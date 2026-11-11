@@ -17,6 +17,7 @@ import {
   VINCULOS_VIAJANTE, lerValor, mostrarValor, normNome, viajanteVazio,
   type PagamentoVenda, type PessoaVenda, type Viajante, type VinculoViajante,
 } from "./vendaRegras.ts";
+import { problemasDoAereo, type TrechoVenda } from "./iata.ts";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const txt = (v: unknown): string => (v == null ? "" : String(v));
@@ -168,7 +169,8 @@ export interface EntradaFaltas {
   comprador: Pick<PessoaVenda, "nome">;
   /** Todos que vão junto (sem o comprador). */
   acompanhantes: Pick<Viajante, "nome" | "vinculo">[];
-  itens: { tipo: string; rotulo: string; expedicaoEscolhida?: boolean }[];
+  /** `trechos`: só nos itens COM aéreo (aéreo; pacote/outro "Inclui aéreo") — ver src/venda/iata.ts. */
+  itens: { tipo: string; rotulo: string; expedicaoEscolhida?: boolean; trechos?: TrechoVenda[] | null }[];
   total: number;
   linhas: LinhaPagamento[];
 }
@@ -184,6 +186,8 @@ export function faltasParaConsolidar(e: EntradaFaltas): string[] {
   });
   if (!e.itens.length) f.push("O que vendeu: nenhum item marcado.");
   for (const i of e.itens) if (i.tipo === "expedicao" && i.expedicaoEscolhida === false) f.push(`${i.rotulo}: escolha qual expedição foi vendida.`);
+  // 11/11: aéreo SÓ com código IATA (origem e destino de cada trecho, inclusive voo interno).
+  for (const i of e.itens) if (i.trechos) f.push(...problemasDoAereo(i.trechos, i.tipo === "aereo" ? i.rotulo : `${i.rotulo} — aéreo`));
   const c = conferirPagamento(e.linhas, e.total);
   if (c.total <= 0) f.push("Pagamento: o total da venda está zerado.");
   e.linhas.forEach((l, i) => { const p = problemaDaLinha(l, i + 1); if (p) f.push(p); });

@@ -22,6 +22,7 @@ import {
   type PagamentoVenda, type PaxLinha, type PessoaVenda, type Viajante,
 } from "./vendaRegras";
 import { familiaParaPayload, lerVendaDoContrato, linhasParaPayload, type VendaDoContrato } from "./vendaFinal";
+import { comTrechos, dadosParaBanco, lerTrechos } from "./iata";
 
 export type OrigemVenda = "closer" | "rel" | "ops";
 
@@ -209,11 +210,11 @@ export interface ResultadoVenda {
 
 /** Monta o jsonb que a venda_subir espera (ver o cabeçalho da 0214). */
 export function montarPayload(p: PayloadVenda, nomeDoItem: (i: ItemVenda) => string) {
-  const limpa = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).filter(([, v]) => String(v ?? "").trim() !== ""));
   const itens = p.itens.map((i) => ({
     id: i.id ?? null, tipo: i.tipo, nome: i.nome.trim() || nomeDoItem(i),
     data_inicio: i.data_inicio || null, data_fim: i.data_fim || null,
-    dados: limpa(i.dados), passageiros: i.passageiros.filter((x) => x.nome.trim()),
+    // Só o que tem valor; trechos do aéreo viram array no formato de rel_viagem_trechos (src/venda/iata.ts).
+    dados: dadosParaBanco(i.dados), passageiros: i.passageiros.filter((x) => x.nome.trim()),
     valor: i.valor, custo: i.custo, fornecedor: i.fornecedor,
   }));
   // 0351: viajantes de QUALQUER item que tenha a lista (expedição sempre; os outros
@@ -389,10 +390,19 @@ export async function lerVoucher(arquivo: File): Promise<LeituraVoucher> {
   return { itens: Array.isArray(j.itens) ? j.itens : [], pessoas: Array.isArray(j.pessoas) ? j.pessoas : [], avisos: Array.isArray(j.avisos) ? j.avisos : [] };
 }
 
-/** Item do voucher → item da tela (dados viram texto, como o catálogo espera). */
+/**
+ * Item do voucher → item da tela (dados viram texto, como o catálogo espera).
+ * Trechos do aéreo: normalizados pra IATA (src/venda/iata.ts) — cidade/país que a
+ * IA devolveu no lugar do código fica PENDENTE (origem_texto/destino_texto) pro closer corrigir.
+ */
 export function itemDoVoucher(i: LeituraVoucher["itens"][number]): ItemVenda {
-  const dados: Record<string, string> = {};
-  for (const [k, v] of Object.entries(i.dados ?? {})) if (v != null && typeof v !== "object") dados[k] = String(v);
+  let dados: Record<string, string> = {};
+  for (const [k, v] of Object.entries(i.dados ?? {})) {
+    if (v == null || k === "trechos") continue;
+    if (typeof v === "boolean") { if (v) dados[k] = "sim"; continue; }
+    if (typeof v !== "object") dados[k] = String(v);
+  }
+  if (Array.isArray(i.dados?.trechos) && i.dados.trechos.length) dados = comTrechos(dados, lerTrechos({ trechos: i.dados.trechos }));
   return {
     k: novaChave(), tipo: i.tipo, nome: i.nome ?? "", data_inicio: i.data_inicio ?? "", data_fim: i.data_fim ?? "",
     dados, passageiros: (i.passageiros ?? []).filter((p) => p?.nome).map((p) => ({ nome: p.nome })),

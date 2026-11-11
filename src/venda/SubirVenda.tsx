@@ -65,6 +65,8 @@ import { familiaDoNegocio } from "./familia";
 import DadosDaPessoaNaVenda from "./DadosDaPessoaNaVenda";
 import BlocoExpedicao from "./BlocoExpedicao";
 import CampoDoTipo from "./CampoDoTipo";
+import TrechosAereo from "./TrechosAereo";
+import { avisosDoAereo, dadosParaBanco, lerTrechos, precisaDeTrechos, problemasDoAereo } from "./iata";
 import ExtratoAnalise from "./ExtratoAnalise";
 import PagamentoLinhas from "./PagamentoLinhas";
 import BlocosDaVenda from "./BlocosDaVenda";
@@ -291,6 +293,17 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
   // Valor final de cada item: expedição = soma de quem viaja; o resto = o que foi digitado.
   const comValores = itens.map((i) => ({ ...i, valor: i.tipo === "expedicao" ? i.valor : lerValor(valores[i.k] ?? "") }));
   const total = somaDosItens(comValores);
+  /** "Aéreo", ou "Aéreo 2" quando a venda tem mais de um do mesmo tipo. */
+  const rotuloDoItem = (i: ItemVenda) => {
+    const mesmos = itens.filter((x) => x.tipo === i.tipo);
+    return `${TIPOS[i.tipo].rotulo}${mesmos.length > 1 ? ` ${mesmos.indexOf(i) + 1}` : ""}`;
+  };
+  /** 11/11: aéreo sem código IATA (bloqueia só o Consolidar) e código fora da lista (só confere). */
+  const problemasIata = itens.filter((i) => precisaDeTrechos(i)).flatMap((i) => {
+    const r = i.tipo === "aereo" ? rotuloDoItem(i) : `${rotuloDoItem(i)} — aéreo`;
+    return problemasDoAereo(lerTrechos(i.dados), r);
+  });
+  const avisosIata = itens.filter((i) => precisaDeTrechos(i)).flatMap((i) => avisosDoAereo(lerTrechos(i.dados), i.tipo === "aereo" ? rotuloDoItem(i) : `${rotuloDoItem(i)} — aéreo`));
   const principal = itemPrincipal(comValores);
   // 0351: venda sem expedição → "Quem vai" vale pra venda toda e vai no 1º item que não é expedição.
   const temExpedicao = itens.some((i) => i.tipo === "expedicao");
@@ -377,7 +390,10 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       setViajantes((v) => ({ ...v, ...Object.fromEntries(novos.filter((i) => i.tipo === "expedicao").map((i) => [i.k, restaurarViajantes({ item: i, nomeComprador: pessoa.nome }).viajantes])) }));
       const p0 = r.pessoas[0];
       if (p0 && !pessoaTravada) setPessoa((p) => ({ ...p, nome: p.nome || p0.nome, cpf: p.cpf || p0.cpf || "", passaporte: p.passaporte || p0.passaporte || "", nascimento: p.nascimento || p0.nascimento || "" }));
-      setInfo({ tom: r.avisos.length ? "aviso" : "ok", t: `O voucher preencheu ${novos.length} item(ns)${r.pessoas.length ? ` e ${r.pessoas.length} pessoa(s)` : ""}. Confira antes de salvar.`, lista: r.avisos });
+      // 11/11: trecho em que a IA não devolveu código IATA (cidade/país) fica pendente pro closer corrigir.
+      const pendIata = novos.filter((i) => precisaDeTrechos(i)).flatMap((i) => problemasDoAereo(lerTrechos(i.dados), `${TIPOS[i.tipo].rotulo} (voucher)`));
+      const avisosV = [...pendIata, ...r.avisos];
+      setInfo({ tom: avisosV.length ? "aviso" : "ok", t: `O voucher preencheu ${novos.length} item(ns)${r.pessoas.length ? ` e ${r.pessoas.length} pessoa(s)` : ""}. Confira antes de salvar.`, lista: avisosV });
     } catch (e) {
       setInfo({ tom: "aviso", t: `Não deu pra ler o voucher (${(e as Error).message}). Siga no manual — nada se perdeu.` });
     } finally {
@@ -499,7 +515,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       setAnalise(await analisarRascunho({
         origem, negocio_id: ehCloser ? negocio!.id : null, cliente_id: pessoa.id || null, viagem_id: viagemId ?? null,
         cliente: { nome: pessoa.nome },
-        itens: final.map((i) => ({ tipo: i.tipo, nome: i.nome.trim() || nomeSugerido(i), data_inicio: i.data_inicio || null, data_fim: i.data_fim || null, dados: i.dados, passageiros: i.passageiros.map((x) => ({ nome: x.nome })), valor: i.valor, custo: i.custo, status: i.status ?? "vendido" })),
+        itens: final.map((i) => ({ tipo: i.tipo, nome: i.nome.trim() || nomeSugerido(i), data_inicio: i.data_inicio || null, data_fim: i.data_fim || null, dados: dadosParaBanco(i.dados), passageiros: i.passageiros.map((x) => ({ nome: x.nome })), valor: i.valor, custo: i.custo, status: i.status ?? "vendido" })),
         viajantes: vjs,
         pagamento: { forma: leg.forma, condicao: leg.condicao, entrada: lerValor(leg.entrada), entrada_data: leg.entrada_data || null, parcelas: Number(leg.parcelas) || null },
         total,
@@ -578,7 +594,11 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       if (acao === "consolidar") {
         const f = faltasParaConsolidar({
           comprador: pessoa, acompanhantes: todosAcompanhantes(), total, linhas,
-          itens: itens.map((i) => ({ tipo: i.tipo, rotulo: TIPOS[i.tipo].rotulo, expedicaoEscolhida: i.tipo === "expedicao" ? !!i.dados.expedicao_id : undefined })),
+          itens: itens.map((i) => ({
+            tipo: i.tipo, rotulo: rotuloDoItem(i), expedicaoEscolhida: i.tipo === "expedicao" ? !!i.dados.expedicao_id : undefined,
+            // 11/11: aéreo só com código IATA em cada trecho (src/venda/iata.ts) — bloqueia o consolidar.
+            trechos: precisaDeTrechos(i) ? lerTrechos(i.dados) : null,
+          })),
         });
         if (f.length) { setFaltas(f); irPara(primeiroPassoDasFaltas(f)); return; }
         if (!modeloNovo) {
@@ -591,7 +611,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       if (acao === "salvar" && ehCloser && !modeloNovo && estado === "negociacao" && !jaPreVenda) {
         await salvarItensDaVenda(negocio!.id, itensFinais());
         lsApagar(chaveLocal);
-        onSalvo({ tom: "ok", mensagem: `Venda salva (${brl(total)}), ainda em negociação: não ocupa vaga nem conta no Dashboard. Quando fechar, use "Reservar vaga" ou "Consolidar venda".` });
+        onSalvo({ tom: problemasIata.length ? "aviso" : "ok", mensagem: `Venda salva (${brl(total)}), ainda em negociação: não ocupa vaga nem conta no Dashboard. Quando fechar, use "Reservar vaga" ou "Consolidar venda".${problemasIata.length ? ` Atenção: ${problemasIata.length} pendência(s) no aéreo (código IATA dos aeroportos).` : ""}` });
         return;
       }
 
@@ -631,9 +651,11 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       }
 
       const an = acao === "reservar" || consolidada ? await guardarAnalise(r.venda_id) : "";
-      if (pv) { onSalvo({ tom: pv.tom, mensagem: `${acao === "reservar" ? "Vaga reservada. " : ""}${pv.mensagem}${aviso}${an}` }); return; }
+      // Salvar/Reservar NÃO bloqueiam por IATA: só avisam (o Consolidar bloqueia).
+      const semIata = problemasIata.length ? ` Atenção: ${problemasIata.length} pendência(s) no aéreo (código IATA dos aeroportos) — corrija antes de consolidar.` : "";
+      if (pv) { onSalvo({ tom: semIata ? "aviso" : pv.tom, mensagem: `${acao === "reservar" ? "Vaga reservada. " : ""}${pv.mensagem}${aviso}${an}${semIata}` }); return; }
       const qual = acao === "reservar" ? "Vaga reservada: a venda já conta como venda." : consolidada ? "Alterações salvas na venda consolidada." : `Venda salva (${ESTADOS_VENDA[estado].rotulo.toLowerCase()}).`;
-      onSalvo({ tom: "ok", mensagem: `${qual} ${r.itens} item(ns), ${brl(r.total)}.${aviso}${an}` });
+      onSalvo({ tom: semIata ? "aviso" : "ok", mensagem: `${qual} ${r.itens} item(ns), ${brl(r.total)}.${aviso}${an}${semIata}` });
     } catch (err) {
       setErro((err as Error).message);
     } finally {
@@ -784,9 +806,20 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
                       </div>
                       {d1 && <Campo rotulo={d1}><Entrada type="date" value={i.data_inicio} onChange={(e) => mudarItem(i.k, { data_inicio: e.target.value })} /></Campo>}
                       {d2 && <Campo rotulo={d2}><Entrada type="date" value={i.data_fim} onChange={(e) => mudarItem(i.k, { data_fim: e.target.value })} /></Campo>}
-                      {camposDoTipo(i.tipo, "venda").map((c) => (
+                      {camposDoTipo(i.tipo, "venda").filter((c) => !(i.tipo === "aereo" && c.chave === "voos")).map((c) => (
                         <CampoDoTipo key={c.chave} c={c} valor={i.dados[c.chave] ?? ""} onMudar={(v) => mudarDado(i.k, c.chave, v)} />
                       ))}
+                      {/* 11/11: com aéreo, os trechos SÓ com código IATA (o texto livre "voos" saiu da tela). */}
+                      {(i.tipo === "pacote" || i.tipo === "outro") && (
+                        <label className="sm:col-span-2 flex items-center gap-2 text-[13px]" style={{ color: "var(--ink2)" }}>
+                          <input type="checkbox" checked={precisaDeTrechos(i)} onChange={(e) => mudarDado(i.k, "aereo_incluso", e.target.checked ? "sim" : "")} />
+                          <span><b>Inclui aéreo</b> (passagens) — aí os voos entram com o código IATA de cada aeroporto</span>
+                        </label>
+                      )}
+                      {precisaDeTrechos(i) && (
+                        <TrechosAereo dados={i.dados} dataIda={i.data_inicio} dataVolta={i.data_fim}
+                          onDados={(d) => mudarItem(i.k, { dados: d })} />
+                      )}
                       <Campo rotulo="Fornecedor / operadora (interno)" dica="Opcional. O cliente não vê.">
                         <Entrada value={i.fornecedor} onChange={(e) => mudarItem(i.k, { fornecedor: e.target.value })} />
                       </Campo>
@@ -868,6 +901,12 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
         {/* ── 5. Análise ── */}
         {passo === PASSO_ANALISE && (
           <div className="space-y-3">
+            {(problemasIata.length > 0 || avisosIata.length > 0) && (
+              <Aviso tom={problemasIata.length ? "erro" : "aviso"}>
+                <b>Aéreo — código IATA dos aeroportos:</b>{problemasIata.length ? " dá pra salvar e reservar, mas a venda só consolida com isso corrigido (passo Detalhes)." : ""}
+                <ul className="list-disc pl-5 mt-1">{[...problemasIata, ...avisosIata].map((p) => <li key={p}>{p}</li>)}</ul>
+              </Aviso>
+            )}
             {analisando ? (
               <div className="rel-card p-6 text-center" role="status" aria-live="polite">
                 <p className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>Revisando a venda…</p>

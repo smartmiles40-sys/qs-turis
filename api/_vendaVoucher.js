@@ -194,9 +194,23 @@ export function nomeLimpo(s) {
 export const paisDoIata = (c) => IATA[txt(c).toUpperCase().slice(0, 3)]?.[0] || '';
 
 // ── Voos: normalizar, juntar conexões, voo interno ───────────────────────────
+// 11/11/2026 (IATA obrigatório na venda): código de aeroporto SÓ se a IA devolveu
+// 3 letras (ou "Lisboa (LIS)"). Antes era slice(0,3): "Europa" virava "EUR" e
+// "Lisboa" virava "LIS" por sorte. Agora o texto que não é código vai em
+// origem_texto/destino_texto e a tela (src/venda/iata.ts) tenta achar o aeroporto
+// pelo nome — se não achar, o trecho fica PENDENTE pro closer corrigir.
+const CODIGOS_CIDADE = new Set(['SAO', 'RIO', 'BHZ', 'TYO', 'OSA', 'LON', 'PAR', 'NYC', 'MIL', 'ROM', 'BUE', 'SEL', 'BJS', 'STO', 'MOW', 'CHI', 'WAS', 'REK', 'YTO', 'YMQ', 'JKT']);
+const NAO_AEROPORTO = new Set(['EUA', 'USA', 'EUR', 'ASI', 'AFR', 'OCE', 'AME', 'SUL', 'NOR', 'JAP', 'CHN', 'XXX', 'AAA', 'ZZZ']);
+/** "GRU" / " gru " / "Lisboa (LIS)" / "LIS - Lisboa" → código; cidade, país, região ou código de cidade → ''. */
+export function codigoIata(s) {
+  const t = txt(s).toUpperCase();
+  const m = /^([A-Z]{3})(?:\s*[·\-–—(,:/|]|$)/.exec(t) || /\(([A-Z]{3})\)/.exec(t);
+  const c = m ? m[1] : '';
+  return c && !CODIGOS_CIDADE.has(c) && !NAO_AEROPORTO.has(c) ? c : '';
+}
 function normalizarVoo(v) {
-  const origem = txt(v.origem).toUpperCase().slice(0, 3);
-  const destino = txt(v.destino).toUpperCase().slice(0, 3);
+  const origem = codigoIata(v.origem);
+  const destino = codigoIata(v.destino);
   const data = dataOk(v.data);
   const hs = horaOk(v.hora_saida), hc = horaOk(v.hora_chegada);
   let chegada_data = dataOk(v.chegada_data) || data;
@@ -204,6 +218,8 @@ function normalizarVoo(v) {
   if (data && chegada_data === data && hs && hc && hc < hs) chegada_data = somaDias(data, 1);
   return {
     origem, destino,
+    ...(!origem && txt(v.origem) ? { origem_texto: txt(v.origem) } : {}),
+    ...(!destino && txt(v.destino) ? { destino_texto: txt(v.destino) } : {}),
     origem_cidade: txt(v.origem_cidade) || IATA[origem]?.[1] || '',
     destino_cidade: txt(v.destino_cidade) || IATA[destino]?.[1] || '',
     origem_pais: paisChave(v.origem_pais) || IATA[origem]?.[0] || '',
@@ -268,6 +284,10 @@ function itensDeVoos(brutos, avisos) {
     if (!t.data) avisos.push(`Trecho ${t.origem || '?'} → ${t.destino || '?'} sem data.`);
     else if (!t.hora_saida || !t.hora_chegada) avisos.push(`Trecho ${t.origem || '?'} → ${t.destino || '?'} de ${BR(t.data)} sem horário${!t.hora_saida ? ' de saída' : ' de chegada'}.`);
     if (!t.localizador) avisos.push(`Trecho ${t.origem || '?'} → ${t.destino || '?'} sem localizador.`);
+    if (!t.origem || !t.destino) {
+      const falta = [!t.origem && `origem (${t.origem_texto || t.origem_cidade || 'vazio'})`, !t.destino && `destino (${t.destino_texto || t.destino_cidade || 'vazio'})`].filter(Boolean).join(' e ');
+      avisos.push(`Trecho${t.voo ? ` ${t.voo}` : t.data ? ` de ${BR(t.data)}` : ''}: a IA não achou o código IATA de ${falta} — escolha o aeroporto antes de consolidar.`);
+    }
   }
   const jornadas = jornadasDe(trechos, avisos);
   for (const j of jornadas) {
@@ -304,6 +324,7 @@ function itensDeVoos(brutos, avisos) {
         trechos: ts.map((t) => ({
           sentido: t.sentido, conexao: t.conexao, voo_interno: t.voo_interno,
           origem: t.origem, origem_cidade: t.origem_cidade, destino: t.destino, destino_cidade: t.destino_cidade,
+          ...(t.origem_texto ? { origem_texto: t.origem_texto } : {}), ...(t.destino_texto ? { destino_texto: t.destino_texto } : {}),
           data: t.data, hora_saida: t.hora_saida, chegada_data: t.chegada_data, hora_chegada: t.hora_chegada,
           cia: t.cia, voo: t.voo, localizador: t.localizador, classe: t.classe, bagagem: t.bagagem,
           ...(t.conexao_min != null && t.conexao ? { conexao_min: t.conexao_min } : {}),

@@ -36,7 +36,7 @@
 // Situação de cada linha:  ok | falta | divergente | extra (emitido fora do apresentado)
 // Status da venda (prioridade): risco_alto > divergencia > faltam_emissoes > tudo_emitido
 // -----------------------------------------------------------------------------
-import { compararNomes, nomeLimpo, paisDoIata } from './_vendaVoucher.js';
+import { codigoIata, compararNomes, nomeLimpo, paisDoIata } from './_vendaVoucher.js';
 
 const txt = (v) => (v == null ? '' : String(v).trim());
 const dataOk = (s) => { const m = /^(\d{4}-\d{2}-\d{2})/.exec(txt(s)); return m && !Number.isNaN(Date.parse(`${m[1]}T12:00:00Z`)) ? m[1] : ''; };
@@ -197,8 +197,11 @@ export function trechosDoItem(i) {
   let lista = Array.isArray(d.trechos) ? d.trechos : [];
   if (!lista.length && typeof d.trechos === 'string') { try { lista = JSON.parse(d.trechos); } catch { lista = []; } }
   if (!lista.length && d.voos) lista = trechosDoTexto(d.voos);
+  // Formato da venda (11/11, src/venda/iata.ts): origem_codigo/destino_codigo = IATA e origem/destino = CIDADE
+  // ("Rio de Janeiro, RJ" não pode virar "RIO"). Formato antigo (voucher/proposta): origem/destino = IATA.
+  const lado = (t, k) => ((`${k}_codigo` in t) ? codigoIata(t[`${k}_codigo`]) : (iata(t[k]) || iata(t[`${k}_codigo`])));
   return lista.map((t) => ({
-    origem: iata(t.origem) || iata(t.origem_codigo), destino: iata(t.destino) || iata(t.destino_codigo),
+    origem: lado(t, 'origem'), destino: lado(t, 'destino'),
     data: dataOk(t.data) || dataOk(t.partida_em),
     saida: txt(t.saida || t.hora_saida), chegada: txt(t.chegada || t.hora_chegada), chegada_data: dataOk(t.chegada_data),
     partida_em: t.partida_em || null, chegada_em: t.chegada_em || null,
@@ -207,6 +210,39 @@ export function trechosDoItem(i) {
     passageiros: Array.isArray(t.passageiros) ? t.passageiros.map(nomeLimpo).filter(Boolean) : null,
     sentido: t.sentido || '',
   })).filter((t) => t.origem || t.destino);
+}
+
+/** Item com aéreo? Aéreo sempre; pacote/outro marcado "Inclui aéreo" (dados.aereo_incluso). */
+export const temAereo = (i) => i?.tipo === 'aereo' || ((i?.tipo === 'pacote' || i?.tipo === 'outro') && [true, 'sim', 'true'].includes((i?.dados || i?.detalhes || {}).aereo_incluso));
+
+/**
+ * Pendências de IATA de um item (vazio = ok): "Aéreo: trecho 2 sem código IATA de destino (está escrito "Europa")."
+ * Lê os trechos CRUS (dados.trechos, array ou JSON texto; venda antiga: o texto de "voos").
+ */
+export function pendenciasIata(i) {
+  if (!temAereo(i)) return [];
+  const rot = i.tipo === 'aereo' ? 'Aéreo' : `${ROTULO_TIPO[i.tipo] || 'Item'} — aéreo`;
+  const d = i?.dados || i?.detalhes || {};
+  let lista = Array.isArray(d.trechos) ? d.trechos : [];
+  if (!lista.length && typeof d.trechos === 'string') { try { lista = JSON.parse(d.trechos); } catch { lista = []; } }
+  if (!Array.isArray(lista)) lista = [];
+  if (!lista.length && txt(d.voos)) {
+    // Venda antiga com texto livre: cada linha que não é "AAA → BBB" é pendência.
+    const linhas = txt(d.voos).split(/\n/).map(txt).filter(Boolean);
+    return linhas.flatMap((l, n) => (trechosDoTexto(l).length ? [] : [`${rot}: trecho ${n + 1} sem código IATA de origem e destino (está escrito "${l}").`]));
+  }
+  if (!lista.length) return [`${rot}: sem trechos de voo (origem e destino com o código IATA do aeroporto).`];
+  const out = [];
+  lista.forEach((t, n) => {
+    if (!t || typeof t !== 'object') return;
+    const cod = (k) => (`${k}_codigo` in t ? codigoIata(t[`${k}_codigo`]) : codigoIata(t[k]));
+    const o = cod('origem'), de = cod('destino');
+    if (o && de) return;
+    const lado = !o && !de ? 'origem e destino' : !o ? 'origem' : 'destino';
+    const escrito = [!o && txt(t.origem_texto || (`origem_codigo` in t ? '' : t.origem)), !de && txt(t.destino_texto || (`destino_codigo` in t ? '' : t.destino))].filter(Boolean).map((x) => `"${x}"`).join(' / ');
+    out.push(`${rot}: trecho ${n + 1} sem código IATA de ${lado}${escrito ? ` (está escrito ${escrito})` : ''}.`);
+  });
+  return out;
 }
 
 const ehInterno = (t) => { const a = paisDoIata(t.origem), b = paisDoIata(t.destino); return Boolean(a && b && a === b); };
@@ -582,6 +618,12 @@ function riscosPorRegra({ ctx, base, vendido, evs, linhas, temProposta, inicio, 
 
   // 13. Datas do item × datas da expedição (expedicoes.data_embarque/data_retorno).
   if (Array.isArray(ctx.expedicoes) && ctx.expedicoes.length) regrasExpedicao(r, ctx.expedicoes, vendido);
+
+  // 14. Aéreo SÓ com código IATA (11/11/2026): trecho sem código de origem/destino ("Europa", "Itália")
+  //     ou item com aéreo sem trecho nenhum. A tela já bloqueia o Consolidar; aqui pega venda antiga/rascunho.
+  for (const it of vendido) for (const motivo of pendenciasIata(it)) {
+    r('medio', 'iata', motivo, { item: it.nome, o_que_fazer: 'Abra a venda (Subir venda → Detalhes) e escolha o aeroporto de origem e de destino de cada trecho pelo código IATA (ex.: GRU → LIS).' });
+  }
 
   // Sem repetir o mesmo motivo.
   const vistos = new Set();
