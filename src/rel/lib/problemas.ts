@@ -105,7 +105,7 @@ const aeroporto = (s: string | null | undefined) => {
   const m = String(s || "").match(/\b([A-Z]{3})\b/);
   return m ? m[1] : null;
 };
-const ROTULO_TIPO: Record<TipoTrecho, string> = { voo_internacional: "Voo", voo_interno: "Voo interno", trem: "Trem", transfer: "Transfer", hospedagem: "Hotel", passeio: "Passeio", outro: "Trecho" };
+const ROTULO_TIPO: Record<TipoTrecho, string> = { voo_internacional: "Voo", voo_interno: "Voo interno", trem: "Trem", transfer: "Transfer", hospedagem: "Hotel", passeio: "Passeio", seguro: "Seguro", outro: "Trecho" };
 
 // ── o conferente ────────────────────────────────────────────────────────────
 

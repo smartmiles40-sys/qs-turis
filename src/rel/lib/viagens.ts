@@ -617,7 +617,7 @@ export const concluirPeloLink = (token: string) => apiDocs("POST", token, { acao
 
 // ── Trechos (voos, trens, transfers) e check-in — migration 0106 ───────────
 
-export type TipoTrecho = "voo_internacional" | "voo_interno" | "trem" | "transfer" | "hospedagem" | "passeio" | "outro";
+export type TipoTrecho = "voo_internacional" | "voo_interno" | "trem" | "transfer" | "hospedagem" | "passeio" | "seguro" | "outro";
 
 export const TIPOS_TRECHO: Record<TipoTrecho, string> = {
   voo_internacional: "Voo internacional",
@@ -626,6 +626,7 @@ export const TIPOS_TRECHO: Record<TipoTrecho, string> = {
   transfer: "Transfer",
   hospedagem: "Hospedagem",
   passeio: "Passeio",
+  seguro: "Seguro",
   outro: "Outro",
 };
 
@@ -642,8 +643,10 @@ export interface Trecho {
   numero: string | null;
   localizador: string | null;
   checkin_abre_em: string | null;
-  /** De onde veio o trecho (0115): manual, expedicoes, bitrix ou ia. */
-  fonte?: "manual" | "expedicoes" | "bitrix" | "ia";
+  /** De onde veio o trecho (0115): manual, expedicoes, bitrix, ia — ou venda (0361: itens da venda consolidada). */
+  fonte?: "manual" | "expedicoes" | "bitrix" | "ia" | "venda";
+  /** Venda que criou o trecho (0361). */
+  venda_id?: string | null;
   /** Documento de onde a IA tirou o trecho (0115) — passeio sem ele = sem voucher. */
   documento_id?: string | null;
   checkin_feito_em: string | null;

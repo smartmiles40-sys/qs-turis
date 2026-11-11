@@ -42,6 +42,7 @@ export interface TrechoAgenda {
   localizador?: string | null;
   endereco?: string | null;
   ponto_encontro?: string | null;
+  observacoes?: string | null;
   passageiros?: string[] | null;
   fonte?: string | null;
   checkin_abre_em?: string | null;
@@ -229,7 +230,7 @@ export interface Acao {
 }
 
 const CAT_DO_TRECHO: Record<string, CategoriaAcao> = {
-  voo_internacional: "aereo", voo_interno: "aereo", hospedagem: "hotel", passeio: "passeio", transfer: "transfer", trem: "trem", outro: "outro",
+  voo_internacional: "aereo", voo_interno: "aereo", hospedagem: "hotel", passeio: "passeio", transfer: "transfer", trem: "trem", seguro: "seguro", outro: "outro",
 };
 
 const ponta = (codigo?: string | null, nome?: string | null) => (codigo || "").trim().toUpperCase() || (nome || "").trim();
@@ -270,6 +271,13 @@ export function acoesDoTrecho(t: TrechoAgenda, v?: ViagemAgenda | null, agora = 
       out.push({ ...base, chave: `${t.id}|fim`, evento: "passeio_fim", quando: t.chegada_em, fuso: t.chegada_fuso ?? t.partida_fuso ?? null, semHora: false, titulo, detalhe });
     return out;
   }
+  if (cat === "seguro") {
+    const titulo = [t.companhia, nome && nome !== t.companhia ? nome : ""].filter(Boolean).join(" · ") || "Seguro viagem";
+    const detalhe = t.observacoes || "";
+    out.push({ ...base, chave: `${t.id}|seg`, evento: "seguro_inicio", quando: t.partida_em, fuso: null, semHora: sh, titulo, detalhe });
+    if (t.chegada_em) out.push({ ...base, chave: `${t.id}|segfim`, evento: "seguro_fim", quando: t.chegada_em, fuso: null, semHora: semHora({ fonte: t.fonte, partida_em: t.chegada_em }), titulo, detalhe });
+    return out;
+  }
   const evento: EventoAcao = cat === "transfer" ? "transfer" : cat === "trem" ? "trem_parte" : "outro";
   const titulo = cat === "trem" ? ([t.companhia, t.numero].filter(Boolean).join(" ") || nome || "Trem") : nome || ROTULO_EVENTO[evento];
   const detalhe = [rota(t), t.ponto_encontro ? `encontro: ${t.ponto_encontro}` : ""].filter(Boolean).join(" · ");
@@ -298,7 +306,7 @@ export function acoesDaVenda(v: ViagemAgenda, trechosDaViagem: TrechoAgenda[]): 
   if (v.servico === "passeio" && !tem("passeio")) {
     return [{ ...base, chave: `${v.id}|venda|ini`, categoria: "passeio", evento: "passeio_inicio", quando: meioDia(v.data_embarque) }];
   }
-  if (v.servico === "seguro") {
+  if (v.servico === "seguro" && !tem("seguro")) {
     return [
       { ...base, chave: `${v.id}|venda|seg`, categoria: "seguro", evento: "seguro_inicio", quando: meioDia(v.data_embarque), detalhe: "início da cobertura (data da venda)" },
       ...(fim ? [{ ...base, chave: `${v.id}|venda|segfim`, categoria: "seguro" as const, evento: "seguro_fim" as const, quando: meioDia(fim), detalhe: "fim da cobertura (data da venda)" }] : []),
