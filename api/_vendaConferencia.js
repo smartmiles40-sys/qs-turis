@@ -8,7 +8,17 @@
 // Este arquivo NÃO chama IA nem banco: recebe os três lados já carregados e
 // devolve o extrato + os riscos por regra. É a BASE da análise — sem a chave
 // da OpenAI a análise roda só com isto ("modo regras"). A IA (api/venda-analise.js)
-// só COMPLEMENTA os riscos e o texto. Testado offline em scripts/teste-conferencia.mjs.
+// só COMPLEMENTA os riscos e o texto. Testado offline em scripts/teste-conferencia.mjs
+// e tests/venda/vendaConferencia.test.ts (regras novas + leitura da resposta da IA).
+//
+// Subir venda final (11/11/2026) — regras novas, todas com { pessoa?, item, o_que_fazer }:
+//   • pagamento em linhas (qs_venda_pagamentos): soma × total, linha sem forma/valor/data/parcelas,
+//     vencendo depois do embarque, data passada;
+//   • família (qs_venda_pessoas + ficha, ou passageiros dos itens no rascunho): sem vínculo/CPF/nascimento,
+//     CPF inválido, menor sem responsável (ou com responsável menor, ou menor comprador), pessoa sem item;
+//   • nome no bilhete/voucher × ficha: sem acento, tolera nome do meio abreviado;
+//   • datas do item × datas da expedição (expedicoes.data_embarque/data_retorno).
+// Tudo opcional: venda antiga sem essas colunas/tabelas roda como antes.
 //
 //   conferirVenda({ apresentado, proposta, vendido, emitido, pessoas, viajantes,
 //                   pagamento, total_venda, hoje }) →
@@ -35,7 +45,16 @@ const diasEntre = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.pars
 const somaDias = (iso, n) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const semAcento = (s) => txt(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const iata = (s) => { const m = /\b([A-Z]{3})\b/.exec(txt(s).toUpperCase()); return m ? m[1] : ''; };
-const num = (v) => { const n = typeof v === 'string' ? Number(v.replace(/\./g, '').replace(',', '.')) : Number(v); return v != null && v !== '' && Number.isFinite(n) ? n : null; };
+// Número de banco ("10000.00", numeric do PostgREST) ou digitado ("1.500,00", "1.500"): vírgula = decimal BR;
+// sem vírgula, ponto só é milhar quando separa grupos de 3 ("1.500"); senão é decimal ("10000.00").
+const num = (v) => {
+  let n;
+  if (typeof v === 'string') {
+    const s = v.trim().replace(/^R\$\s*/i, '');
+    n = s.includes(',') ? Number(s.replace(/\./g, '').replace(',', '.')) : /^-?\d{1,3}(\.\d{3})+$/.test(s) ? Number(s.replace(/\./g, '')) : Number(s);
+  } else n = Number(v);
+  return v != null && v !== '' && Number.isFinite(n) ? n : null;
+};
 const brl = (v) => (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const unicos = (a) => [...new Set(a.filter(Boolean))];
 
@@ -47,6 +66,108 @@ export const STATUS_VENDA = {
   em_analise: 'Em análise', tudo_emitido: 'Tudo emitido ✓', faltam_emissoes: 'Faltam emissões', divergencia: 'Divergência', risco_alto: 'Risco alto',
 };
 const PESO = { baixo: 1, medio: 2, alto: 3 };
+
+// ── Subir venda final (11/11/2026): família, pagamento em linhas, datas da expedição ──
+export const VINCULOS = { conjuge: 'cônjuge', filho: 'filho(a)', pai_mae: 'pai/mãe', irmao: 'irmão(ã)', amigo: 'amigo(a)', outro: 'outro' };
+export const FORMAS_PAGAMENTO = { pix: 'Pix', cartao: 'Cartão', boleto: 'Boleto', transferencia: 'Transferência', dinheiro: 'Dinheiro', link: 'Link de pagamento', outro: 'Outro' };
+const PARTICULAS = new Set(['DE', 'DA', 'DO', 'DAS', 'DOS', 'E']);
+
+/** CPF com 11 dígitos e dígitos verificadores certos. */
+export function cpfValido(v) {
+  const d = txt(v).replace(/\D/g, '');
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  const dv = (n) => { let s = 0; for (let i = 0; i < n; i++) s += Number(d[i]) * (n + 1 - i); const r = (s * 10) % 11; return r === 10 ? 0 : r; };
+  return dv(9) === Number(d[9]) && dv(10) === Number(d[10]);
+}
+
+/** Idade (anos completos) em `ref` (AAAA-MM-DD). null sem nascimento. */
+export function idadeEm(nascimento, ref) {
+  const n = dataOk(nascimento), r = dataOk(ref);
+  if (!n || !r) return null;
+  const [ra, rm, rd] = r.split('-').map(Number), [na, nm, nd] = n.split('-').map(Number);
+  return ra - na - (rm < nm || (rm === nm && rd < nd) ? 1 : 0);
+}
+
+/** "SILVA/MARIA C MRS" → ['MARIA','C','SILVA'] (sem acento, sem "de/da/dos"). */
+export function tokensNome(s) {
+  return semAcento(nomeLimpo(s)).toUpperCase().replace(/[^A-Z ]/g, ' ').split(/\s+/).filter((t) => t && !PARTICULAS.has(t));
+}
+
+/**
+ * Nome da ficha × nome emitido (bilhete/voucher).
+ *   'igual'      — mesmo nome (sem acento, maiúsculas, "SOBRENOME/NOME" e "de/da" não importam);
+ *   'abreviado'  — mesmo primeiro nome e último sobrenome, nomes do meio abreviados ("Maria C. Silva"): TOLERADO;
+ *   'parcial'    — primeiro e último batem, mas falta (ou sobra) nome do meio, ou o nome bate só em parte;
+ *   'diferente'  — não é a mesma pessoa; null = um dos dois vazio.
+ */
+export function compararNomeFicha(ficha, emitido) {
+  const a = tokensNome(ficha), b = tokensNome(emitido);
+  if (!a.length || !b.length) return null;
+  if (a.join(' ') === b.join(' ')) return 'igual';
+  if (a.length >= 2 && b.length >= 2 && a[0] === b[0] && a.at(-1) === b.at(-1)) {
+    // Nomes do meio: cada um do lado mais curto tem que aparecer (inteiro ou pela inicial), na ordem.
+    const casaMeio = (curto, longo) => {
+      let j = 0, abrev = false;
+      for (const t of curto) {
+        while (j < longo.length && !(longo[j] === t || (t.length === 1 && longo[j][0] === t) || (longo[j].length === 1 && t[0] === longo[j]))) j++;
+        if (j >= longo.length) return null;
+        if (longo[j] !== t) abrev = true;
+        j++;
+      }
+      return { abrev };
+    };
+    const ma = a.slice(1, -1), mb = b.slice(1, -1);
+    const [curto, longo] = mb.length <= ma.length ? [mb, ma] : [ma, mb];
+    const r = casaMeio(curto, longo);
+    if (r && curto.length === longo.length) return r.abrev ? 'abreviado' : 'igual';
+    return 'parcial';
+  }
+  const c = compararNomes(ficha, emitido);
+  return c === 'igual' ? 'igual' : c || 'diferente';
+}
+
+/**
+ * Quem vai na venda (família). Vem de ctx.familia (qs_venda_pessoas + ficha) ou, no rascunho,
+ * dos passageiros dos itens no formato novo (viajantesParaJson: têm `chave`).
+ * → [{ nome, chave, cliente_id, comprador, vinculo, cpf, nascimento, menor, responsavel, itens:number[]|null, removida, explicito }]
+ */
+export function familiaDaVenda(ctx = {}) {
+  const out = [];
+  const add = (p, explicito) => {
+    if (!p || typeof p !== 'object' || !txt(p.nome)) return;
+    if (p.removida || p.removida_em) return;
+    const k = txt(p.chave) || txt(p.cliente_id) || semAcento(p.nome);
+    const ja = out.find((x) => (txt(p.chave) && x.chave === txt(p.chave)) || (txt(p.cliente_id) && x.cliente_id === txt(p.cliente_id)) || semAcento(x.nome) === semAcento(p.nome));
+    const itens = Array.isArray(p.itens) ? p.itens.map(Number).filter(Number.isFinite) : null;
+    if (ja) { // mesma pessoa em vários itens: completa o vazio e junta os itens
+      for (const c of ['vinculo', 'cpf', 'nascimento', 'responsavel', 'cliente_id']) if (!ja[c] && p[c]) ja[c] = txt(p[c]);
+      if (itens && ja.itens) ja.itens = unicos([...ja.itens, ...itens]);
+      return;
+    }
+    out.push({
+      nome: nomeLimpo(p.nome), chave: txt(p.chave) || k, cliente_id: txt(p.cliente_id) || null,
+      comprador: Boolean(p.comprador), vinculo: txt(p.vinculo), cpf: txt(p.cpf), nascimento: dataOk(p.nascimento),
+      menor: typeof p.menor === 'boolean' ? p.menor : null,
+      responsavel: txt(p.responsavel ?? p.responsavel_chave ?? p.responsavel_cliente_id) || null,
+      itens, explicito,
+    });
+  };
+  if (Array.isArray(ctx.familia) && ctx.familia.length) {
+    for (const p of ctx.familia) add(p, true);
+  } else {
+    for (const i of ctx.vendido || []) for (const p of i?.passageiros || []) if (p && typeof p === 'object' && txt(p.chave)) add(p, false);
+  }
+  return out;
+}
+
+/** Linhas de pagamento (qs_venda_pagamentos / rascunho.pagamentos), lidas com defesa. null = venda antiga (sem linhas). */
+export function linhasDePagamento(pagamentos) {
+  if (!Array.isArray(pagamentos)) return null;
+  return pagamentos.filter((p) => p && typeof p === 'object')
+    .map((p, n) => ({ n: n + 1, ordem: num(p.ordem), forma: txt(p.forma).toLowerCase(), valor: num(p.valor), data: dataOk(p.data), parcelas: p.parcelas == null || p.parcelas === '' ? null : num(p.parcelas), obs: txt(p.obs) }))
+    .sort((a, b) => (a.ordem ?? a.n) - (b.ordem ?? b.n))
+    .map((p, n) => ({ ...p, n: n + 1 }));
+}
 
 // Documento da viagem (rel_documentos.tipo) → que tipo de item ele pode comprovar.
 const DOC_COBRE = {
@@ -191,6 +312,7 @@ function normalizarItem(i, origem) {
     passageiros: (i.passageiros || []).map((p) => nomeLimpo(p?.nome ?? p)).filter(Boolean),
     trechos: i.tipo === 'aereo' ? trechosDoItem(i) : [],
     status: i.status || null, dados: i.dados || i.detalhes || {}, id: i.id || null,
+    ordem: num(i.ordem), pax_raw: Array.isArray(i.passageiros) ? i.passageiros : [],
   };
 }
 
@@ -202,8 +324,13 @@ function normalizarItem(i, origem) {
  *   pessoas?: { nome: string, passaporte_validade?: string|null }[],
  *   viajantes?: { nome: string, valor_contratado?: number|null, valor_pago?: number|null }[],
  *   pagamento?: { forma?: string, condicao?: string, entrada?: number|null, entrada_data?: string|null, parcelas?: number|null },
- *   total_venda?: number|null, hoje?: string, viagem?: { data_inicio?: string, data_fim?: string }
+ *   total_venda?: number|null, hoje?: string, viagem?: { data_inicio?: string, data_fim?: string },
+ *   pagamentos?: { forma?: string, valor?: number|string, data?: string, parcelas?: number, obs?: string }[] | null,
+ *   familia?: { nome: string, chave?: string, cliente_id?: string, comprador?: boolean, vinculo?: string, cpf?: string,
+ *               nascimento?: string, menor?: boolean|null, responsavel?: string|null, itens?: number[], removida?: boolean }[] | null,
+ *   expedicoes?: { id: string, nome?: string, data_embarque?: string, data_retorno?: string }[] | null
  * }} ctx
+ * Campos novos (subir venda final, 11/11): todos opcionais — venda antiga sem eles roda como antes.
  */
 export function conferirVenda(ctx = {}) {
   const hoje = dataOk(ctx.hoje) || new Date().toISOString().slice(0, 10);
@@ -283,9 +410,11 @@ export function conferirVenda(ctx = {}) {
   }
 
   // ── Datas da viagem ──
+  const expedicoes = (Array.isArray(ctx.expedicoes) ? ctx.expedicoes : []).filter((e) => e && typeof e === 'object');
   const datas = [
     ...base.flatMap((i) => [i.data_inicio, i.data_fim, ...i.trechos.map((t) => t.data)]),
     ...evs.flatMap((e) => [e.data_inicio, e.data_fim]),
+    ...expedicoes.flatMap((e) => [dataOk(e.data_embarque), dataOk(e.data_retorno)]),
     dataOk(ctx.viagem?.data_inicio), dataOk(ctx.viagem?.data_fim),
   ].filter(Boolean).sort();
   const inicio = dataOk(ctx.viagem?.data_inicio) || datas[0] || '';
@@ -332,7 +461,9 @@ function resumoTexto(status, c, riscos, temProposta) {
 // ── Riscos por regra ───────────────────────────────────────────────────────
 function riscosPorRegra({ ctx, base, vendido, evs, linhas, temProposta, inicio, fim, hoje, paxEsperado }) {
   const R = [];
-  const r = (nivel, categoria, motivo) => R.push({ nivel, categoria, motivo, fonte: 'regra' });
+  // extra = { pessoa, item, o_que_fazer } — quem/qual item o risco aponta e a ação (riscos novos sempre trazem).
+  const r = (nivel, categoria, motivo, extra = null) => R.push({ nivel, categoria, motivo, fonte: 'regra', ...(extra || {}) });
+  const familia = familiaDaVenda(ctx);
   const trechosTodos = [...base.flatMap((i) => i.trechos), ...evs.filter((e) => e.trecho).map((e) => e.trecho)];
   const internacional = trechosTodos.some(ehInternacional) || base.some((i) => i.tipo === 'expedicao');
   const faltas = linhas.filter((l) => l.situacao === 'falta');
@@ -367,16 +498,21 @@ function riscosPorRegra({ ctx, base, vendido, evs, linhas, temProposta, inicio, 
     }
   }
 
-  // 5. Nome no emitido × cadastro.
-  if (pessoas.length) {
+  // 5. Nome no bilhete/voucher × nome da ficha (cadastro + família). Sem acento, "SOBRENOME/NOME" ok,
+  //    nome do meio abreviado ("Maria C. Silva") é tolerado; nome do meio faltando = médio; ninguém = alto.
+  const fichas = [...pessoas.map((p) => p.nome), ...familia.map((p) => p.nome)].filter((n) => txt(n));
+  if (fichas.length) {
     const vistos = new Set();
     for (const e of evs) for (const nome of e.passageiros || []) {
       if (vistos.has(nome)) continue; vistos.add(nome);
-      const res = pessoas.map((p) => compararNomes(p.nome, nome));
-      if (res.includes('igual')) continue;
-      const parc = pessoas[res.indexOf('parcial')];
-      if (parc) r('medio', 'nome', `Nome emitido "${nome}" diferente do cadastro "${nomeLimpo(parc.nome)}" — confira com o documento.`);
-      else r('alto', 'nome', `"${nome}" está no que foi emitido, mas não bate com ninguém do cadastro da venda.`);
+      const res = fichas.map((f) => compararNomeFicha(f, nome));
+      if (res.includes('igual') || res.includes('abreviado')) continue;
+      const onde = e.nome ? ` (${ROTULO_TIPO[e.tipos?.[0]] || 'emitido'}: ${e.nome})` : '';
+      const parc = fichas[res.indexOf('parcial')];
+      if (parc) r('medio', 'nome', `Nome emitido "${nome}" diferente do cadastro "${nomeLimpo(parc)}"${onde} — confira com o documento.`,
+        { pessoa: nomeLimpo(parc), item: e.nome || '', o_que_fazer: 'Compare com o passaporte/RG e, se faltar nome, peça a correção do nome ao fornecedor antes do embarque.' });
+      else r('alto', 'nome', `"${nome}" está no que foi emitido${onde}, mas não bate com ninguém do cadastro da venda.`,
+        { pessoa: nome, item: e.nome || '', o_que_fazer: 'Confirme quem é essa pessoa: cadastre-a na venda ou peça a correção/reemissão com o nome certo.' });
     }
   }
 
@@ -394,10 +530,20 @@ function riscosPorRegra({ ctx, base, vendido, evs, linhas, temProposta, inicio, 
   }
 
   // 7. Pagamento.
+  const linhasPg = linhasDePagamento(ctx.pagamentos);
   const pg = ctx.pagamento || {};
-  if (ctx.pagamento && !txt(pg.forma)) r('medio', 'pagamento', 'Forma de pagamento não registrada.');
-  if (pg.condicao === 'entrada' && (!num(pg.entrada) || !dataOk(pg.entrada_data))) r('medio', 'pagamento', 'Entrada sem valor ou sem data.');
-  if (pg.condicao === 'entrada' && dataOk(pg.entrada_data) && dataOk(pg.entrada_data) < hoje) r('baixo', 'pagamento', `Entrada prevista pra ${BR(dataOk(pg.entrada_data))}: confirme se caiu.`);
+  if (linhasPg && linhasPg.length) {
+    // 7a. Pagamento em linhas (qs_venda_pagamentos): soma × total + cada linha completa.
+    regrasPagamentoEmLinhas(r, linhasPg, num(ctx.total_venda), { hoje, inicio });
+  } else {
+    if (linhasPg && !linhasPg.length && (num(ctx.total_venda) || 0) > 0) {
+      r('medio', 'pagamento', 'Nenhuma linha de pagamento registrada (forma, valor, data e parcelas).',
+        { item: 'Pagamento', o_que_fazer: 'Lance como o cliente vai pagar, uma linha por forma de pagamento, somando o total da venda.' });
+    }
+    if (ctx.pagamento && !txt(pg.forma) && !linhasPg) r('medio', 'pagamento', 'Forma de pagamento não registrada.');
+    if (pg.condicao === 'entrada' && (!num(pg.entrada) || !dataOk(pg.entrada_data))) r('medio', 'pagamento', 'Entrada sem valor ou sem data.');
+    if (pg.condicao === 'entrada' && dataOk(pg.entrada_data) && dataOk(pg.entrada_data) < hoje) r('baixo', 'pagamento', `Entrada prevista pra ${BR(dataOk(pg.entrada_data))}: confirme se caiu.`);
+  }
   const vj = (ctx.viajantes || []).filter((v) => num(v.valor_contratado));
   const deve = vj.reduce((s, v) => s + Math.max(0, (num(v.valor_contratado) || 0) - (num(v.valor_pago) || 0)), 0);
   if (vj.length && deve > 0.009) {
@@ -431,10 +577,145 @@ function riscosPorRegra({ ctx, base, vendido, evs, linhas, temProposta, inicio, 
   // 11. Passageiros: venda pra N e emitido pra menos (já está nas linhas; aqui só o resumo).
   if (paxEsperado > 1 && pessoas.length && pessoas.length < paxEsperado) r('baixo', 'cadastro', `Venda pra ${paxEsperado} pessoa(s) e só ${pessoas.length} com cadastro completo.`);
 
+  // 12. Família: vínculo/CPF/nascimento, menor sem responsável, pessoa sem item.
+  if (familia.length) regrasFamilia(r, familia, vendido, { ref: inicio || hoje });
+
+  // 13. Datas do item × datas da expedição (expedicoes.data_embarque/data_retorno).
+  if (Array.isArray(ctx.expedicoes) && ctx.expedicoes.length) regrasExpedicao(r, ctx.expedicoes, vendido);
+
   // Sem repetir o mesmo motivo.
   const vistos = new Set();
   return R.filter((x) => (vistos.has(x.motivo) ? false : vistos.add(x.motivo)))
     .sort((a, b) => PESO[b.nivel] - PESO[a.nivel]);
+}
+
+const juntarE = (a) => (a.length <= 1 ? a.join('') : `${a.slice(0, -1).join(', ')} e ${a.at(-1)}`);
+
+/** 7a. Linhas de pagamento: soma = total da venda; cada linha com forma, valor, data e parcelas. */
+function regrasPagamentoEmLinhas(r, linhas, total, { hoje, inicio }) {
+  const soma = Math.round(linhas.reduce((s, l) => s + (l.valor > 0 ? l.valor : 0), 0) * 100) / 100;
+  if (total != null && total > 0) {
+    const dif = Math.round((soma - total) * 100) / 100;
+    if (dif < -0.01) {
+      r('alto', 'pagamento', `Pagamento: soma das linhas ${brl(soma)} ≠ total da venda ${brl(total)} (faltam ${brl(-dif)}).`,
+        { item: 'Pagamento', o_que_fazer: `Lance a linha que falta (${brl(-dif)}) ou corrija o total da venda — a soma tem que ser igual ao total.` });
+    } else if (dif > 0.01) {
+      r('medio', 'pagamento', `Pagamento: soma das linhas ${brl(soma)} ≠ total da venda ${brl(total)} (sobram ${brl(dif)}).`,
+        { item: 'Pagamento', o_que_fazer: 'Veja se tem linha repetida ou valor digitado a mais — a soma tem que ser igual ao total.' });
+    }
+  }
+  for (const l of linhas) {
+    const forma = FORMAS_PAGAMENTO[l.forma];
+    const rot = `Pagamento ${l.n}${forma ? ` (${forma}${l.valor > 0 ? ` ${brl(l.valor)}` : ''})` : ''}`;
+    const f = [];
+    if (!l.forma) f.push('sem forma de pagamento');
+    else if (!forma) f.push(`forma "${l.forma}" desconhecida`);
+    if (l.valor == null || l.valor <= 0) f.push('sem valor');
+    if (!l.data) f.push('sem data');
+    if (l.parcelas != null && (l.parcelas < 1 || !Number.isInteger(l.parcelas))) f.push(`nº de parcelas inválido (${l.parcelas})`);
+    if (f.length) r('medio', 'pagamento', `${rot}: ${juntarE(f)}.`, { item: rot, o_que_fazer: 'Complete a linha de pagamento: forma, valor, data e nº de parcelas.' });
+    if (l.data && inicio && l.data > inicio) {
+      r('medio', 'pagamento', `${rot}: vence ${BR(l.data)}, depois do embarque (${BR(inicio)}).`,
+        { item: rot, o_que_fazer: 'Combine com o cliente receber antes do embarque ou confirme a exceção com o Financeiro.' });
+    } else if (l.data && l.data < hoje) {
+      r('baixo', 'pagamento', `${rot}: data ${BR(l.data)} já passou — confirme se caiu.`, { item: rot, o_que_fazer: 'Confirme com o Financeiro se esse valor já entrou.' });
+    }
+  }
+}
+
+/** 12. Família: cadastro de quem vai (vínculo, CPF, nascimento), menor sem responsável, pessoa sem item. */
+function regrasFamilia(r, familia, vendido, { ref }) {
+  const comprador = familia.find((p) => p.comprador) || null;
+  const achar = (k) => familia.find((p) => p.chave === k || (p.cliente_id && p.cliente_id === k)) || null;
+  const ehMenor = (p) => {
+    if (typeof p.menor === 'boolean') return p.menor;
+    const i = idadeEm(p.nascimento, ref);
+    return i == null ? null : i < 18;
+  };
+  for (const p of familia) {
+    // No rascunho (passageiros dos itens), os dados do comprador ficam na ficha dele, não no item → só confere quem vai junto.
+    if (!p.comprador || p.explicito) {
+      const f = [];
+      if (!p.comprador && !VINCULOS[p.vinculo]) f.push('o vínculo com o comprador');
+      if (!p.cpf) f.push('o CPF');
+      if (!p.nascimento) f.push('a data de nascimento');
+      if (f.length) {
+        r('medio', 'familia', `${p.nome}: falta ${juntarE(f)}.`,
+          { pessoa: p.nome, item: 'Quem vai', o_que_fazer: `Complete ${juntarE(f)} de ${p.nome} em "Quem vai" — sem isso não sai o contrato nem a emissão.` });
+      }
+      if (p.cpf && !cpfValido(p.cpf)) {
+        r('medio', 'familia', `${p.nome}: CPF inválido (confira os dígitos).`,
+          { pessoa: p.nome, item: 'Quem vai', o_que_fazer: `Peça o documento de ${p.nome} e corrija o CPF.` });
+      }
+    }
+    if (ehMenor(p)) {
+      if (p.comprador) {
+        r('alto', 'familia', `${p.nome} é menor de idade e está como comprador(a) da venda.`,
+          { pessoa: p.nome, item: 'Quem vai', o_que_fazer: 'Coloque um adulto (pai, mãe ou responsável legal) como comprador; o menor entra como acompanhante.' });
+        continue;
+      }
+      // Sem responsável indicado = o comprador (na tela e no banco). No rascunho o comprador pode não viajar (não está na lista) — aí é ele.
+      const resp = p.responsavel ? achar(p.responsavel) : (comprador || (p.explicito ? null : { nome: 'o comprador', chave: '', menor: false }));
+      if (p.responsavel && !resp) {
+        r('medio', 'familia', `${p.nome} é menor de idade e o responsável indicado não está (mais) na venda.`,
+          { pessoa: p.nome, item: 'Quem vai', o_que_fazer: `Escolha um adulto da venda como responsável por ${p.nome} (quem assina o contrato por ele/ela).` });
+      } else if (!resp) {
+        r('medio', 'familia', `${p.nome} é menor de idade e está sem responsável na venda.`,
+          { pessoa: p.nome, item: 'Quem vai', o_que_fazer: `Indique o adulto responsável por ${p.nome} (quem assina o contrato por ele/ela).` });
+      } else if (resp.chave !== p.chave && ehMenor(resp)) {
+        r('alto', 'familia', `${p.nome} é menor de idade e o responsável (${resp.nome}) também é menor.`,
+          { pessoa: p.nome, item: 'Quem vai', o_que_fazer: `Troque o responsável por ${p.nome} por um adulto (pai, mãe ou responsável legal).` });
+      }
+    }
+  }
+  // Pessoa sem item: qs_venda_pessoas.itens = ordens dos itens ([] no banco = "em todos"); no rascunho, passageiros de cada item.
+  const itensVend = vendido.filter((i) => !NAO_EMITE.has(i.tipo));
+  if (!itensVend.length) return;
+  const ordens = new Set(vendido.map((i, n) => i.ordem ?? n));
+  const comLista = itensVend.filter((i) => i.pax_raw.some((x) => txt(x?.nome ?? x)));
+  const naLista = (p, i) => i.pax_raw.some((x) => (txt(x?.chave) && txt(x.chave) === p.chave) || ['igual', 'abreviado'].includes(compararNomeFicha(p.nome, x?.nome ?? x)));
+  for (const p of familia) {
+    let tem;
+    if (p.itens && p.itens.length) tem = p.itens.some((o) => ordens.has(o));
+    else if (p.explicito && p.itens) tem = true;
+    else tem = !comLista.length || comLista.some((i) => naLista(p, i));
+    if (!tem) {
+      r('medio', 'familia', `${p.nome} está em "Quem vai", mas não está em nenhum item da venda (sem vaga, passagem ou hospedagem).`,
+        { pessoa: p.nome, item: 'Itens da venda', o_que_fazer: `Inclua ${p.nome} nos itens que vai usar (expedição, aéreo, hotel…) ou tire da família se não vai.` });
+    }
+  }
+}
+
+/** 13. Datas do item × datas da expedição; outros itens fora do período da expedição (± 7 dias). */
+function regrasExpedicao(r, expedicoes, vendido) {
+  const exps = expedicoes.filter((e) => e && typeof e === 'object')
+    .map((e) => ({ id: txt(e.id), nome: txt(e.nome) || 'Expedição', ini: dataOk(e.data_embarque), fim: dataOk(e.data_retorno) }));
+  const itensExp = vendido.filter((i) => i.tipo === 'expedicao');
+  for (const it of itensExp) {
+    const e = exps.find((x) => x.id && x.id === txt(it.dados?.expedicao_id)) || (exps.length === 1 && itensExp.length === 1 ? exps[0] : null);
+    if (!e) continue;
+    if (e.ini && it.data_inicio && it.data_inicio !== e.ini) {
+      r('alto', 'datas', `${it.nome}: início no item ${BR(it.data_inicio)} ≠ embarque da expedição ${BR(e.ini)} (${e.nome}).`,
+        { item: it.nome, o_que_fazer: 'Confira se escolheu a turma/data certa da expedição e corrija a data do item.' });
+    }
+    if (e.fim && it.data_fim && it.data_fim !== e.fim) {
+      r('medio', 'datas', `${it.nome}: fim no item ${BR(it.data_fim)} ≠ retorno da expedição ${BR(e.fim)} (${e.nome}).`,
+        { item: it.nome, o_que_fazer: 'Corrija a data de volta do item pra bater com o retorno da expedição.' });
+    }
+  }
+  const janela = exps.filter((e) => e.ini && e.fim);
+  if (!janela.length) return;
+  const ini = janela.map((e) => e.ini).sort()[0], fim = janela.map((e) => e.fim).sort().at(-1);
+  for (const it of vendido) {
+    if (it.tipo === 'expedicao' || NAO_EMITE.has(it.tipo)) continue;
+    const a = it.data_inicio || it.trechos[0]?.data || '';
+    const b = it.data_fim || it.trechos.at(-1)?.data || a;
+    if (!a) continue;
+    if (b < somaDias(ini, -7) || a > somaDias(fim, 7)) {
+      r('medio', 'datas', `${ROTULO_TIPO[it.tipo] || it.tipo}: ${it.nome} (${BR(a)}${b !== a ? `–${BR(b)}` : ''}) fora do período da expedição (${BR(ini)}–${BR(fim)}).`,
+        { item: it.nome, o_que_fazer: 'Confira as datas desse item com o roteiro da expedição; se for extensão combinada, anote na venda.' });
+    }
+  }
 }
 
 /** Instantes (ms) de saída/chegada de um trecho: timestamptz do Rel ou data+hora local. */
@@ -450,13 +731,18 @@ function instantes(t) {
   return { sai, chega };
 }
 
-/** Junta riscos da IA (já validados pelo esquema) com os da regra, sem repetir categoria+motivo parecido. */
+/** Junta riscos da IA (já lidos por lerRespostaIa) com os da regra, sem repetir categoria+motivo parecido. */
 export function juntarRiscos(regras, ia) {
   const out = [...regras];
   for (const x of ia || []) {
     if (!x || !PESO[x.nivel] || !txt(x.motivo)) continue;
     const parecido = out.some((r) => r.categoria === x.categoria && semelhancaNome(r.motivo, x.motivo) > 0.6);
-    if (!parecido) out.push({ nivel: x.nivel, categoria: txt(x.categoria) || 'outro', motivo: txt(x.motivo).slice(0, 300), fonte: 'ia' });
+    if (parecido) continue;
+    const extra = {};
+    if (txt(x.pessoa)) extra.pessoa = txt(x.pessoa).slice(0, 120);
+    if (txt(x.item)) extra.item = txt(x.item).slice(0, 120);
+    if (txt(x.o_que_fazer)) extra.o_que_fazer = txt(x.o_que_fazer).slice(0, 300);
+    out.push({ nivel: x.nivel, categoria: txt(x.categoria) || 'outro', motivo: txt(x.motivo).slice(0, 300), fonte: 'ia', ...extra });
   }
   return out.sort((a, b) => PESO[b.nivel] - PESO[a.nivel]);
 }
@@ -468,7 +754,9 @@ export function fecharAnalise(base, riscosIa, iaInfo) {
   return { ...base, riscos, risco_nivel, status: statusDaVenda(base.contagens, riscos), ia: iaInfo };
 }
 
-// ── Esquema da resposta da IA (structured outputs, strict) ──────────────────
+// ── IA: auditor de emissão (structured outputs, strict) ─────────────────────
+export const CATEGORIAS_IA = ['passaporte', 'conexao', 'nome', 'pagamento', 'voo_interno', 'sem_proposta', 'margem', 'prazo', 'seguro',
+  'documento', 'roteiro', 'valor', 'familia', 'datas', 'emissao', 'outro'];
 const S = { type: 'string' };
 export const RISCOS_IA = {
   type: 'object', additionalProperties: false, required: ['riscos', 'texto'],
@@ -476,37 +764,112 @@ export const RISCOS_IA = {
     riscos: {
       type: 'array',
       items: {
-        type: 'object', additionalProperties: false, required: ['nivel', 'categoria', 'motivo'],
+        type: 'object', additionalProperties: false, required: ['nivel', 'categoria', 'pessoa', 'item', 'motivo', 'o_que_fazer'],
         properties: {
           nivel: { type: 'string', enum: ['baixo', 'medio', 'alto'] },
-          categoria: { type: 'string', enum: ['passaporte', 'conexao', 'nome', 'pagamento', 'voo_interno', 'sem_proposta', 'margem', 'prazo', 'seguro', 'documento', 'roteiro', 'valor', 'outro'] },
-          motivo: { ...S, description: 'uma frase curta, em português, citando o item/pessoa' },
+          categoria: { type: 'string', enum: CATEGORIAS_IA },
+          pessoa: { ...S, description: 'nome da pessoa afetada, como está no material; "" se o risco não é de uma pessoa' },
+          item: { ...S, description: 'item afetado (ex.: "Aéreo GRU → NRT", "Hotel Gracery", "Pagamento 2"); "" se for de uma pessoa só' },
+          motivo: { ...S, description: 'o problema em 1 frase curta, português simples, citando o dado do material' },
+          o_que_fazer: { ...S, description: 'a ação concreta pra quem emite, em 1 frase (ex.: "Peça a correção do nome à cia aérea")' },
         },
       },
     },
-    texto: { ...S, description: 'parecer de 2 a 4 frases pra quem vai emitir: o que olhar primeiro' },
+    texto: { ...S, description: 'parecer de 2 a 4 frases pra quem vai emitir: está tudo no lugar? o que olhar primeiro' },
   },
 };
 
-export const INSTRUCAO_IA =
-  'Você revisa vendas de uma agência de viagens brasileira DEPOIS que a venda foi lançada. Recebe a conferência já ' +
-  'feita por regras (o que está ok, o que falta emitir, o que diverge) e os riscos que as regras acharam. Seu papel: ' +
-  'apontar riscos ADICIONAIS que as regras não pegaram (ex.: roteiro com noite sem hotel, transfer sem voo no mesmo dia, ' +
-  'visto exigido pelo destino, criança sem documento, bagagem incompatível entre trechos, conexão com troca de aeroporto, ' +
-  'nome com abreviação que a cia aérea não aceita). NÃO repita os riscos já listados. NÃO invente dados que não estão ' +
-  'no material. Níveis: alto = pode impedir a viagem ou gerar prejuízo; medio = precisa de ação antes do embarque; ' +
-  'baixo = atenção. Se não houver nada a acrescentar, devolva riscos vazio. Escreva em português do Brasil.';
+export const INSTRUCAO_IA = [
+  'Você é AUDITOR DE EMISSÃO de uma agência de viagens brasileira. Revisa a venda DEPOIS de lançada pra garantir que tudo foi',
+  'emitido do jeito certo e que cada informação está no lugar certo (pessoa certa no item certo, datas, nomes, valores).',
+  '',
+  'ENTRADA: um JSON com: hoje; inicio/fim da viagem; proposta (o que foi apresentado); apresentado e vendido (itens);',
+  'emitidos (o que já tem bilhete/voucher, com os nomes como saíram); familia (quem vai: vínculo, idade na viagem, se é menor,',
+  'responsável, se tem CPF e nascimento, em quais itens está); expedicoes (datas oficiais); pagamentos (linhas forma/valor/data/',
+  'parcelas, soma e total da venda); extrato (conferência por regras: ok/falta/divergente/extra); riscos_das_regras (já apontados).',
+  '',
+  'O QUE PROCURAR (só o que as regras NÃO pegaram): pessoa da família sem passagem/hotel/seguro num item que os outros têm;',
+  'nome no bilhete/voucher que a cia aérea ou o hotel podem recusar (sobrenome trocado, nome de casada, agnome); menor viajando',
+  'sem os pais ou com um só (autorização de viagem); noite sem hospedagem no roteiro; transfer ou passeio sem voo/hotel no mesmo',
+  'dia; datas que não fecham entre trechos, hotel, seguro e expedição; conexão com troca de aeroporto; visto ou vacina exigidos',
+  'pelo destino; bagagem incompatível entre trechos; pagamento que vence depois do embarque ou parcela incoerente com a forma.',
+  '',
+  'REGRAS:',
+  '1. NUNCA invente dado. Use só o que está no material; se faltar informação, diga que falta (não suponha que está ok nem errado).',
+  '2. NÃO repita nada que já está em riscos_das_regras nem no extrato (mesmo com outras palavras).',
+  '3. TODO risco aponta QUEM e/ou O QUÊ: "pessoa" (nome como está no material) e/ou "item" (ex.: "Aéreo GRU → NRT"). Nunca os dois vazios.',
+  '4. "o_que_fazer" é uma ação concreta e curta pra quem emite.',
+  '5. Gravidade: alto = pode impedir o embarque ou dar prejuízo; medio = precisa de ação antes do embarque; baixo = conferir.',
+  '6. Português do Brasil simples, frases curtas, sem jargão. Valores em R$, datas em DD/MM/AAAA.',
+  '7. Sem nada a acrescentar: riscos = [] e um texto curto dizendo que a conferência das regras cobre a venda.',
+].join('\n');
 
-/** O material que vai pra IA (sem CPF, número de passaporte, telefone ou e-mail). */
+const NIVEL_IA = { baixo: 'baixo', baixa: 'baixo', low: 'baixo', medio: 'medio', media: 'medio', medium: 'medio', alto: 'alto', alta: 'alto', high: 'alto' };
+
+/**
+ * Lê a resposta da IA com defesa (nunca lança): aceita JSON puro ou dentro de ```json```, normaliza nível
+ * ("médio"/"alta"), categoria fora da lista vira "outro", descarta risco sem motivo e garante pessoa/item.
+ * → { riscos: [{nivel,categoria,pessoa,item,motivo,o_que_fazer}], texto } ou null se não der pra usar.
+ */
+export function lerRespostaIa(conteudo) {
+  let j = conteudo;
+  if (typeof j === 'string') {
+    const s = j.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    try { j = JSON.parse(s); } catch { return null; }
+  }
+  if (!j || typeof j !== 'object' || !Array.isArray(j.riscos)) return null;
+  const riscos = [];
+  for (const x of j.riscos) {
+    if (!x || typeof x !== 'object') continue;
+    const nivel = NIVEL_IA[semAcento(x.nivel)];
+    const motivo = txt(x.motivo).slice(0, 300);
+    if (!nivel || !motivo) continue;
+    const categoria = CATEGORIAS_IA.includes(txt(x.categoria)) ? txt(x.categoria) : 'outro';
+    const pessoa = txt(x.pessoa).slice(0, 120), item = txt(x.item).slice(0, 120);
+    riscos.push({ nivel, categoria, pessoa, item: item || (pessoa ? '' : 'Venda inteira'), motivo, o_que_fazer: txt(x.o_que_fazer).slice(0, 300) });
+    if (riscos.length >= 15) break;
+  }
+  return { riscos, texto: txt(j.texto).slice(0, 1200) };
+}
+
+/**
+ * O material que vai pra IA — entrada estruturada, SEM CPF, número de passaporte, telefone, e-mail ou data de nascimento
+ * (vai só "tem CPF", "CPF válido", a idade na viagem e se é menor).
+ */
 export function materialParaIa(ctx, conf) {
-  const limpa = (i) => ({ tipo: i.tipo, nome: i.nome, data_inicio: i.data_inicio || null, data_fim: i.data_fim || null, trechos: trechosDoItem(i).map(({ passageiros: _p, ...t }) => t), quantidade: i.quantidade ?? null });
+  const limpa = (i) => ({
+    tipo: i.tipo, nome: i.nome, data_inicio: dataOk(i.data_inicio) || null, data_fim: dataOk(i.data_fim) || null,
+    trechos: trechosDoItem(i).map(({ passageiros: _p, ...t }) => t), quantidade: i.quantidade ?? null,
+    valor: num(i.valor_total ?? i.valor), status: i.status || null,
+    passageiros: (i.passageiros || []).map((p) => nomeLimpo(p?.nome ?? p)).filter(Boolean).slice(0, 20),
+  });
+  const ref = conf.inicio || dataOk(ctx.hoje);
+  const familia = familiaDaVenda(ctx);
+  const nomeDe = (k) => familia.find((p) => p.chave === k || p.cliente_id === k)?.nome || null;
+  const vendido = (ctx.vendido || []).map((i, n) => ({ ordem: num(i.ordem) ?? n, nome: txt(i.nome) || ROTULO_TIPO[i.tipo] || 'Item' }));
+  const linhasPg = linhasDePagamento(ctx.pagamentos);
   return {
     hoje: ctx.hoje, inicio: conf.inicio, fim: conf.fim,
     proposta: ctx.proposta ? { numero: ctx.proposta.numero ?? null, opcao: ctx.proposta.opcao ?? null, total: ctx.proposta.total ?? null, pessoas: (Number(ctx.proposta.adultos) || 0) + (Number(ctx.proposta.criancas) || 0) + (Number(ctx.proposta.bebes) || 0) } : null,
     apresentado: (ctx.apresentado || []).map(limpa),
     vendido: (ctx.vendido || []).map(limpa),
+    emitidos: evidencias(ctx.emitido || []).map((e) => ({ tipo: e.tipos[0], nome: e.nome, fonte: e.fonte, data_inicio: e.data_inicio || null, data_fim: e.data_fim || null, tem_localizador: Boolean(e.localizador), passageiros: (e.passageiros || []).slice(0, 20) })).slice(0, 60),
     pessoas: (ctx.pessoas || []).map((p) => ({ nome: nomeLimpo(p.nome), passaporte_validade: dataOk(p.passaporte_validade) || null })),
+    familia: familia.map((p) => {
+      const idade = idadeEm(p.nascimento, ref);
+      return {
+        nome: p.nome, comprador: p.comprador, vinculo: VINCULOS[p.vinculo] || null, tem_cpf: Boolean(p.cpf), cpf_valido: p.cpf ? cpfValido(p.cpf) : null,
+        tem_nascimento: Boolean(p.nascimento), idade_na_viagem: idade, menor: typeof p.menor === 'boolean' ? p.menor : idade == null ? null : idade < 18,
+        responsavel: p.responsavel ? nomeDe(p.responsavel) : null,
+        itens: p.itens && p.itens.length ? vendido.filter((v) => p.itens.includes(v.ordem)).map((v) => v.nome) : null,
+      };
+    }),
+    expedicoes: (Array.isArray(ctx.expedicoes) ? ctx.expedicoes : []).filter((e) => e && typeof e === 'object')
+      .map((e) => ({ nome: txt(e.nome) || null, data_embarque: dataOk(e.data_embarque) || null, data_retorno: dataOk(e.data_retorno) || null })),
     pagamento: ctx.pagamento ? { forma: ctx.pagamento.forma || null, condicao: ctx.pagamento.condicao || null, parcelas: ctx.pagamento.parcelas ?? null } : null,
+    pagamentos: linhasPg ? linhasPg.map((l) => ({ forma: FORMAS_PAGAMENTO[l.forma] || l.forma || null, valor: l.valor, data: l.data || null, parcelas: l.parcelas })) : null,
+    soma_pagamentos: linhasPg ? Math.round(linhasPg.reduce((s, l) => s + (l.valor > 0 ? l.valor : 0), 0) * 100) / 100 : null,
+    total_venda: num(ctx.total_venda),
     extrato: conf.linhas.map((l) => ({ tipo: l.tipo, nome: l.nome, situacao: l.situacao, motivos: l.motivos, nota: l.nota || '' })),
     riscos_das_regras: conf.riscos.map((x) => `${x.nivel}: ${x.motivo}`),
   };

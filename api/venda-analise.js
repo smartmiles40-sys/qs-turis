@@ -8,7 +8,12 @@
 //   POST { rascunho: {...} }   → análise da tela, ANTES de gravar (nada é salvo)
 //        rascunho = { origem, negocio_id?, cliente_id?, viagem_id?, cliente:{nome},
 //                     itens:[qs_venda_itens-like], viajantes:[{nome,valor_contratado,valor_pago}],
-//                     pagamento:{forma,condicao,entrada,entrada_data,parcelas}, total }
+//                     pagamento:{forma,condicao,entrada,entrada_data,parcelas}, total,
+//                     — subir venda final (11/11), todos opcionais —
+//                     pagamentos:[{forma,valor,data,parcelas,obs}],
+//                     pessoas|familia:[{chave,nome,vinculo,cpf,nascimento,comprador,responsavel,itens?}] }
+//        (sem "pessoas", a família sai dos passageiros dos itens no formato novo, com `chave`;
+//         as datas da expedição vêm de expedicoes pelo dados.expedicao_id do item)
 //   POST { venda_id, motivo?: 'subir_venda'|'reanalise'|'correcao', ia_previa?: {riscos,texto,modelo} }
 //        → analisa a venda GRAVADA, guarda (0230: venda_analise_gravar) e, se
 //          falta emitir/diverge, abre a solicitação "Emissões pendentes" pro Rel.
@@ -23,7 +28,7 @@
 // -----------------------------------------------------------------------------
 import { rest } from './_supabaseAdmin.js';
 import { getSupabaseUserId } from './_wa.js';
-import { conferirVenda, fecharAnalise, materialParaIa, textoDoExtrato, RISCOS_IA, INSTRUCAO_IA } from './_vendaConferencia.js';
+import { conferirVenda, fecharAnalise, materialParaIa, textoDoExtrato, lerRespostaIa, RISCOS_IA, INSTRUCAO_IA } from './_vendaConferencia.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SETORES_OK = ['comercial', 'relacionamento', 'operacoes', 'operacional', 'financeiro'];
@@ -114,43 +119,101 @@ async function pessoasDe(clienteIds, extras = []) {
   return out;
 }
 
-// ── IA (opcional) ───────────────────────────────────────────────────────────
-async function revisarComIa(material) {
-  if (!String(process.env.OPENAI_API_KEY || '').trim()) return { usada: false, aviso: AVISO_SEM_IA, riscos: [], texto: '' };
-  const modelo = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+// ── IA (opcional): auditor de emissão ──────────────────────────────────────
+const semIa = (modelo, motivo) => ({ usada: false, modelo, aviso: `Análise por IA indisponível (${motivo}): conferência feita só pelas regras.`, riscos: [], texto: '' });
+
+/**
+ * Revisão da IA. NUNCA lança e nunca derruba a análise: qualquer falha (sem chave, HTTP, recusa,
+ * resposta cortada, JSON inválido) volta { usada:false, aviso } e a análise segue só com as regras.
+ * Modelo: OPENAI_MODEL (padrão gpt-4o-mini); temperatura 0; saída em json_schema strict (RISCOS_IA).
+ */
+export async function revisarComIa(material) {
+  const chave = String(process.env.OPENAI_API_KEY || '').trim();
+  if (!chave) return { usada: false, aviso: AVISO_SEM_IA, riscos: [], texto: '' };
+  const modelo = String(process.env.OPENAI_MODEL || '').trim() || 'gpt-4o-mini';
   try {
     const r = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${chave}`, 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(35_000),
       body: JSON.stringify({
         model: modelo, temperature: 0,
         messages: [
           { role: 'system', content: INSTRUCAO_IA },
-          { role: 'user', content: `Venda pra revisar (JSON):\n${JSON.stringify(material).slice(0, 60_000)}` },
+          { role: 'user', content: `Audite esta venda. Material (JSON):\n${materialEmTexto(material)}` },
         ],
-        response_format: { type: 'json_schema', json_schema: { name: 'riscos_venda', strict: true, schema: RISCOS_IA } },
+        response_format: { type: 'json_schema', json_schema: { name: 'auditoria_emissao', strict: true, schema: RISCOS_IA } },
       }),
     });
     const j = await r.json().catch(() => null);
-    if (!r.ok) {
-      const motivo = r.status === 401 ? 'chave da OpenAI recusada' : r.status === 429 ? 'OpenAI pediu pra esperar' : `HTTP ${r.status}`;
-      return { usada: false, modelo, aviso: `Análise por IA indisponível (${motivo}): conferência feita só pelas regras.`, riscos: [], texto: '' };
-    }
-    const lido = safeParse(j?.choices?.[0]?.message?.content || '');
-    if (!lido || !Array.isArray(lido.riscos)) return { usada: false, modelo, aviso: 'A IA não devolveu a revisão: conferência feita só pelas regras.', riscos: [], texto: '' };
-    return { usada: true, modelo, aviso: '', riscos: lido.riscos, texto: String(lido.texto || '').slice(0, 1200) };
+    if (!r.ok) return semIa(modelo, r.status === 401 ? 'chave da OpenAI recusada' : r.status === 429 ? 'OpenAI pediu pra esperar' : `HTTP ${r.status}`);
+    const escolha = j?.choices?.[0];
+    if (escolha?.message?.refusal) return semIa(modelo, 'a IA recusou revisar');
+    if (escolha?.finish_reason === 'length') return semIa(modelo, 'a resposta da IA veio cortada');
+    const lido = lerRespostaIa(escolha?.message?.content ?? '');
+    if (!lido) return { usada: false, modelo, aviso: 'A IA não devolveu a revisão: conferência feita só pelas regras.', riscos: [], texto: '' };
+    return { usada: true, modelo, aviso: '', riscos: lido.riscos, texto: lido.texto };
   } catch (e) {
     const t = e?.name === 'TimeoutError' || e?.name === 'AbortError';
-    return { usada: false, modelo, aviso: `Análise por IA indisponível (${t ? 'demorou demais' : 'falhou'}): conferência feita só pelas regras.`, riscos: [], texto: '' };
+    return semIa(modelo, t ? 'demorou demais' : 'falhou');
   }
+}
+
+/** JSON do material sem estourar o limite: encurta as listas em vez de cortar o texto no meio (JSON quebrado). */
+export function materialEmTexto(material, limite = 60_000) {
+  let m = material || {};
+  let t = JSON.stringify(m);
+  for (const n of [40, 20, 10, 5, 0]) {
+    if (t.length <= limite) return t;
+    m = Object.fromEntries(Object.entries(m).map(([k, v]) => [k, Array.isArray(v) ? v.slice(0, n) : v]));
+    t = JSON.stringify(m);
+  }
+  return t.length <= limite ? t : JSON.stringify({ aviso: 'material grande demais; revise só pelo extrato', riscos_das_regras: lista(m.riscos_das_regras).slice(0, 20) });
+}
+
+/** Datas oficiais das expedições dos itens (dados.expedicao_id). Falhou/sem expedição → null (a regra não roda). */
+export async function expedicoesDosItens(itens) {
+  const ids = unicosUuid(lista(itens).filter((i) => i?.tipo === 'expedicao').map((i) => i?.dados?.expedicao_id));
+  if (!ids.length) return null;
+  const rows = await rest(`expedicoes?select=id,nome,data_embarque,data_retorno&id=in.(${ids.join(',')})`).catch(() => null);
+  return Array.isArray(rows) && rows.length ? rows : null;
+}
+const unicosUuid = (a) => [...new Set(a.map((x) => String(x || '')).filter((x) => UUID.test(x)))].slice(0, 30);
+
+/**
+ * Venda gravada — tabelas novas (frente Banco: qs_venda_pagamentos na 0356+; qs_venda_pessoas da 0351).
+ * Lê com defesa: tabela que não existe (ou erro) → null, e a conferência roda como na venda antiga.
+ */
+export async function extrasDaVenda(vendaId) {
+  const [pags, pes] = await Promise.all([
+    rest(`qs_venda_pagamentos?select=ordem,forma,valor,data,parcelas,obs&venda_id=eq.${vendaId}&order=ordem.asc`).catch(() => null),
+    rest(`qs_venda_pessoas?select=cliente_id,comprador,chave,vinculo,menor,responsavel_cliente_id,itens,removida_em&venda_id=eq.${vendaId}`).catch(() => null),
+  ]);
+  const ativas = Array.isArray(pes) ? pes.filter((p) => p && !p.removida_em) : [];
+  let familia = null;
+  if (ativas.length) {
+    const ids = unicosUuid(ativas.map((p) => p.cliente_id));
+    const fichas = ids.length ? await rest(`rel_clientes?select=id,nome,cpf,nascimento&id=in.(${ids.join(',')})`).catch(() => []) : [];
+    const porId = new Map(lista(fichas).map((c) => [c.id, c]));
+    familia = ativas.map((p) => {
+      const c = porId.get(p.cliente_id) || {};
+      return {
+        nome: c.nome || '', cpf: c.cpf || '', nascimento: c.nascimento || '', cliente_id: p.cliente_id, chave: p.chave || p.cliente_id,
+        comprador: Boolean(p.comprador), vinculo: p.vinculo || '', menor: typeof p.menor === 'boolean' ? p.menor : null,
+        responsavel: p.responsavel_cliente_id || null, itens: Array.isArray(p.itens) ? p.itens : [],
+      };
+    }).filter((p) => p.nome);
+  }
+  return { pagamentos: Array.isArray(pags) ? pags : null, familia: familia && familia.length ? familia : null };
 }
 
 async function analisar(ctx, { proposta_id, iaPrevia } = {}) {
   const base = conferirVenda(ctx);
   let ia;
-  if (iaPrevia && typeof iaPrevia === 'object' && Array.isArray(iaPrevia.riscos)) {
-    ia = { usada: Boolean(iaPrevia.usada ?? true), modelo: String(iaPrevia.modelo || ''), aviso: String(iaPrevia.aviso || ''), riscos: iaPrevia.riscos.slice(0, 20), texto: String(iaPrevia.texto || '').slice(0, 1200) };
+  // A leitura da IA que a tela já pediu (não paga 2×) passa pela mesma limpeza da resposta da OpenAI.
+  const previa = iaPrevia && typeof iaPrevia === 'object' ? lerRespostaIa({ riscos: iaPrevia.riscos, texto: iaPrevia.texto }) : null;
+  if (previa) {
+    ia = { usada: Boolean(iaPrevia.usada ?? true), modelo: String(iaPrevia.modelo || ''), aviso: String(iaPrevia.aviso || ''), riscos: previa.riscos, texto: previa.texto };
   } else {
     ia = await revisarComIa(materialParaIa(ctx, base));
   }
@@ -167,10 +230,15 @@ async function analisarRascunho(r) {
   const { emitido, clienteIds = [] } = await emitidosDaViagem(r.viagem_id, null);
   const nomes = [r.cliente?.nome, ...lista(r.viajantes).map((v) => v?.nome)].filter(Boolean).map((nome) => ({ nome, passaporte_validade: null }));
   const pessoas = await pessoasDe([r.cliente_id, ...clienteIds], nomes);
+  const vendido = lista(r.itens).slice(0, 60);
+  const familia = lista(r.pessoas).length ? lista(r.pessoas) : lista(r.familia);
   const ctx = {
     hoje: hojeSP(), proposta: prop?.meta || null, apresentado: prop?.itens || [],
-    vendido: lista(r.itens).slice(0, 60), emitido, pessoas,
+    vendido, emitido, pessoas,
     viajantes: lista(r.viajantes).slice(0, 30), pagamento: r.pagamento || null, total_venda: r.total ?? null,
+    pagamentos: Array.isArray(r.pagamentos) ? r.pagamentos.slice(0, 30) : null,
+    familia: familia.length ? familia.slice(0, 30) : null,
+    expedicoes: await expedicoesDosItens(vendido),
   };
   return analisar(ctx, { proposta_id: prop?.id });
 }
@@ -188,11 +256,12 @@ async function carregarVenda(vendaId, u) {
 
 async function analisarVenda(vendaId, u, iaPrevia) {
   const v = await carregarVenda(vendaId, u);
-  const [itens, pax, prop, emit] = await Promise.all([
-    rest(`qs_venda_itens?select=id,tipo,nome,data_inicio,data_fim,dados,passageiros,valor,custo,status&venda_id=eq.${vendaId}&order=ordem.asc`).catch(() => []),
+  const [itens, pax, prop, emit, extras] = await Promise.all([
+    rest(`qs_venda_itens?select=id,tipo,nome,data_inicio,data_fim,dados,passageiros,valor,custo,status,ordem&venda_id=eq.${vendaId}&order=ordem.asc`).catch(() => []),
     rest(`passageiros?select=nome_completo,status_reserva,valor_contratado_brl,valor_pago_brl,validade_passaporte,cliente_id&venda_id=eq.${vendaId}`).catch(() => []),
     propostaAprovada(v),
     emitidosDaViagem(v.viagem_id, vendaId),
+    extrasDaVenda(vendaId),
   ]);
   const emitido = [...emit.emitido];
   for (const p of pax || []) if (['Pré-reserva', 'Confirmado'].includes(p.status_reserva)) emitido.push({ fonte: 'expedicao', tipo: 'expedicao', nome: p.nome_completo, status_reserva: p.status_reserva });
@@ -203,6 +272,8 @@ async function analisarVenda(vendaId, u, iaPrevia) {
     vendido: itens || [], emitido, pessoas,
     viajantes: (pax || []).map((p) => ({ nome: p.nome_completo, valor_contratado: p.valor_contratado_brl, valor_pago: p.valor_pago_brl })),
     pagamento: v.pagamento || null, total_venda: v.valor_total,
+    pagamentos: extras.pagamentos, familia: extras.familia,
+    expedicoes: await expedicoesDosItens(itens || []),
   };
   return { venda: v, analise: await analisar(ctx, { proposta_id: prop?.id, iaPrevia }) };
 }
