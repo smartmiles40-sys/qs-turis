@@ -22,7 +22,7 @@ const GRUPOS: { id: string; titulo: string; tipos: TipoTrecho[]; cor: string }[]
   { id: "trem", titulo: "Trens", tipos: ["trem"], cor: "#7C3AED" },
   { id: "transfer", titulo: "Transfers", tipos: ["transfer"], cor: "#B45309" },
   { id: "hotel", titulo: "Hospedagem", tipos: ["hospedagem"], cor: "#BE185D" },
-  { id: "passeio", titulo: "Passeios e outros", tipos: ["passeio", "outro"], cor: "#0369A1" },
+  { id: "passeio", titulo: "Passeios e outros", tipos: ["passeio", "seguro", "outro"], cor: "#0369A1" },
 ];
 const COR_DO_TIPO = Object.fromEntries(GRUPOS.flatMap((g) => g.tipos.map((t) => [t, g.cor]))) as Record<TipoTrecho, string>;
 
@@ -33,6 +33,7 @@ const ICONE: Record<TipoTrecho, ReactNode> = {
   transfer: <><rect x="1" y="6" width="22" height="11" rx="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" /></>,
   hospedagem: <><path d="M2 20V8M22 20v-6a3 3 0 0 0-3-3H10v6M2 17h20" /><circle cx="6.5" cy="11.5" r="2" /></>,
   passeio: <><circle cx="12" cy="10" r="3" /><path d="M12 21s-7-6.5-7-11a7 7 0 0 1 14 0c0 4.5-7 11-7 11z" /></>,
+  seguro: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
   outro: <><circle cx="12" cy="12" r="9" /><path d="M12 8v4l3 2" /></>,
 };
 

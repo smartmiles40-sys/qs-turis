@@ -77,9 +77,10 @@ export async function extrasDasViagens(clienteId: string, ids: string[]): Promis
   const agora = Date.now() - 6 * 3600_000; // voo de hoje cedo ainda conta como "próximo"
 
   const [trechos, docs, pax, ia] = await Promise.allSettled([
-    lerEmLotes<{ viagem_id: string; tipo: TipoTrecho; origem: string | null; destino: string | null; partida_em: string; companhia: string | null; numero: string | null; checkin_em: string | null; checkin_feito_em: string | null }>(
+    lerEmLotes<{ viagem_id: string; tipo: TipoTrecho; origem: string | null; destino: string | null; partida_em: string; companhia: string | null; numero: string | null; checkin_em: string | null; checkin_feito_em: string | null; fonte?: string | null; conta_como_voo?: boolean | null; viagem_aereo_vendido?: boolean | null }>(
       ids, (l) => supabase.from("rel_trechos_v")
-        .select("viagem_id, tipo, origem, destino, partida_em, companhia, numero, checkin_em, checkin_feito_em")
+        // "*" (e não a lista): conta_como_voo / viagem_aereo_vendido só existem com a 0359 — sem ela, só não filtra
+        .select("*")
         .in("viagem_id", l).order("partida_em")),
     lerEmLotes<{ viagem_id: string; tipo: TipoDocumento; status: string }>(
       ids, (l) => supabase.from("rel_documentos").select("viagem_id, tipo, status").in("viagem_id", l)),
@@ -95,6 +96,8 @@ export async function extrasDasViagens(clienteId: string, ids: string[]): Promis
       const e = de(t.viagem_id);
       e.trechos++;
       if (t.tipo !== "voo_internacional" && t.tipo !== "voo_interno") continue;
+      // 0359: a data do Bitrix numa venda sem aéreo (hotel, seguro…) não é voo
+      if (t.conta_como_voo === false || (t.fonte === "bitrix" && t.viagem_aereo_vendido === false)) continue;
       e.voos++;
       if (!e.proximoVoo && new Date(t.partida_em).getTime() >= agora) {
         e.proximoVoo = {

@@ -396,7 +396,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
 
   // os voos pela régua única (statusViagem): papel (ida/volta/interno), estado e se valem
   const resumo = useMemo(() => (v && analise ? resumirVoos({
-    data_embarque: v.data_embarque, data_retorno: v.data_retorno, status: v.status, titulo: v.titulo, expedicao: v.expedicao, servico: v.servico,
+    data_embarque: v.data_embarque, data_retorno: v.data_retorno, status: v.status, titulo: v.titulo, expedicao: v.expedicao, servico: v.servico, aereo_vendido: v.aereo_vendido ?? null,
     fase_manual: v.fase_manual ?? null, fase_manual_motivo: v.fase_manual_motivo ?? null, fase_manual_ate: v.fase_manual_ate ?? null,
     alertas_ignorados: v.alertas_ignorados ?? null,
   }, analise.trechos) : null), [v, analise]);
