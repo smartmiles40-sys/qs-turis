@@ -30,7 +30,7 @@ import { notifyError } from "@/lib/qs/notify";
 // "reuniao-campos" (2026-08-14): desfecho da reunião preenche os CAMPOS do
 // negócio (Data da reunião realizada, Data de No Show, Reagendamento, SAL) —
 // o mapeamento desfecho→UF_CRM_* vive no servidor, nunca no navegador.
-export type BitrixSyncEvent = "perdido" | "ganho" | "reuniao" | "nota" | "primeiro-contato" | "reuniao-campos";
+export type BitrixSyncEvent = "perdido" | "ganho" | "reuniao" | "nota" | "primeiro-contato" | "reuniao-campos" | "criar-card";
 
 export interface BitrixSyncPayload {
   lead_id: string;
@@ -39,6 +39,8 @@ export interface BitrixSyncPayload {
 }
 
 let warnedNotConfigured = false;
+/** Leads sem card já avisados nesta sessão (um toast por lead, não por evento). */
+const avisadosSemCard = new Set<string>();
 
 /** O que o envio deu, para quem PRECISA saber (um botão, por exemplo). */
 export interface BitrixSyncResult {
@@ -86,10 +88,9 @@ export async function enviarAoBitrix(
     } | null;
 
     if (json?.code === "not_configured") return { ok: false, desligado: true };
-    // "Lead sem bitrix_id" volta como SUCESSO do servidor — e é o certo pro
-    // disparo automático, que não pode berrar por cada lead que não veio do
-    // Bitrix. Mas um botão que a pessoa apertou não pode dizer "enviado" quando
-    // não existe card do outro lado: aqui isso vira resposta, não silêncio.
+    // "Lead sem bitrix_id": desde 12/11 o servidor responde success:false com
+    // este code (antes era um sucesso falso). Um botão que a pessoa apertou
+    // não pode dizer "enviado" quando não existe card do outro lado.
     if (json?.code === "skipped_no_bitrix_id") return { ok: false, semCard: true };
     if (!res.ok || !json?.success) {
       const erro = String(json?.error ?? "");
@@ -144,6 +145,16 @@ export function notifyBitrix(event: BitrixSyncEvent, payload: BitrixSyncPayload)
         if (!warnedNotConfigured) {
           warnedNotConfigured = true;
           console.info("[bitrixSync] integração desligada no servidor (BITRIX_WEBHOOK_BASE não configurado)");
+        }
+        return;
+      }
+      // Lead sem card (12/11): o servidor deixou de responder "sucesso" e marca
+      // a pendência no lead. Avisa UMA vez por lead nesta sessão — sem isso,
+      // cada nota de um lead sem card virava um toast.
+      if (json?.code === "skipped_no_bitrix_id") {
+        if (!avisadosSemCard.has(payload.lead_id)) {
+          avisadosSemCard.add(payload.lead_id);
+          notifyError("Este lead ainda não tem card no Bitrix — a atualização ficou só no QS. O card vai ser criado (veja o selo na ficha do lead).");
         }
         return;
       }

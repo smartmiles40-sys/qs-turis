@@ -10,8 +10,11 @@
 //
 // Body (JSON): { "event": "perdido"|"ganho"|"reuniao"|"nota"|"primeiro-contato"|"reuniao-campos", "lead_id": uuid, ...payload }
 //   O `bitrix_id` é resolvido AQUI a partir do lead_id (qs_leads via service
-//   role) — o valor enviado pelo cliente é ignorado. Lead sem bitrix_id → skip
-//   silencioso ({ success: true, code: "skipped_no_bitrix_id" }).
+//   role) — o valor enviado pelo cliente é ignorado. Lead sem bitrix_id →
+//   { success: false, code: "skipped_no_bitrix_id", pendente: true } (12/11:
+//   antes era success:true — um "deu certo" falso pra uma atualização que não
+//   chegou a lugar nenhum). O lead fica marcado como pendência de card.
+//   Evento 'criar-card': cria/vincula o card do lead (api/_leadCardBitrix.js).
 //   `ganho` e `reuniao` (o que o n8n fazia) moram em api/_bitrixSaida.js.
 //
 // Segurança (igual ao chatapp-send, fail-closed):
@@ -26,13 +29,17 @@ import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { bx, comentarNoNegocio, bitrixConfigurado, moverNegocioParaReuniao } from './_bitrixLead.js';
 import { gravarGanhoNoBitrix, enviarReuniaoDireto } from './_bitrixSaida.js';
 import { deveLevarParaReuniao } from './_bitrixSaidaRegras.js';
+import { garantirCardDoLead, marcarFalha } from './_leadCardBitrix.js';
 
 // 'primeiro-contato' (2026-07-28): o SDR conclui a 1ª atividade no QS e o negócio
 // anda sozinho de "Novo lead" para "Follow-up 1" no Bitrix. Quem decide se move é
 // o n8n (só move o que ainda está em Novo lead) — aqui é só o repasse.
 // 'reuniao-campos' (2026-08-14): desfecho da reunião preenche os CAMPOS do
 // negócio direto no Bitrix (datas, flags, SAL) — sem passar pelo n8n.
-const EVENTS = new Set(['perdido', 'ganho', 'reuniao', 'nota', 'primeiro-contato', 'reuniao-campos']);
+// 'criar-card' (12/11/2026): cria/vincula o negócio de um lead que ainda não
+// tem card (botão "Tentar agora" da ficha e o cadastro manual). Mesma regra da
+// rotina de nova tentativa — api/_leadCardBitrix.js.
+const EVENTS = new Set(['perdido', 'ganho', 'reuniao', 'nota', 'primeiro-contato', 'reuniao-campos', 'criar-card']);
 
 // ─── Desfecho da reunião → campos do negócio ─────────────────────────────────
 // Mapeamento confirmado com o Bruno em 14/08, campo a campo, lido do portal via
@@ -433,7 +440,7 @@ export default async function handler(req, res) {
   const body = typeof req.body === 'string' ? safeJson(req.body) : req.body || {};
   const { event, ...payload } = body;
   if (!EVENTS.has(event)) {
-    return res.status(400).json({ success: false, error: 'event inválido (perdido|ganho|reuniao|nota|primeiro-contato|reuniao-campos)' });
+    return res.status(400).json({ success: false, error: 'event inválido (perdido|ganho|reuniao|nota|primeiro-contato|reuniao-campos|criar-card)' });
   }
 
   // bitrix_id NUNCA vem do cliente (auditoria 2026-07-14): qualquer usuário
@@ -455,7 +462,7 @@ export default async function handler(req, res) {
   let lead = null;
   try {
     const rows = await rest(
-      `qs_leads?select=owner_id,bitrix_id,bitrix_status_synced,closed_value,full_name&id=eq.${encodeURIComponent(leadId)}&limit=1`
+      `qs_leads?select=*&id=eq.${encodeURIComponent(leadId)}&limit=1`
     );
     lead = (rows && rows[0]) || null;
   } catch (err) {
@@ -478,11 +485,41 @@ export default async function handler(req, res) {
     }
   }
 
+  // ── Criar/vincular o card do lead (12/11/2026) ────────────────────────────
+  // "Tentar agora" na ficha e o cadastro manual. A posse já foi conferida acima.
+  if (event === 'criar-card') {
+    if (lead?.bitrix_id) {
+      return res.status(200).json({ success: true, code: 'ja_tinha', bitrix_id: String(lead.bitrix_id) });
+    }
+    const r = await garantirCardDoLead(leadId, { origem: userId ? 'manual' : 'servidor' })
+      .catch((e) => ({ resultado: 'falhou', motivo: e?.message || 'erro' }));
+    if (r.resultado === 'criado' || r.resultado === 'vinculado' || r.resultado === 'ja_tinha') {
+      return res.status(200).json({ success: true, code: r.resultado, bitrix_id: r.bitrixId || null, motivo: r.motivo || null });
+    }
+    if (r.resultado === 'desligado') return res.status(200).json({ success: false, code: 'not_configured', error: r.motivo });
+    if (r.resultado === 'ocupado') return res.status(409).json({ success: false, code: 'ocupado', error: 'Já estou criando o card deste lead — confira em alguns segundos.' });
+    if (r.resultado === 'inexistente') return res.status(404).json({ success: false, error: 'Esse lead não existe mais no QS.' });
+    return res.status(502).json({ success: false, code: 'falhou', error: r.motivo || 'O Bitrix não criou o negócio.' });
+  }
+
   const serverBitrixId = (lead && lead.bitrix_id) || null;
   if (!serverBitrixId) {
-    // Lead sem vínculo com o Bitrix (não veio de lá) — mesmo comportamento de
-    // sempre: pula sem erro (o front já pulava quando não tinha bitrix_id).
-    return res.status(200).json({ success: true, code: 'skipped_no_bitrix_id' });
+    // SUCESSO FALSO, CORRIGIDO (12/11/2026). Antes respondia success:true e
+    // quem disparou achava que o Bitrix tinha recebido. Lead sem card é uma
+    // PENDÊNCIA: devolve erro claro (o code continua o mesmo — a tela e o
+    // agenda-reparo já sabem ler) e garante a marca no lead, pra rotina de
+    // nova tentativa criar o card. O evento em si NÃO fica guardado: depois
+    // que o card nascer, quem disparou precisa reenviar (o desfecho da reunião
+    // tem botão de reenvio; perdido/ganho o espelho da etapa resolve).
+    if (lead && !lead.bitrix_card_status) {
+      await marcarFalha(leadId, `uma atualização (${event}) não foi pro Bitrix porque o lead não tem card`, 0);
+    }
+    return res.status(200).json({
+      success: false,
+      code: 'skipped_no_bitrix_id',
+      pendente: true,
+      error: 'Este lead ainda não tem card no Bitrix — a atualização não foi enviada. O QS vai criar o card; depois reenvie.',
+    });
   }
   payload.bitrix_id = serverBitrixId; // sobrescreve qualquer valor do cliente
 
