@@ -3,7 +3,8 @@
 // SUBIR VENDA (0214, Bruno 28/10/2026) — o banco por trás da tela única de
 // venda (Closer, Relacionamento e Operacional usam a mesma, src/venda/SubirVenda.tsx).
 //
-//   • exp_vagas_para_venda()      — expedições à venda + vagas (pax_planejados − pagantes ativos);
+//   • exp_vagas_para_venda(p_venda?) — expedições à venda + vagas (pax_planejados − pagantes ativos
+//     − os que esperam na fila do espelho, 0368); com p_venda, quantos já são desta venda;
 //   • exp_passageiros_para_quarto — quem já está na expedição, pra "divide o quarto com";
 //   • exp_vagas_ajustar           — o Ops abre vaga, com motivo registrado;
 //   • venda_subir(p)              — grava tudo numa transação: pessoa (rel_clientes),
@@ -21,7 +22,7 @@ import {
   lerValor, pagamentoDaVenda, viajanteVazio,
   type PagamentoVenda, type PaxLinha, type PessoaVenda, type Viajante,
 } from "./vendaRegras";
-import { familiaParaPayload, lerVendaDoContrato, linhasParaPayload, type VendaDoContrato } from "./vendaFinal";
+import { familiaParaPayload, lerCancelamento, lerVendaDoContrato, linhasParaPayload, type ResultadoCancelamento, type VendaDoContrato } from "./vendaFinal";
 import { comTrechos, dadosParaBanco, lerTrechos } from "./iata";
 
 export type OrigemVenda = "closer" | "rel" | "ops";
@@ -41,6 +42,10 @@ export interface ExpedicaoVaga {
   pax_planejados: number;
   ocupados: number;
   vagas: number;
+  /** 0368: quantos dos ocupados ainda esperam a troca do sistema (fila do espelho). Ausente = banco sem a 0368. */
+  na_fila?: number;
+  /** 0368: com a venda informada, quantos ocupados já são DESTA venda (tabela ou fila). Ausente = banco sem a 0368. */
+  desta_venda?: number;
 }
 
 export interface PaxParaQuarto { id: string; nome: string; quarto_desejado: string | null; tem_par: boolean; venda_id: string | null }
@@ -55,10 +60,19 @@ export {
 export const viajanteNovo = (comprador = false, nome = ""): Viajante => viajanteVazio(comprador, nome, novaChave());
 
 // ── Leitura ────────────────────────────────────────────────────────────────
-export async function listarExpedicoesParaVenda(): Promise<ExpedicaoVaga[]> {
-  const { data, error } = await supabase.rpc("exp_vagas_para_venda");
+/** vendaId (0368): a lista já diz quantos ocupados são desta venda — reabrir não trava na vaga dela mesma. */
+export async function listarExpedicoesParaVenda(vendaId?: string | null): Promise<ExpedicaoVaga[]> {
+  let { data, error } = vendaId
+    ? await supabase.rpc("exp_vagas_para_venda", { p_venda: vendaId })
+    : await supabase.rpc("exp_vagas_para_venda");
+  // Banco ainda sem a 0368 (função sem parâmetro): pede sem a venda.
+  if (error && vendaId) ({ data, error } = await supabase.rpc("exp_vagas_para_venda"));
   if (error) throw new Error(/exp_vagas_para_venda/.test(error.message) ? "A lista de vagas ainda não está ligada no banco (falta aplicar a 0214)." : error.message);
-  const lista = ((data ?? []) as ExpedicaoVaga[]).map((e) => ({ ...e, pax_planejados: Number(e.pax_planejados) || 0, ocupados: Number(e.ocupados) || 0, vagas: Number(e.vagas) || 0 }));
+  const lista = ((data ?? []) as ExpedicaoVaga[]).map((e) => ({
+    ...e, pax_planejados: Number(e.pax_planejados) || 0, ocupados: Number(e.ocupados) || 0, vagas: Number(e.vagas) || 0,
+    ...(e.na_fila != null ? { na_fila: Number(e.na_fila) || 0 } : {}),
+    ...(e.desta_venda != null ? { desta_venda: Number(e.desta_venda) || 0 } : {}),
+  }));
   // Preço SEM aéreo (0220): a RPC da 0214 não devolve. Quem tem acesso às Expedições
   // (Ops) lê direto; o closer não enxerga a tabela (RLS exp_tem_acesso) e fica sem —
   // até a RPC passar a devolver a coluna (SQL proposto no relatório de 09/11).
@@ -294,12 +308,23 @@ export async function consolidarVenda(vendaId: string): Promise<ResultadoConsoli
   return { ok: r.ok === true && !faltas.length, faltas };
 }
 
-export async function cancelarVenda(vendaId: string, motivo: string): Promise<void> {
-  const { error } = await supabase.rpc("venda_cancelar", { p_venda: vendaId, p_motivo: motivo });
+/** Cancela a venda (0367): vaga volta, comissão sai, a receber cancelado, viagem do Rel e Bitrix sinalizados. */
+export async function cancelarVenda(vendaId: string, motivo: string): Promise<ResultadoCancelamento> {
+  const { data, error } = await supabase.rpc("venda_cancelar", { p_venda: vendaId, p_motivo: motivo });
   if (error) {
     if (semFuncao(error.message, "venda_cancelar")) throw new Error(`Cancelar a venda ainda não está ligado no banco (${FALTA_FINAL}).`);
     throw new Error(erroDaVenda(error));
   }
+  return lerCancelamento(data);
+}
+
+/** A venda deste cartão que ainda vale (não cancelada) — pro botão "Cancelar venda". null = nenhuma (ou banco antigo). */
+export async function vendaAtivaDoCartao(negocioId: string): Promise<{ id: string; estado: string } | null> {
+  const { data, error } = await supabase.from("qs_vendas").select("id, estado").eq("negocio_id", negocioId).maybeSingle();
+  if (error || !data) return null;
+  const r = data as { id: string; estado: string | null };
+  if (!r.estado || r.estado === "cancelada") return null;
+  return { id: r.id, estado: r.estado };
 }
 
 export interface BlocosVenda {

@@ -53,6 +53,36 @@ test("vagas: quem já é desta venda não conta contra ela (reabrir em expediç�
   assert.equal(F.vagasParaEstaVenda(-1, []), 0);
 });
 
+test("vagas (0368): fila do espelho conta — desta_venda do banco vale mais que o passageiro_id da tela", () => {
+  // Reservada com o espelho ligado: as 2 pessoas estão na fila, sem passageiro_id.
+  const vs = [{ passageiro_id: null }, { passageiro_id: null }];
+  assert.equal(F.vagasParaEstaVenda(0, vs), 0, "sem a info do banco, a tela não sabe que são desta venda");
+  assert.equal(F.vagasParaEstaVenda(0, vs, 2), 2, "banco diz 2 desta venda → cabem as 2 de novo");
+  assert.equal(F.vagasParaEstaVenda(1, [{ passageiro_id: "p1" }], 0), 1, "desta_venda = 0 do banco manda (não soma o passageiro_id)");
+  assert.equal(F.vagasParaEstaVenda(1, [{ passageiro_id: "p1" }], null), 2, "null = banco antigo → usa o passageiro_id");
+  assert.equal(F.textoNaFila(0), "");
+  assert.equal(F.textoNaFila(undefined), "");
+  assert.equal(F.textoNaFila(1), "1 reservada aguardando a troca do sistema");
+  assert.equal(F.textoNaFila(3), "3 reservadas aguardando a troca do sistema");
+});
+
+test("cancelar venda (0367): leitura do retorno e frase da tela", () => {
+  const r = F.lerCancelamento({ ok: true, passageiros_cancelados: 2, parcelas_canceladas: 3, parcela_paga: true, viagem_cancelada: true, cartao_movido: true });
+  assert.deepEqual(r, { jaEstava: false, passageiros: 2, parcelas: 3, parcelaPaga: true, viagemCancelada: true, cartaoMovido: true });
+  const m = F.mensagemDoCancelamento(r);
+  assert.match(m, /2 vagas voltaram/);
+  assert.match(m, /comissão/);
+  assert.match(m, /3 parcelas a receber canceladas/);
+  assert.match(m, /PAGA/);
+  assert.match(m, /Relacionamento/);
+  assert.match(m, /Venda cancelada/);
+  // banco antigo (0357) devolve só passageiros/parcelas
+  const antigo = F.lerCancelamento({ ok: true, passageiros_cancelados: 1, parcelas_canceladas: 0 });
+  assert.equal(F.mensagemDoCancelamento(antigo), "Venda cancelada. 1 vaga voltou para a expedição. Deixou de contar na comissão.");
+  assert.equal(F.mensagemDoCancelamento(F.lerCancelamento({ ok: true, ja_estava: true })), "Esta venda já estava cancelada.");
+  assert.equal(F.lerCancelamento(null).passageiros, 0);
+});
+
 test("faltas pra consolidar + passo de cada falta", () => {
   const base: F.EntradaFaltas = {
     comprador: { nome: "Ana Souza" },

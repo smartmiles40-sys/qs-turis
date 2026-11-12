@@ -256,6 +256,8 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       setModeloNovo(novo);
       setEstado(est);
       setVendaId(venda?.id ?? null);
+      // 0368: com a venda gravada, a lista de vagas diz quantos ocupados já são dela (inclusive na fila do espelho).
+      if (venda?.id) void listarExpedicoesParaVenda(venda.id).then((l) => vivo && setExpedicoes(l)).catch(() => undefined);
       setPessoa(pessoaFinal);
       setDaFicha([...veio]);
       if (venda) {
@@ -420,7 +422,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
         if (!exp) return "Escolha qual expedição foi vendida.";
         const vs = viajantes[i.k] ?? [];
         // Vagas livres pra ESTA venda = vagas da expedição + quem já é desta venda (reabrir não trava).
-        const livres = vagasParaEstaVenda(exp.vagas, vs);
+        const livres = vagasParaEstaVenda(exp.vagas, vs, exp.desta_venda);
         if (vs.length > livres) return `${exp.nome}: só ${livres} vaga(s) pra esta venda. Peça pro Operacional abrir vaga.`;
         if (vs.some((v) => !v.comprador && v.nome.trim().length < 3)) return "Escreva o nome de quem viaja junto.";
         if (vs.some((v) => !lerValor(v.valor_contratado))) return "Coloque o valor que cada pessoa paga na expedição.";

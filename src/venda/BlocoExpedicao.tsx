@@ -20,7 +20,9 @@
 //
 // Sprint final (11/11): vagas livres PRA ESTA VENDA = vagas da expedição + quem
 // já é desta venda (tem linha em passageiros) — reabrir em expedição quase
-// lotada não trava mais.
+// lotada não trava mais. 0368: "Reservar vaga" com o espelho ligado (fila
+// exp_venda_pax_pendentes) também ocupa vaga; a etiqueta mostra quantas
+// "reservadas aguardando a troca do sistema".
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
 import { Aviso, Botao, Campo, Entrada, Etiqueta } from "@/rel/ui";
@@ -30,7 +32,7 @@ import { brl, dataBr } from "@/closer/lib";
 import { lerValor, passageirosParaQuarto, viajanteNovo, type ExpedicaoVaga, type PaxParaQuarto, type Viajante } from "./api";
 import { mostrarValor, precoTabela, sugerirValor, trocarAereo, valorAjustado } from "./vendaRegras";
 import DadosDoViajante from "./DadosDoViajante";
-import { jaOcupamVaga } from "./vendaFinal";
+import { jaOcupamVaga, textoNaFila } from "./vendaFinal";
 
 const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 const mesAno = (iso: string | null) => (iso ? `${MESES[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}` : "");
@@ -80,7 +82,9 @@ export default function BlocoExpedicao({ item, viajantes, expedicoes, carregando
 
   const mudar = (chave: string, p: Partial<Viajante>) => onViajantes(viajantes.map((v) => (v.chave === chave ? { ...v, ...p } : v)));
   // Quem já é desta venda já ocupa a vaga dele: não conta contra ela mesma.
-  const proprios = jaOcupamVaga(viajantes);
+  // 0368: o banco diz quantos (inclusive quem ainda espera na fila do espelho, sem passageiro_id).
+  const proprios = exp?.desta_venda != null ? exp.desta_venda : jaOcupamVaga(viajantes);
+  const naFila = textoNaFila(exp?.na_fila);
   const livres = exp ? exp.vagas + proprios : 0;
   const lotada = exp && livres <= 0;
   const faltaVaga = exp && viajantes.length > livres;
@@ -104,6 +108,7 @@ export default function BlocoExpedicao({ item, viajantes, expedicoes, carregando
       {exp && (
         <p className="text-[12.5px] flex flex-wrap gap-1.5 items-center" style={{ color: "var(--ink3)" }}>
           <Etiqueta tom={exp.vagas > 2 ? "rel" : "aviso"}>{exp.vagas} de {exp.pax_planejados} vagas livres{proprios ? ` (+ ${proprios} já desta venda)` : ""}</Etiqueta>
+          {naFila && <Etiqueta tom="neutro">{naFila}</Etiqueta>}
           {exp.codigo} · embarque {dataBr(exp.data_embarque)}{exp.data_retorno ? ` · volta ${dataBr(exp.data_retorno)}` : ""}
           {exp.preco_venda_brl || exp.preco_sem_aereo_brl
             ? ` · tabela do Operacional: ${exp.preco_venda_brl ? `${brl(exp.preco_venda_brl)} com aéreo` : "com aéreo não cadastrado"}${exp.preco_sem_aereo_brl ? ` / ${brl(exp.preco_sem_aereo_brl)} sem aéreo` : ""}`
