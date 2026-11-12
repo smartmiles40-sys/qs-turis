@@ -19,6 +19,10 @@
 //   g) leads ABERTOS sem card no Bitrix (bitrix_id nulo) criados há mais de 30 min
 //      (12/11/2026, diretriz "todo card do QS nasce no Bitrix"; rotina de nova
 //      tentativa em api/_leadCardBitrix.js).
+//   h) (12/11) cartões do closer esperando o Bitrix (pendente/erro) há > 6 h
+//      (bitrix_pendente_em da 0365; sem ela, atualizado_em) — qualquer um;
+//   i) (12/11) pessoas sem contato no Bitrix há > 2 h (fila rel_clientes_bitrix
+//      da 0366; sem ela, rel_clientes sem bitrix_contato_id) — aviso baixo.
 //
 // Canal: o sininho do QS (qs_avisos via rpc qs_aviso_criar, o mesmo dos avisos de
 // prazo/reunião). Dedupe: cada alerta no máximo 1x a cada 6h (aviso baixo: 24h);
@@ -202,6 +206,30 @@ export function regraLeadsSemCard(qtd, { rotinaLigada = false, minutos = LEADS_S
   };
 }
 
+/** f) cartões do closer esperando o Bitrix há mais de X horas (12/11). */
+export function regraCloserAtrasado(qtd, { horas = 6, automatico = false } = {}) {
+  if (qtd <= 0) return null;
+  return {
+    id: 'closer_bitrix_atrasado',
+    nivel: 'alto',
+    titulo: 'Cartões do closer sem ir pro Bitrix',
+    texto: `${qtd} cartão(ões) do closer esperando o Bitrix (pendente ou com erro) há mais de ${horas}h.` +
+      (automatico ? ' O reenvio automático está ligado: conferir os erros nos cartões.' : ' O reenvio automático está DESLIGADO (CLOSER_CRON_BITRIX_LIGADO): use "Enviar agora" no cartão.'),
+  };
+}
+
+/** g) pessoas do QS sem contato no Bitrix (12/11). Aviso baixo. */
+export function regraPessoasSemContato(qtd, { horas = 2, automatico = false } = {}) {
+  if (qtd <= 0) return null;
+  return {
+    id: 'pessoas_sem_bitrix',
+    nivel: 'baixo',
+    titulo: 'Pessoas sem contato no Bitrix',
+    texto: `${qtd} pessoa(s) cadastrada(s) no QS sem contato no Bitrix há mais de ${horas}h.` +
+      (automatico ? ' O envio automático está ligado: conferir as que falharam (ficha › Contato).' : ' O envio automático está DESLIGADO (REL_PESSOA_BITRIX_LIGADO): use "Enviar agora" na ficha.'),
+  };
+}
+
 /** Dedupe: devolve os alertas que podem sair agora e o estado novo. */
 export function filtrarDedupe(alertas, estado, agoraMs) {
   const base = estado && typeof estado === 'object' && !Array.isArray(estado) ? estado : {};
@@ -295,6 +323,33 @@ async function checarLeadsSemCard(agoraMs) {
   return { dados: { leadsSemCard: qtd, rotinaLigada }, alerta: regraLeadsSemCard(qtd, { rotinaLigada }) };
 }
 
+const ligado = (k) => String(process.env[k] || '').trim() === '1';
+const faltaColuna = (e, nome) => new RegExp(nome).test(String(e?.message || ''));
+
+async function checarCloserAtrasado(agoraMs) {
+  const limite = iso(agoraMs - 6 * HORA);
+  let qtd;
+  try {
+    qtd = await contar(`qs_closer_negocios?select=id&bitrix_status=in.(pendente,erro)&arquivado_em=is.null&bitrix_pendente_em=lt.${limite}`);
+  } catch (e) {
+    if (!faltaColuna(e, 'bitrix_pendente_em')) throw e; // banco sem a 0365
+    qtd = await contar(`qs_closer_negocios?select=id&bitrix_status=in.(pendente,erro)&arquivado_em=is.null&atualizado_em=lt.${limite}`);
+  }
+  return { dados: { atrasados6h: qtd }, alerta: regraCloserAtrasado(qtd, { automatico: ligado('CLOSER_CRON_BITRIX_LIGADO') }) };
+}
+
+async function checarPessoas(agoraMs) {
+  const limite = iso(agoraMs - 2 * HORA);
+  let qtd;
+  try {
+    qtd = (await listarTudo(`rel_clientes_bitrix?select=cliente_id&status=in.(pendente,falhou,sem_dados)&pendente_em=lt.${limite}`, 'cliente_id.asc')).length;
+  } catch (e) {
+    if (!faltaColuna(e, 'rel_clientes_bitrix')) throw e; // banco sem a 0366
+    qtd = await contar(`rel_clientes?select=id&bitrix_contato_id=is.null&mesclado_em_id=is.null&arquivado_em=is.null&criado_em=lt.${limite}`);
+  }
+  return { dados: { pessoasSemContato: qtd }, alerta: regraPessoasSemContato(qtd, { automatico: ligado('REL_PESSOA_BITRIX_LIGADO') }) };
+}
+
 // ---------------------------------------------------------------- envio
 
 async function destinatarios() {
@@ -347,6 +402,8 @@ const CHECAGENS = {
   gravacoes_sem_bitrix: checarGravacoes,
   leads_sem_atividade: checarLeadsSemAtividade,
   leads_sem_card: checarLeadsSemCard,
+  closer_bitrix_atrasado: checarCloserAtrasado,
+  pessoas_sem_bitrix: checarPessoas,
 };
 
 export default async function handler(req, res) {

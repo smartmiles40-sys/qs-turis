@@ -8,12 +8,12 @@
 // Enquanto o banco guardar os dois separados, a lista é a união por pessoa; a
 // proposta de unificar está em docs/PROPOSTA-SCHEMA-FICHA.md.
 // -----------------------------------------------------------------------------
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { Avatar, Btn, Card, StatusChip, nomeLimpo } from "@/components/ui";
 import { Icon } from "@/components/ui/icons";
 import { VINCULOS, type Acompanhante } from "@/clientes/cadastro";
-import { PARENTESCOS, formatarTelefone, type Cliente, type LigacoesCliente, type Metrica } from "../../lib/clientes";
+import { PARENTESCOS, enviarPessoaAoBitrix, formatarTelefone, pendenciaBitrix, type Cliente, type LigacoesCliente, type Metrica, type PendenciaBitrix } from "../../lib/clientes";
 import { anotarObservacao } from "./fontes";
 
 const BITRIX = "https://agenciasetuforeuvou.bitrix24.com.br";
@@ -23,8 +23,46 @@ const zap = (fone: string) => {
   return `https://wa.me/${d.length <= 11 ? `55${d}` : d}`;
 };
 
+// ── Contato no Bitrix (0366, revisão 12/11) ─────────────────────────────────
+// Toda pessoa do QS tem que ter contato no Bitrix. Sem contato: mostra a
+// pendência (desde quando / por que falhou) e o botão "Enviar agora", que
+// procura por CPF, telefone e e-mail antes de criar (api/_relPessoaBitrix.js).
+const dataHoraBR = (d: string | null | undefined) => (d ? new Date(d).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
+function SemContatoBitrix({ c, onMudou }: { c: Cliente; onMudou: () => void }) {
+  const [pend, setPend] = useState<PendenciaBitrix | null>(null);
+  const [ocupado, setOcupado] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    void pendenciaBitrix(c.id).then((p) => { if (vivo) setPend(p); });
+    return () => { vivo = false; };
+  }, [c.id, c.atualizado_em]);
+  const enviar = async () => {
+    setOcupado(true); setMsg(null);
+    try {
+      const r = await enviarPessoaAoBitrix(c.id);
+      if (r.ok) { onMudou(); return; }
+      setMsg(r.motivo || "O Bitrix não aceitou.");
+      setPend(await pendenciaBitrix(c.id));
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setOcupado(false); }
+  };
+  const falhou = pend?.status === "falhou" || pend?.status === "sem_dados";
+  return (
+    <div style={{ display: "grid", gap: 4 }}>
+      <span>
+        <StatusChip tone={falhou ? "danger" : "warn"}>{pend?.status === "sem_dados" ? "Faltam dados" : falhou ? "Falhou" : "Pendente"}</StatusChip>{" "}
+        <span className="qs-tone-subtle">sem contato no Bitrix{pend?.pendente_em ? ` desde ${dataHoraBR(pend.pendente_em)}` : ""}</span>
+      </span>
+      {falhou && pend?.erro && <span style={{ color: "var(--err-ink)", fontSize: 12 }}>{pend.erro}</span>}
+      {msg && <span style={{ color: "var(--err-ink)", fontSize: 12 }}>{msg}</span>}
+      {!c.mesclado_em_id && <span><Btn size="sm" onClick={() => void enviar()} disabled={ocupado}>{ocupado ? "Enviando…" : "Enviar agora"}</Btn></span>}
+    </div>
+  );
+}
+
 // ── Contato ─────────────────────────────────────────────────────────────────
-function Contato({ c }: { c: Cliente }) {
+function Contato({ c, onMudou }: { c: Cliente; onMudou: () => void }) {
   const fone = c.telefone ?? "";
   return (
     <Card title="Contato">
@@ -49,7 +87,7 @@ function Contato({ c }: { c: Cliente }) {
           <dt>Bitrix</dt>
           <dd>{c.bitrix_contato_id
             ? <a className="fc-link" href={`${BITRIX}/crm/contact/details/${c.bitrix_contato_id}/`} target="_blank" rel="noreferrer">Contato #{c.bitrix_contato_id}</a>
-            : <span className="qs-tone-subtle">sem contato ligado</span>}</dd>
+            : <SemContatoBitrix c={c} onMudou={onMudou} />}</dd>
         </div>
       </dl>
     </Card>
@@ -213,7 +251,7 @@ export default function LateralFicha(p: {
   const bloqueado = !!p.c.mesclado_em_id;
   return (
     <aside className="fc-lateral" aria-label="Contato e informações da pessoa">
-      <Contato c={p.c} />
+      <Contato c={p.c} onMudou={p.onMudou} />
       <Pessoas lista={pessoasLigadas(p.c, p.titular, p.familia, p.acompanhantes)} podeEditar={!bloqueado} ehTitular={!p.c.titular_id}
         onAbrir={p.onAbrir} onAdicionarFamiliar={p.onAdicionarFamiliar} onViajaJunto={p.onViajaJunto} />
       <Origem c={p.c} ligacoes={p.ligacoes} metrica={p.metrica} onVerTudo={p.onVerOndeAparece} />

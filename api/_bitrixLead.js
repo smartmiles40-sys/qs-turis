@@ -109,7 +109,8 @@ export async function donoNoQsDoResponsavel(assignedById) {
   }
 }
 
-async function responsavelNoBitrix(ownerId) {
+/** Usuário do QS → id do usuário no Bitrix (casado por e-mail). null = sem par. */
+export async function responsavelNoBitrix(ownerId) {
   if (!ownerId) return null;
   try {
     const rows = await rest(`qs_users?select=email&id=eq.${encodeURIComponent(ownerId)}&limit=1`);

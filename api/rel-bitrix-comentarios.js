@@ -7,10 +7,51 @@
 // ainda vai acontecer) e lê em lote pelo `batch` do Bitrix — 50 chamadas por
 // pedido. Cada comentário vira uma linha em rel_bitrix_comentarios, ligada à
 // viagem e/ou à ficha.
+//
+// PESSOA → CONTATO NO BITRIX (0366, revisão 12/11 — api/_relPessoaBitrix.js).
+// Pendurado aqui pra não criar função nova na Vercel (o plano está no teto):
+//   • no fim do cron, se REL_PESSOA_BITRIX_LIGADO=1 (DESLIGADO por padrão), uma
+//     rodada curta (até 8 pessoas, ~10 s) da fila rel_clientes_bitrix;
+//   • GET ?acao=pessoas-conferir[&pular=N] (CRON_SECRET) → SIMULAÇÃO: o que faria
+//     com cada pessoa (vincular a contato existente / criar / sem dados / ambíguo),
+//     só LENDO o Bitrix. Paginado: repita com pular=proximo até vir null.
+//     Script: scripts/rel-pessoas-bitrix-conferir.mjs;
+//   • GET ?acao=pessoas-enviar (CRON_SECRET) → uma rodada real à mão (só com o
+//     interruptor ligado);
+//   • POST { acao: 'pessoa-enviar', clienteId, automatico? } (usuário logado) →
+//     botão "Enviar agora" da ficha. automatico:true (depois de salvar a ficha)
+//     respeita o interruptor; o botão não.
 // -----------------------------------------------------------------------------
 
-import { rest } from './_supabaseAdmin.js';
-import { bx } from './_bitrixLead.js';
+import { rest, segredoConfere } from './_supabaseAdmin.js';
+import { bx, bitrixConfigurado } from './_bitrixLead.js';
+import { getSupabaseUserId } from './_wa.js';
+import { enviarPessoa, rodadaPessoas } from './_relPessoaBitrix.js';
+
+const pessoasLigado = () => String(process.env.REL_PESSOA_BITRIX_LIGADO || '').trim() === '1';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** POST da ficha: usuário ativo que mexe com cadastro (não o perfil Marketing, só leitura). */
+async function pessoaEnviar(req, res) {
+  const id = await getSupabaseUserId(req.headers['authorization']);
+  if (!id || !UUID_RE.test(id)) return res.status(401).json({ error: 'Entre de novo no QS.' });
+  const u = (await rest(`qs_users?select=id,role,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
+  if (!u?.is_active || u.role === 'marketing') return res.status(403).json({ error: 'Sem permissão.' });
+  let body = req.body || {};
+  if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
+  if (body.acao !== 'pessoa-enviar') return res.status(400).json({ error: 'Ação inválida.' });
+  const clienteId = String(body.clienteId || '');
+  if (!UUID_RE.test(clienteId)) return res.status(400).json({ error: 'Pessoa inválida.' });
+  if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE na Vercel.' });
+  if (body.automatico && !pessoasLigado()) return res.status(200).json({ ok: false, pulado: 'Envio automático desligado (REL_PESSOA_BITRIX_LIGADO).' });
+  try {
+    const r = await enviarPessoa(clienteId, { bx, rest });
+    return res.status(r.status).json(r.body);
+  } catch (e) {
+    console.error('[rel-bitrix-comentarios] pessoa-enviar:', String(e?.message || '').slice(0, 160));
+    return res.status(500).json({ error: 'Falhou.' });
+  }
+}
 
 const ORCAMENTO_MS = 50_000;
 const POR_BATCH = 50;
@@ -91,9 +132,23 @@ async function lerLote(lote) {
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
+  if (req.method === 'POST') return pessoaEnviar(req, res);
   const segredo = String(process.env.CRON_SECRET || '').trim();
   const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
-  if (!segredo || veio !== segredo) return res.status(401).json({ error: 'Não autorizado' });
+  if (!segredo || !segredoConfere(veio, segredo)) return res.status(401).json({ error: 'Não autorizado' });
+  const sp = new URL(req.url || '/', 'http://x').searchParams;
+  const acao = String(req.query?.acao || sp.get('acao') || '');
+  if (acao === 'pessoas-conferir' || acao === 'pessoas-enviar') {
+    if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE.' });
+    const seco = acao === 'pessoas-conferir';
+    if (!seco && !pessoasLigado()) return res.status(200).json({ pulado: 'Envio desligado (REL_PESSOA_BITRIX_LIGADO).' });
+    try {
+      return res.status(200).json(await rodadaPessoas({ bx, rest, seco, limite: seco ? 30 : 10, pular: sp.get('pular'), orcamentoMs: 40_000 }));
+    } catch (e) {
+      console.error('[rel-bitrix-comentarios] pessoas:', String(e?.message || '').slice(0, 160));
+      return res.status(500).json({ error: 'Falhou.' });
+    }
+  }
   const prazo = Date.now() + ORCAMENTO_MS;
   const conta = { entidades: 0, comentarios: 0, erros: 0 };
   try {
@@ -103,6 +158,16 @@ export default async function handler(req, res) {
       catch (e) { conta.erros++; console.warn('[rel-bitrix-comentarios] lote:', String(e?.message || '').slice(0, 160)); }
     }
     conta.restam = Math.max(0, fila.length - conta.entidades);
+    // 0366: pessoas → contato no Bitrix, com o que sobrou do tempo (interruptor desligado por padrão).
+    if (pessoasLigado()) {
+      try {
+        const folga = Math.min(10_000, prazo + 8_000 - Date.now());
+        if (folga > 3_000) {
+          const p = await rodadaPessoas({ bx, rest, limite: 8, orcamentoMs: folga });
+          conta.pessoas = p.resumo;
+        }
+      } catch (e) { conta.pessoas = { erro: String(e?.message || '').slice(0, 120) }; }
+    }
     console.log(`[rel-bitrix-comentarios] ${JSON.stringify(conta)}`);
     return res.status(200).json(conta);
   } catch (e) {

@@ -77,6 +77,10 @@ export interface Negocio {
   bitrix_erro: string | null;
   bitrix_enviado_em: string | null;
   bitrix_etapa: Etapa | null;
+  /** 0365: desde quando o cartão espera o Bitrix (pendente/erro). Ausente em banco sem a 0365. */
+  bitrix_pendente_em?: string | null;
+  /** 0365: última troca de responsável (o dono do card no Bitrix muda no próximo envio). */
+  closer_trocado_em?: string | null;
   arquivado_em: string | null;
   arquivado_motivo: string | null;
   // 0207: pré-venda ("Marcar como venda" — sobe pro Dashboard antes da ficha).
@@ -291,6 +295,9 @@ export async function trocarCloser(negocioId: string, closerId: string, motivo: 
       : /closer-invalido/.test(m) ? "Escolha um closer ativo."
       : /closer_negocio_trocar_closer/.test(m) ? "Falta aplicar a 0334 no banco." : m);
   }
+  // 12/11: o dono do card no Bitrix muda junto (ASSIGNED_BY_ID). Best-effort: se
+  // falhar, o cartão fica "pendente" e a tela mostra o botão "Enviar agora".
+  await espelharNoBitrix(negocioId).catch(() => null);
 }
 
 /** Quem pode receber cartão: closers ativos (e gestores/admin, pra devolver ao time). */
@@ -313,7 +320,7 @@ export function espelharNoBitrix(negocioId: string) {
 // ── O que está ligado no servidor (27/10) ──────────────────────────────────
 // A tela esconde o que depende de variável que não está na Vercel (contrato
 // pelo ZapSign/Google, Bitrix). Uma chamada por sessão, dividida entre as telas.
-export interface ConfigDaArea { contrato: boolean; bitrix: boolean }
+export interface ConfigDaArea { contrato: boolean; bitrix: boolean; /** CLOSER_CRON_BITRIX_LIGADO=1 na Vercel (12/11). */ reenvioAutomatico?: boolean }
 let configCache: Promise<ConfigDaArea> | null = null;
 export function configDaArea(): Promise<ConfigDaArea> {
   if (!configCache) {

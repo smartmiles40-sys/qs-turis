@@ -97,3 +97,41 @@ test("valor igual não regrava", () => {
   const p = P.planejarEspelho({ n: cartao("em_negociacao", { valor_previsto: 5000 }), deal: deal("UC_YGG9JY", "0", { OPPORTUNITY: "5000.00" }), lista: C1 });
   assert.deepEqual(p.fields, {});
 });
+
+// ── Revisão 12/11: motivo da perda e responsável ────────────────────────────
+test("motivo: texto livre do closer → opção do enum 'Motivo de perda'", () => {
+  assert.equal(P.opcaoMotivoPerda("Desistência na reunião"), P.OPCAO_MOTIVO_PERDA.desistiu);
+  assert.equal(P.opcaoMotivoPerda("achou caro demais"), P.OPCAO_MOTIVO_PERDA.caro);
+  assert.equal(P.opcaoMotivoPerda("fechou com outra agência"), P.OPCAO_MOTIVO_PERDA.outra_agencia);
+  assert.equal(P.opcaoMotivoPerda("cliente sumiu, não responde"), P.OPCAO_MOTIVO_PERDA.nao_responde);
+  assert.equal(P.opcaoMotivoPerda("no-show duas vezes"), P.OPCAO_MOTIVO_PERDA.no_show);
+  assert.equal(P.opcaoMotivoPerda("qualquer outra coisa"), P.OPCAO_MOTIVO_PERDA.outros);
+  assert.equal(P.opcaoMotivoPerda("  "), null);
+});
+
+test("perdido com motivo → campo 'Motivo de perda'; já igual no Bitrix não regrava", () => {
+  const n = cartao("perdido", { motivo_perda: "Desistência na reunião" });
+  const p = P.planejarEspelho({ n, deal: deal("UC_YGG9JY"), lista: C1 });
+  assert.equal(p.ok, true);
+  assert.equal(p.fields.STAGE_ID, "LOSE");
+  assert.equal(p.fields[P.CAMPO_MOTIVO_PERDA], "153");
+  const igual = P.planejarEspelho({ n, deal: deal("LOSE", "0", { [P.CAMPO_MOTIVO_PERDA]: "153" }), lista: C1 });
+  assert.deepEqual(igual.fields, {});
+});
+
+test("venda cancelada com motivo → 'motivo da desistência' (texto)", () => {
+  const n = cartao("venda_cancelada", { motivo_perda: "Cliente perdeu o emprego" });
+  const p = P.planejarEspelho({ n, deal: deal("UC_70BW8E"), lista: C1, porPessoa: true });
+  assert.equal(p.fields[P.CAMPO_MOTIVO_DESISTENCIA], "Cliente perdeu o emprego");
+  assert.equal(p.fields[P.CAMPO_MOTIVO_PERDA], undefined);
+});
+
+test("responsável trocado → ASSIGNED_BY_ID só quando difere", () => {
+  const n = cartao("em_negociacao");
+  const muda = P.planejarEspelho({ n, deal: deal("UC_YGG9JY", "0", { ASSIGNED_BY_ID: "23" }), lista: C1, responsavel: "41" });
+  assert.deepEqual(muda.fields, { ASSIGNED_BY_ID: "41" });
+  const igual = P.planejarEspelho({ n, deal: deal("UC_YGG9JY", "0", { ASSIGNED_BY_ID: "41" }), lista: C1, responsavel: "41" });
+  assert.deepEqual(igual.fields, {});
+  const sem = P.planejarEspelho({ n, deal: deal("UC_YGG9JY", "0", { ASSIGNED_BY_ID: "23" }), lista: C1 });
+  assert.deepEqual(sem.fields, {});
+});

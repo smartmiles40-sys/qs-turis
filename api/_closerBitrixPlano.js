@@ -41,6 +41,38 @@ export const FUNIL_COMERCIAL = '0';
 export const FUNIL_PRE_VENDAS = '25';
 export const CAMPO_TIPO_VENDA = 'UF_CRM_1743296167520'; // enum "Tipo de venda" — o Bitrix quer o id em STRING
 
+// MOTIVO (revisão 12/11): o cartão perdido/cancelado leva o motivo pro card.
+//   • Perdido → "Motivo de perda" (enum do funil 0, lido do catálogo bitrix_fields
+//     em 12/11). O closer escreve texto livre; aqui vira a opção mais parecida
+//     (sem casar → "Outros"). O texto inteiro vai num comentário (api/_closerEspelho.js).
+//   • Venda cancelada → "motivo da desistência" (texto; o mesmo campo que o lado
+//     SDR usa na desistência — api/bitrix-sync.js CAMPO.desist_motivo).
+export const CAMPO_MOTIVO_PERDA = 'UF_CRM_1744663824797';
+export const CAMPO_MOTIVO_DESISTENCIA = 'UF_CRM_1789683835018';
+export const OPCAO_MOTIVO_PERDA = {
+  outra_agencia: '145', nao_responde: '147', caro: '149', pesquisando: '151', desistiu: '153',
+  sem_dinheiro: '155', conta_propria: '157', follow_up: '453', no_show: '745', outros: '159',
+};
+const REGRAS_MOTIVO = [
+  [/no.?show|nao apareceu|nao compareceu|faltou/, 'no_show'],
+  [/outra agencia|concorren|fechou com outr|fechou em outr/, 'outra_agencia'],
+  [/conta propria|por conta|sozinh|direto (na|no|com)/, 'conta_propria'],
+  [/nao respond|sem resposta|sem retorno|sumiu|nao atend|vacuo|nao retorn/, 'nao_responde'],
+  [/sem dinheiro|dinheiro|financ|grana|sem condic|desempreg/, 'sem_dinheiro'],
+  [/caro|preco|valor alto|acima do orcamento|orcamento/, 'caro'],
+  [/pesquis|so cotando|so orcando|curios/, 'pesquisando'],
+  [/desist|cancel|nao vai (mais )?viajar|adiou/, 'desistiu'],
+  [/follow/, 'follow_up'],
+];
+/** Texto livre do motivo → id da opção do enum "Motivo de perda" (string, como o Bitrix quer). */
+export function opcaoMotivoPerda(texto) {
+  const t = semAcento(texto);
+  if (!t.trim()) return null;
+  for (const [re, chave] of REGRAS_MOTIVO) if (re.test(t)) return OPCAO_MOTIVO_PERDA[chave];
+  return OPCAO_MOTIVO_PERDA.outros;
+}
+const valorDoCampo = (v) => String(Array.isArray(v) ? v[0] ?? '' : v ?? '').trim();
+
 export const NOMES_BITRIX = {
   aguardando_reuniao: [/aguardando\s+reuni/, /reuniao\s+de\s+venda/],
   reagendamento: [/reagend/],
@@ -111,11 +143,13 @@ const nomeDaColuna = (lista, id) => (lista || []).find((e) => String(e?.STATUS_I
  *   valorFilhos = 0351: soma do que foi pros cards filhos da família (o pai leva o resto)
  *   vendaCancelada = qs_vendas.estado 'cancelada' (11/11): o cron PODE tirar o card da
  *                 coluna de venda (foi o próprio QS que pôs lá com a reserva/pré-venda)
+ *   responsavel = id do usuário NO BITRIX que deve ser o responsável (12/11: só vem
+ *                 quando o responsável do cartão foi trocado no QS e ainda não subiu)
  * Devolve { ok, fields, etapaAlvo, preVenda, valor, valorVenda, valorFilhos, de, para, motivo }.
  *   ok=false → não envia; `motivo` explica (vira o bitrix_erro do cartão).
  *   fields vazio → já está igual, nada a enviar.
  */
-export function planejarEspelho({ n, deal, lista, listaComercial = null, porPessoa = false, valorFilhos = 0, vendaCancelada = false }) {
+export function planejarEspelho({ n, deal, lista, listaComercial = null, porPessoa = false, valorFilhos = 0, vendaCancelada = false, responsavel = null }) {
   const etapaAlvo = etapaNoBitrix(n);
   const preVenda = emPreVenda(n);
   const funil = String(deal?.CATEGORY_ID ?? '0');
@@ -186,6 +220,19 @@ export function planejarEspelho({ n, deal, lista, listaComercial = null, porPess
     if (tipoPre && atualTipo !== tipoPre) fields[CAMPO_TIPO_VENDA] = tipoPre;
     else if (!tipoPre && tipoFicha && !atualTipo) fields[CAMPO_TIPO_VENDA] = tipoFicha;
   }
+  // Motivo (12/11): perdido → enum "Motivo de perda"; venda cancelada → texto da desistência.
+  const motivo = String(n.motivo_perda || '').trim();
+  if (motivo && etapaAlvo === 'perdido') {
+    const op = opcaoMotivoPerda(motivo);
+    if (op && valorDoCampo(deal?.[CAMPO_MOTIVO_PERDA]) !== op) fields[CAMPO_MOTIVO_PERDA] = op;
+  }
+  if (motivo && etapaAlvo === 'venda_cancelada') {
+    const txt = motivo.slice(0, 250);
+    if (valorDoCampo(deal?.[CAMPO_MOTIVO_DESISTENCIA]) !== txt) fields[CAMPO_MOTIVO_DESISTENCIA] = txt;
+  }
+  // Responsável trocado no QS (closer_negocio_trocar_closer) → o card muda de dono no Bitrix.
+  const resp = String(responsavel || '').replace(/\D/g, '');
+  if (resp && valorDoCampo(deal?.ASSIGNED_BY_ID) !== resp) fields.ASSIGNED_BY_ID = resp;
   return {
     ...base, ok: true, fields, valor, valorVenda, valorFilhos: filhos,
     para: { funil: mudaFunil ? FUNIL_COMERCIAL : funil, coluna: alvo, nome: nomeDaColuna(colunas, alvo) },

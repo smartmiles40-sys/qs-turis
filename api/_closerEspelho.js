@@ -23,7 +23,7 @@
 //                  timeline do pai e de cada filho (uma vez — marca no histórico).
 // -----------------------------------------------------------------------------
 
-import { CAMPO_TIPO_VENDA, ETAPAS_DE_VENDA, FUNIL_COMERCIAL, FUNIL_PRE_VENDAS, NOME_ETAPA, planejarEspelho } from './_closerBitrixPlano.js';
+import { CAMPO_MOTIVO_DESISTENCIA, CAMPO_MOTIVO_PERDA, CAMPO_TIPO_VENDA, ETAPAS_DE_VENDA, FUNIL_COMERCIAL, FUNIL_PRE_VENDAS, NOME_ETAPA, planejarEspelho } from './_closerBitrixPlano.js';
 import { carregarFamilia, carregarVenda, espelharFamilia, filhosAtivos, resumoDaFamilia, somaDosFilhos, textoVendaCancelada } from './_closerBitrixFamilia.js';
 
 const SERVICO = {
@@ -75,6 +75,8 @@ export function cartaoComEstadoDaVenda(n, venda) {
       ...n,
       pre_venda_em: null, pre_venda_valor: null,
       etapa: ETAPAS_DE_VENDA.includes(n.etapa) ? 'venda_cancelada' : n.etapa,
+      // 12/11: o motivo do cancelamento da venda vai pro campo do Bitrix quando o cartão não tem um.
+      motivo_perda: n.motivo_perda || venda.cancelada_motivo || null,
     };
   }
   // Mapa do Bruno (12/11): reservou → "Em emissão / Pix Expedição"; CONSOLIDOU → "Venda realizada".
@@ -90,14 +92,26 @@ export function cartaoComEstadoDaVenda(n, venda) {
 export const vendaConsolidada = (n, venda) => venda?.estado === 'consolidada' || (Boolean(n?.consolidada_em) && venda?.estado !== 'cancelada');
 
 /**
+ * O responsável do cartão foi trocado no QS (0365: closer_trocado_em) depois do
+ * último envio? Então o card do Bitrix também muda de dono (ASSIGNED_BY_ID).
+ * Sem a marca (banco sem a 0365) ou já enviado depois da troca → não mexe no dono.
+ */
+export function responsavelPendente(n) {
+  const troca = Date.parse(n?.closer_trocado_em || '');
+  if (!Number.isFinite(troca) || !n?.closer_id) return false;
+  const enviado = Date.parse(n?.bitrix_enviado_em || '');
+  return !Number.isFinite(enviado) || troca > enviado;
+}
+
+/**
  * Manda a etapa (e o valor) do cartão pro Bitrix — pai e filhos.
  *   u     = quem pediu (null = o cron)
  *   extra = { seco?, preVenda?, comentario?(n, valor) }
- *   deps  = { rest, bx, atualizarNegocioComFunil, comentarNoNegocio, colunasDoFunil, podeMexer }
+ *   deps  = { rest, bx, atualizarNegocioComFunil, comentarNoNegocio, colunasDoFunil, podeMexer, responsavelNoBitrix? }
  * Devolve { status, body } (o handler responde com isso).
  */
 export async function espelharCartao(negocioId, u, extra = {}, deps) {
-  const { rest, bx, atualizarNegocioComFunil, comentarNoNegocio, colunasDoFunil, podeMexer } = deps;
+  const { rest, bx, atualizarNegocioComFunil, comentarNoNegocio, colunasDoFunil, podeMexer, responsavelNoBitrix } = deps;
   const marcar = async (campos, evento) => {
     await rest(`qs_closer_negocios?id=eq.${negocioId}`, { method: 'PATCH', body: campos, prefer: 'return=minimal' });
     if (evento) {
@@ -151,11 +165,19 @@ export async function espelharCartao(negocioId, u, extra = {}, deps) {
     // Card ainda na Pré-Vendas: o plano leva pro Comercial 1 (precisa das colunas de lá).
     const listaComercial = String(deal.CATEGORY_ID ?? '0') === FUNIL_PRE_VENDAS ? await colunasDoFunil(FUNIL_COMERCIAL) : null;
     const porPessoa = Boolean(u);
+    // 12/11: responsável trocado no QS → o id dele no Bitrix (casado por e-mail).
+    // Sem par no Bitrix: não trava o resto do envio; fica anotado no histórico.
+    let responsavel = null;
+    let semParNoBitrix = false;
+    if (responsavelNoBitrix && responsavelPendente(n)) {
+      responsavel = await responsavelNoBitrix(n.closer_id).catch(() => null);
+      semParNoBitrix = !responsavel;
+    }
     const temFilhos = Boolean(familia?.pessoas?.some((p) => !p.comprador));
 
     // Modo CONFERIR (03/11): devolve o que seria enviado e não escreve nada.
     if (extra.seco) {
-      const plano = planejarEspelho({ n: nEf, deal, lista, listaComercial, porPessoa, vendaCancelada: venda?.estado === 'cancelada', valorFilhos: somaDosFilhos(familia?.pessoas) });
+      const plano = planejarEspelho({ n: nEf, deal, lista, listaComercial, porPessoa, vendaCancelada: venda?.estado === 'cancelada', valorFilhos: somaDosFilhos(familia?.pessoas), responsavel });
       const filhos = filhosAtivos(familia?.pessoas);
       return { status: 200, body: { seco: true, dealId, ...plano, estadoVenda: venda?.estado || null, familia: familia ? {
         pessoas: (familia.pessoas || []).filter((p) => !p.removida_em).length,
@@ -165,7 +187,7 @@ export async function espelharCartao(negocioId, u, extra = {}, deps) {
     }
 
     // 2) Destino do pai (o valor ainda não importa: só a coluna).
-    const destino = planejarEspelho({ n: nEf, deal, lista, listaComercial, porPessoa, vendaCancelada: venda?.estado === 'cancelada', valorFilhos: 0 });
+    const destino = planejarEspelho({ n: nEf, deal, lista, listaComercial, porPessoa, vendaCancelada: venda?.estado === 'cancelada', valorFilhos: 0, responsavel });
     if (!destino.ok) throw new Error(destino.motivo);
 
     // Venda cancelada ainda não avisada? (uma vez só — a marca fica no histórico do cartão)
@@ -191,7 +213,7 @@ export async function espelharCartao(negocioId, u, extra = {}, deps) {
 
     // 4) Só agora o PAI: desconta apenas os filhos que existem no Bitrix.
     const plano = fam
-      ? planejarEspelho({ n: nEf, deal, lista, listaComercial, porPessoa, vendaCancelada: venda?.estado === 'cancelada', valorFilhos: fam.valorNoBitrix })
+      ? planejarEspelho({ n: nEf, deal, lista, listaComercial, porPessoa, vendaCancelada: venda?.estado === 'cancelada', valorFilhos: fam.valorNoBitrix, responsavel })
       : destino;
     const { fields, etapaAlvo, preVenda, valor } = plano;
     if (Object.keys(fields).length) {
@@ -211,6 +233,10 @@ export async function espelharCartao(negocioId, u, extra = {}, deps) {
       await comentarNoNegocio(dealId, resumoDaFicha(n.ficha, parcelas));
       if (temMarcaResumo) marcas.bitrix_resumo_em = new Date().toISOString();
     }
+    // 12/11: o motivo acabou de ir pro campo → o texto inteiro que o closer escreveu vai pra timeline (uma vez).
+    if (fields[CAMPO_MOTIVO_PERDA] || fields[CAMPO_MOTIVO_DESISTENCIA]) {
+      await Promise.resolve(comentarNoNegocio(dealId, `${etapaAlvo === 'venda_cancelada' ? '⛔ Venda cancelada' : '❌ Perdido'} no QS. Motivo escrito pelo closer: ${String(nEf.motivo_perda || '').slice(0, 500)}`)).catch(() => null);
+    }
     // Pré-venda marcada/desfeita pelo botão: um recado na timeline do negócio.
     if (extra.comentario && fields.STAGE_ID && !cancelada) await comentarNoNegocio(dealId, extra.comentario(nEf, valor)).catch(() => null);
     // Venda cancelada: recado no pai (os filhos já receberam no passo 3).
@@ -224,8 +250,11 @@ export async function espelharCartao(negocioId, u, extra = {}, deps) {
       fields.STAGE_ID ? `coluna "${preVenda ? 'venda (pré-venda)' : NOME_ETAPA[etapaAlvo] || etapaAlvo}"` : '',
       fields.OPPORTUNITY !== undefined ? `valor ${brl(valor)}${plano.valorFilhos > 0 ? ` (titular; ${brl(plano.valorFilhos)} nos cards da família)` : ''}` : '',
       fields[CAMPO_TIPO_VENDA] ? 'tipo de venda' : '',
+      fields[CAMPO_MOTIVO_PERDA] || fields[CAMPO_MOTIVO_DESISTENCIA] ? 'motivo' : '',
+      fields.ASSIGNED_BY_ID ? 'responsável' : '',
     ].filter(Boolean).join(' + ')}.` : '';
-    const nota = [partesPai, notaFamilia, avisouCancelada ? `${MARCA_CANCELADA}.` : ''].filter(Boolean).join(' ') || null;
+    const avisoDono = semParNoBitrix ? 'O responsável novo não tem usuário no Bitrix com o mesmo e-mail: o dono do card lá não mudou.' : '';
+    const nota = [partesPai, notaFamilia, avisouCancelada ? `${MARCA_CANCELADA}.` : '', avisoDono].filter(Boolean).join(' ') || null;
     if (fam?.erros?.length) {
       Object.assign(marcas, {
         bitrix_status: 'erro',

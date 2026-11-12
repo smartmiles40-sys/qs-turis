@@ -11,8 +11,9 @@
 //        → reenvia os cartões com bitrix_status = 'pendente' (a reunião move
 //          o cartão no banco; é o cron que leva isso pro Bitrix) e, 1x por
 //          hora cada, os que ficaram em 'erro'. Nunca tira uma venda do Bitrix.
-//   GET  ?acao=conferir-bitrix[&escopo=todos] (Bearer CRON_SECRET) ou
-//   POST { acao: 'conferir-bitrix', escopo? } (gestão do Comercial)
+//   GET  ?acao=conferir-bitrix[&escopo=todos][&pular=N] (Bearer CRON_SECRET) ou
+//   POST { acao: 'conferir-bitrix', escopo?, pular? } (gestão do Comercial)
+//        (12/11: paginado — a resposta traz `proximo`; repita com pular=proximo até null)
 //        → MODO CONFERIR (03/11): lista o que o cron mandaria (de → pra onde,
 //          ou por que não mexe), SEM escrever nada no Bitrix nem no QS.
 //          Script: scripts/closer-bitrix-conferir.mjs. Regras e mapeamento
@@ -75,7 +76,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
-import { bx, bitrixConfigurado, comentarNoNegocio, atualizarNegocioComFunil } from './_bitrixLead.js';
+import { bx, bitrixConfigurado, comentarNoNegocio, atualizarNegocioComFunil, responsavelNoBitrix } from './_bitrixLead.js';
 import { getSupabaseUserId } from './_wa.js';
 import { NOME_ETAPA, emPreVenda, etapaParaColuna } from './_closerBitrixPlano.js';
 import { brl, espelharCartao } from './_closerEspelho.js';
@@ -127,7 +128,7 @@ async function colunasDoFunil(categoria) {
  * `u` = quem pediu; null = o cron. A execução mora em ./_closerEspelho.js.
  */
 function espelhar(negocioId, u, extra = {}) {
-  return espelharCartao(negocioId, u, extra, { rest, bx, atualizarNegocioComFunil, comentarNoNegocio, colunasDoFunil, podeMexer });
+  return espelharCartao(negocioId, u, extra, { rest, bx, atualizarNegocioComFunil, comentarNoNegocio, colunasDoFunil, podeMexer, responsavelNoBitrix });
 }
 
 /**
@@ -166,10 +167,21 @@ export async function cronBitrix() {
  * CONFERIR (03/11): o que o cron mandaria pro Bitrix, SEM mandar. Lê cada card
  * (crm.deal.get) e devolve de onde → pra onde, ou por que não mexeria.
  * escopo 'fila' (padrão) = pendentes + erro + sem_card; 'todos' = todo cartão aberto.
+ * 12/11: PAGINADO. Cada leitura no Bitrix leva ~0,5 s e a função tem 45 s; antes
+ * a 2ª chamada reconferia os MESMOS primeiros (o modo seco não muda nada) e o resto
+ * da fila nunca era visto. Agora: `pular` = quantos já foram conferidos; a resposta
+ * traz `proximo` (passe como pular na próxima chamada) até vir null.
+ * Ordem estável (criado_em, id) — o atualizado_em anda com outros gatilhos.
  */
-async function conferirBitrix(escopo = 'fila') {
+const CONFERIR_LOTE = 60;
+async function conferirBitrix(escopo = 'fila', pular = 0) {
   const filtro = escopo === 'todos' ? 'bitrix_status=in.(pendente,erro,ok,sem_card)' : 'bitrix_status=in.(pendente,erro,sem_card)';
-  const cartoes = (await rest(`qs_closer_negocios?select=id,etapa,bitrix_status,lead:qs_leads(full_name,bitrix_id),closer:qs_users!qs_closer_negocios_closer_id_fkey(name)&${filtro}&arquivado_em=is.null&order=atualizado_em.asc&limit=150`)) || [];
+  const de = Math.max(0, Math.floor(Number(pular) || 0));
+  const base = `qs_closer_negocios?${filtro}&arquivado_em=is.null`;
+  const [cartoes, contagem] = await Promise.all([
+    rest(`${base}&select=id,etapa,bitrix_status,lead:qs_leads(full_name,bitrix_id),closer:qs_users!qs_closer_negocios_closer_id_fkey(name)&order=criado_em.asc,id.asc&limit=${CONFERIR_LOTE}&offset=${de}`).then((r) => r || []),
+    rest(`${base}&select=id&limit=2000`).then((r) => (Array.isArray(r) ? r.length : null)).catch(() => null),
+  ]);
   const inicio = Date.now();
   const itens = [];
   let naoConferidos = 0;
@@ -183,13 +195,15 @@ async function conferirBitrix(escopo = 'fila') {
       ok: Boolean(b.ok), motivo: b.motivo || b.mensagem || null, de: b.de || null, para: b.para || null, campos: b.fields || {},
     });
   }
+  const proximo = naoConferidos || cartoes.length === CONFERIR_LOTE ? de + itens.length : null;
   const resumo = {
+    total: contagem, pulados: de, proximo,
     conferidos: itens.length, naoConferidos,
     enviaria: itens.filter((i) => i.envia).length,
     jaIgual: itens.filter((i) => i.ok && !i.envia).length,
     bloqueados: itens.filter((i) => !i.ok).length,
   };
-  return { seco: true, escopo, resumo, itens };
+  return { seco: true, escopo, proximo, resumo, itens };
 }
 
 /** O que está ligado no servidor (só sim/não, nunca os valores) — a tela esconde o resto. */
@@ -197,7 +211,8 @@ async function configDaArea() {
   const bitrix = bitrixConfigurado();
   let contrato = false;
   try { contrato = (await situacaoDaConfig()).falta.length === 0; } catch { contrato = false; }
-  return { contrato, bitrix };
+  // 12/11: a tela só promete "tenta de novo sozinho" se o reenvio automático estiver ligado.
+  return { contrato, bitrix, reenvioAutomatico: env('CLOSER_CRON_BITRIX_LIGADO') === '1' };
 }
 
 /**
@@ -746,8 +761,9 @@ export default async function handler(req, res) {
     const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
     if (!segredo || !segredoConfere(veio, segredo)) return res.status(401).json({ error: 'Sem autorização.' });
     if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE.' });
-    const escopo = new URL(req.url || '', 'http://x').searchParams.get('escopo') === 'todos' ? 'todos' : 'fila';
-    try { return res.status(200).json(await conferirBitrix(escopo)); }
+    const sp = new URL(req.url || '', 'http://x').searchParams;
+    const escopo = sp.get('escopo') === 'todos' ? 'todos' : 'fila';
+    try { return res.status(200).json(await conferirBitrix(escopo, sp.get('pular'))); }
     catch (e) { console.error('[closer] conferir-bitrix', e?.message); return res.status(500).json({ error: 'Falhou.' }); }
   }
 
@@ -786,7 +802,7 @@ export default async function handler(req, res) {
     if (acao === 'conferir-bitrix') {
       if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE na Vercel.' });
       if (!ehGestao(u)) return res.status(403).json({ error: 'Só a gestão do Comercial.' });
-      return res.status(200).json(await conferirBitrix(body.escopo === 'todos' ? 'todos' : 'fila'));
+      return res.status(200).json(await conferirBitrix(body.escopo === 'todos' ? 'todos' : 'fila', body.pular));
     }
     if (acao === 'espelhar') {
       if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE na Vercel.' });

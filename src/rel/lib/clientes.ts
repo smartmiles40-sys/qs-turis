@@ -213,7 +213,44 @@ export async function salvarCliente(c: ClienteInput, id?: string): Promise<Clien
     ? await supabase.from("rel_clientes").update(corpo).eq("id", id).select("*").single()
     : await supabase.from("rel_clientes").insert(corpo).select("*").single();
   if (res.error) throw new Error(mensagemDeErro(res.error));
-  return res.data as Cliente;
+  const salvo = res.data as Cliente;
+  // 0366 (12/11): sem contato no Bitrix → tenta ligar/criar agora, sem esperar a tela.
+  // Respeita o interruptor REL_PESSOA_BITRIX_LIGADO (desligado → o servidor só responde "pulado").
+  if (!salvo.bitrix_contato_id) void enviarPessoaAoBitrix(salvo.id, true).catch(() => null);
+  return salvo;
+}
+
+// ── Contato no Bitrix (0366, revisão 12/11) ─────────────────────────────────
+export interface PendenciaBitrix {
+  cliente_id: string;
+  status: "pendente" | "ok" | "falhou" | "sem_dados";
+  erro: string | null;
+  tentativas: number;
+  tentativa_em: string | null;
+  pendente_em: string | null;
+  resultado: string | null;
+  contato_id: string | null;
+}
+
+/** A linha da fila "pessoa → contato no Bitrix". null = sem linha (ou banco sem a 0366). */
+export async function pendenciaBitrix(clienteId: string): Promise<PendenciaBitrix | null> {
+  const { data, error } = await supabase.from("rel_clientes_bitrix").select("*").eq("cliente_id", clienteId).maybeSingle();
+  if (error) return null;
+  return (data ?? null) as PendenciaBitrix | null;
+}
+
+/** Procura o contato no Bitrix (CPF, telefone, e-mail) e liga; não achou, cria. automatico=true respeita o interruptor. */
+export async function enviarPessoaAoBitrix(clienteId: string, automatico = false): Promise<{ ok: boolean; status?: string; motivo?: string; contatoId?: string | null; pulado?: string }> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error("Sessão expirada. Entre de novo.");
+  const r = await fetch("/api/rel-bitrix-comentarios", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ acao: "pessoa-enviar", clienteId, automatico }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j as { error?: string }).error || `Falhou (HTTP ${r.status}).`);
+  return j as { ok: boolean; status?: string; motivo?: string; contatoId?: string | null; pulado?: string };
 }
 
 export async function buscarParecidos(c: Partial<ClienteInput>, ignorar?: string): Promise<Parecido[]> {

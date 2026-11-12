@@ -32,6 +32,7 @@ import FichaFechamento from "./FichaFechamento";
 import FichaFechamentoResumo from "./FichaFechamentoResumo";
 import ContratoBloco from "./ContratoBloco";
 import PagamentoBloco from "./PagamentoBloco";
+import AvisoBitrix from "./AvisoBitrix";
 // 28/10 (0214): a venda do closer usa a tela única de venda (src/venda/SubirVenda.tsx).
 import SubirVenda from "@/venda/SubirVenda";
 import { ListaPropostasAnexadas } from "@/venda/PropostasAnexadas";
@@ -367,20 +368,8 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
               Desde {dataBr(n.etapa_em)}. Anda sozinho com a reunião (reagendou, no-show, realizada) e com a proposta enviada.
               Aguardando emissão = venda fechada (pagamento definido).
             </p>
-            {/* Bitrix é automático (cron a cada 10 min): só aparece quando precisa de alguém. */}
-            {n.bitrix_status === "erro" && (
-              <div className="mt-2 text-[12px] space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Etiqueta tom="erro">Bitrix não atualizou</Etiqueta>
-                  <Botao variante="fantasma" disabled={ocupado} onClick={() => void rodar(async () => {
-                    const r = await espelharNoBitrix(n.id);
-                    if (!r.ok) throw new Error(r.mensagem || "O Bitrix não aceitou.");
-                  }, "Bitrix atualizado.")}>Tentar agora</Botao>
-                </div>
-                {n.bitrix_erro && <p style={{ color: "var(--err-ink)" }}>{n.bitrix_erro}</p>}
-                <p style={{ color: "var(--ink3)" }}>O QS tenta de novo sozinho a cada hora.</p>
-              </div>
-            )}
+            {/* 12/11: pendente ou erro → aviso honesto + "Enviar agora" (src/closer/AvisoBitrix.tsx). */}
+            <AvisoBitrix n={n} ocupado={ocupado} rodar={rodar} />
             {n.bitrix_status === "sem_card" && (
               <p className="text-[12px] mt-2" style={{ color: "var(--ink3)" }}>Este cliente não tem card no Bitrix: fica só no QS (o Dashboard não vê).</p>
             )}
