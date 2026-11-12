@@ -45,7 +45,7 @@ import { segredoConfere } from './_supabaseAdmin.js';
 import { bx, bitrixConfigurado } from './_bitrixLead.js';
 import {
   lerCorpo, achatar, pegar, leadDoBitrix, temIdentificador, completarPeloNegocio,
-  idDaAtividade, processarAtividade,
+  idDaAtividade, processarAtividade, juntarUtm,
 } from './_bitrixEntrada.js';
 
 export const EVENTOS = ['lead', 'resgate', 'primeiro-contato', 'atividade'];
@@ -109,7 +109,9 @@ async function eventoLead(evento, mapa, query, req, res) {
   // ONCRMDEALADD ou robô que só manda `document_id`: os dados da pessoa não
   // vêm junto. Busca no negócio, como o workflow bitrix-to-qs fazia.
   const funil = String(q1(query.funil) || '').trim();
-  if (lead.bitrix_id && (!temIdentificador(lead) || funil)) {
+  const precisaDoNegocio = Boolean(lead.bitrix_id && (!temIdentificador(lead) || funil));
+  let utmNegocio = null; // pro log: o negócio tinha UTM? (null = não foi lido)
+  if (precisaDoNegocio) {
     if (!bitrixConfigurado()) {
       return res.status(503).json({ ok: false, error: 'BITRIX_WEBHOOK_BASE não configurado — não dá pra ler o negócio' });
     }
@@ -120,8 +122,33 @@ async function eventoLead(evento, mapa, query, req, res) {
     if (funil && String(achado.deal.CATEGORY_ID ?? '') !== funil) {
       return res.status(200).json({ ok: true, ignorado: true, motivo: 'outro_funil', funil: String(achado.deal.CATEGORY_ID ?? '') });
     }
-    for (const [k, v] of Object.entries(achado.campos)) if (lead[k] == null) lead[k] = v;
+    const { utm_source, utm_medium, utm_campaign, utm_content, utm_term, ...pessoa } = achado.campos;
+    for (const [k, v] of Object.entries(pessoa)) if (lead[k] == null) lead[k] = v;
+    utmNegocio = { utm_source, utm_medium, utm_campaign, utm_content, utm_term };
+  } else if (lead.bitrix_id && bitrixConfigurado()) {
+    // UTM SEMPRE (12/11/2026): 1.021 de 1.022 leads de 30 dias chegaram sem UTM
+    // porque o negócio só era lido quando faltava nome/telefone ou com &funil=.
+    // Agora toda entrada com negócio lê o negócio UMA vez (só o deal, sem o
+    // contato — a pessoa já veio na URL). Best-effort: falhar aqui não pode
+    // impedir o lead de entrar.
+    try {
+      const achado = await completarPeloNegocio(lead.bitrix_id, bx, { semContato: true });
+      if (achado) {
+        const c = achado.campos;
+        utmNegocio = { utm_source: c.utm_source, utm_medium: c.utm_medium, utm_campaign: c.utm_campaign, utm_content: c.utm_content, utm_term: c.utm_term };
+      }
+    } catch (e) {
+      console.warn('[bitrix-entrada] leitura das UTMs do negócio falhou (segue sem):', e?.bitrix || '', String(e?.message || '').slice(0, 120));
+    }
   }
+  // A UTM boa que veio pela URL não é sobrescrita; o negócio completa o resto.
+  const origemUtm = juntarUtm(lead, utmNegocio);
+  // Log sem PII: diz, em um dia de produção, se o problema é do QS ou se a UTM
+  // nem chega ao negócio do Bitrix (negocio_com_utm=nao em todo lead pago).
+  try {
+    const temNoNegocio = utmNegocio ? Object.values(utmNegocio).some(Boolean) : null;
+    console.log(`[bitrix-entrada] utm | negocio_lido=${utmNegocio ? 'sim' : 'nao'} negocio_com_utm=${temNoNegocio == null ? '-' : temNoNegocio ? 'sim' : 'nao'} origem=${JSON.stringify(origemUtm)}`);
+  } catch { /* ignora */ }
 
   if (!temIdentificador(lead)) {
     return res.status(400).json({

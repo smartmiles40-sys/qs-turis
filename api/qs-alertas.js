@@ -12,7 +12,10 @@
 //      partir das 8h30, pra não acusar o silêncio da madrugada);
 //   d) cartões do closer com bitrix_status='pendente' criados há > 24h, acima de 20;
 //   e) gravações achadas (gravacao_status='achada') que não foram pro Bitrix
-//      (bitrix_gravacao_em nulo) há > 1 dia — aviso baixo.
+//      (bitrix_gravacao_em nulo) há > 1 dia — aviso baixo;
+//   f) leads abertos (nao_iniciado/em_prospeccao, criados há > 1 h) SEM NENHUMA
+//      tarefa pendente/atrasada — somem da fila do SDR (12/11/2026: 224, dos
+//      quais 181 parados atrás de cadência congelada) — aviso baixo.
 //
 // Canal: o sininho do QS (qs_avisos via rpc qs_aviso_criar, o mesmo dos avisos de
 // prazo/reunião). Dedupe: cada alerta no máximo 1x a cada 6h (aviso baixo: 24h);
@@ -155,6 +158,32 @@ export function regraGravacoes(qtd) {
   };
 }
 
+/**
+ * f) leads abertos sem nenhuma atividade pendente (aviso baixo).
+ * `leads` = [{ id, cadence_id }] abertos; `comTarefa` = Set de lead_id com
+ * tarefa aberta; `cadAtiva` = Set de cadências "disponivel".
+ */
+export function regraLeadsSemAtividade(leads, comTarefa, cadAtiva) {
+  const sem = leads.filter((l) => !comTarefa.has(l.id));
+  if (!sem.length) return { qtd: 0, semCadencia: 0, cadenciaPausada: 0, cadenciaAtiva: 0, alerta: null };
+  const semCadencia = sem.filter((l) => !l.cadence_id).length;
+  const cadenciaAtiva = sem.filter((l) => l.cadence_id && cadAtiva.has(l.cadence_id)).length;
+  const cadenciaPausada = sem.length - semCadencia - cadenciaAtiva;
+  const partes = [];
+  if (cadenciaAtiva) partes.push(`${cadenciaAtiva} em cadência ativa que terminou`);
+  if (cadenciaPausada) partes.push(`${cadenciaPausada} em cadência congelada/rascunho`);
+  if (semCadencia) partes.push(`${semCadencia} sem cadência`);
+  return {
+    qtd: sem.length, semCadencia, cadenciaPausada, cadenciaAtiva,
+    alerta: {
+      id: 'leads_sem_atividade',
+      nivel: 'baixo',
+      titulo: 'Leads abertos sem nenhuma atividade',
+      texto: `${sem.length} lead(s) aberto(s) sem nenhuma tarefa pendente — não aparecem na fila de ninguém (${partes.join(', ')}).`,
+    },
+  };
+}
+
 /** Dedupe: devolve os alertas que podem sair agora e o estado novo. */
 export function filtrarDedupe(alertas, estado, agoraMs) {
   const base = estado && typeof estado === 'object' && !Array.isArray(estado) ? estado : {};
@@ -227,6 +256,18 @@ async function checarGravacoes(agoraMs) {
   return { dados: { gravacoes: qtd }, alerta: regraGravacoes(qtd) };
 }
 
+async function checarLeadsSemAtividade(agoraMs) {
+  // Lead que acabou de entrar ainda pode estar ganhando o plano: 1 h de folga.
+  const leads = await listarTudo(
+    `qs_leads?select=id,cadence_id&status=in.(nao_iniciado,em_prospeccao)&created_at=lt.${iso(agoraMs - HORA)}`, 'id.asc');
+  const tarefas = await listarTudo('qs_tasks?select=id,lead_id&status=in.(pendente,atrasada)', 'id.asc');
+  const cads = await rest('qs_cadences?select=id&status=eq.disponivel');
+  const r = regraLeadsSemAtividade(
+    leads, new Set(tarefas.map((t) => t.lead_id)), new Set((cads || []).map((c) => c.id)));
+  const { alerta, ...dados } = r;
+  return { dados, alerta };
+}
+
 // ---------------------------------------------------------------- envio
 
 async function destinatarios() {
@@ -277,6 +318,7 @@ const CHECAGENS = {
   whatsapp_parado: checarPulso,
   closer_pendente: checarCloser,
   gravacoes_sem_bitrix: checarGravacoes,
+  leads_sem_atividade: checarLeadsSemAtividade,
 };
 
 export default async function handler(req, res) {
