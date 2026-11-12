@@ -3,6 +3,8 @@ import { supabase } from "@/lib/supabase";
 import { useQsAuth, canSeeAllData, podeExecutar } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
 import ImportarListaCsv from "./ImportarListaCsv";
+import SeloCardBitrix from "./SeloCardBitrix";
+import { criarCardNoBitrix, type LeadComCardBitrix } from "./cardBitrix";
 import type {
   Lead,
   LeadStatus,
@@ -152,7 +154,6 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   // (Bruno, 09/09). Guardada em estado porque o caminho do DUPLICADO ("Cadastrar
   // mesmo assim") é um segundo clique, noutro botão: sem lembrar o que a pessoa
   // escolheu, o lead forçado ia sempre pro caminho errado, calado.
-  const [criarNoBitrix, setCriarNoBitrix] = useState(false);
   const isManager = currentUser?.role === "admin" || currentUser?.role === "gestor";
 
   // ── Filtros (vão pro banco) ──
@@ -338,40 +339,13 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
     return { ok: true, dup: hit ? { id: hit.id, name: hit.full_name, ownerName: hit.owner?.name ?? null } : null };
   }
 
-  /**
-   * Abre o negócio no Bitrix para um lead que ACABOU de nascer no QS.
-   *
-   * O trabalho é o mesmo que o webhook e o WhatsApp já faziam sozinhos
-   * (`vincularLeadAoBitrix`): mesmo funil, mesma etapa, mesmo casamento de
-   * contato por telefone. O cadastro manual era o único caminho sem essa perna.
-   *
-   * NÃO desfaz o lead se falhar: o cadastro no QS já está feito e é o que
-   * importa. Devolve o erro pra tela poder dizer a verdade — "o lead entrou, o
-   * card não" — em vez de um sucesso que esconde metade do serviço.
-   */
-  async function abrirNegocioNoBitrix(leadId: string): Promise<{ ok: boolean; error?: string }> {
-    try {
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      const { data } = await supabase.auth.getSession();
-      if (data.session?.access_token) headers["Authorization"] = `Bearer ${data.session.access_token}`;
-      const res = await fetch("/api/lead-bitrix", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ lead_id: leadId, criar: true }),
-      });
-      const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!res.ok || !json?.ok) return { ok: false, error: json?.error ?? `O Bitrix recusou (HTTP ${res.status}).` };
-      return { ok: true };
-    } catch {
-      return { ok: false, error: "Sem conexão com o servidor do QS." };
-    }
-  }
+  // (12/11) O negócio no Bitrix é aberto por criarCardNoBitrix (./cardBitrix):
+  // mesmo caminho do "Tentar agora" da ficha — procura o negócio pelo telefone
+  // antes de criar e, se falhar, deixa o lead PENDENTE pra rotina tentar de novo.
 
   // `force` = "Cadastrar mesmo assim" (só gestor/admin) pulando a checagem.
-  // `bitrix` = qual dos dois botões de cadastro foi clicado; quando não vem,
-  // vale a última escolha (o caminho do duplicado).
-  async function handleCreateLead(force = false, bitrix?: boolean) {
-    const comBitrix = bitrix ?? criarNoBitrix;
+  // (12/11) Não existe mais "Cadastrar só no QS": todo lead nasce no Bitrix.
+  async function handleCreateLead(force = false) {
     if (!formFirstName.trim() || !currentUser) return;
     setSaving(true);
     if (!force) {
@@ -421,24 +395,17 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
       const finalOwner = users.find((u) => u.id === inserted.owner_id)?.name;
       const dono = finalOwner && inserted.owner_id !== currentUser.id ? ` — responsável: ${finalOwner}` : "";
 
-      // O card do Bitrix, quando foi isso que a pessoa pediu. É esperado (e não
-      // fire-and-forget) porque ela CLICOU nisso: se falhar, ela precisa saber
-      // agora, e não descobrir daqui a uma semana que o comercial nunca viu o
-      // cliente. O lead já está salvo de qualquer forma.
-      let avisoBitrix = "";
-      if (comBitrix) {
-        const r = await abrirNegocioNoBitrix(inserted.id);
-        if (r.ok) {
-          avisoBitrix = " e o negócio foi aberto no Bitrix";
-        } else {
-          notifyError(
-            `Lead ${fullName} foi salvo no QS, mas o negócio NÃO foi criado no Bitrix: ${r.error} ` +
-            `Dá pra tentar de novo pelo perfil do lead.`
-          );
-        }
-      }
-      if (!comBitrix || avisoBitrix) {
-        notifySuccess(`Lead ${fullName} cadastrado${avisoBitrix}${dono}.`);
+      // O card do Bitrix (12/11: sempre — "todo card do QS nasce no Bitrix").
+      // Esperado, não fire-and-forget: se falhar, a pessoa sabe agora. O lead
+      // já está salvo e fica PENDENTE (selo na ficha + nova tentativa).
+      const r = await criarCardNoBitrix(inserted.id);
+      if (r.ok) {
+        notifySuccess(`Lead ${fullName} cadastrado e com card no Bitrix${dono}.`);
+      } else {
+        notifyError(
+          `Lead ${fullName} foi salvo no QS, mas o card NÃO foi criado no Bitrix: ${r.error} ` +
+          `Ficou pendente — o QS tenta de novo, e dá pra clicar em "Tentar agora" na ficha.`
+        );
       }
 
       await recarregarTudo();
@@ -1175,6 +1142,17 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                           {lead.company_name ?? "\u2014"}
                           {lead.bitrix_id && <span className="ml-2 text-gray-400 tabular-nums">\u00b7 ID {lead.bitrix_id}</span>}
                         </p>
+                        {/* Sem card no Bitrix (12/11, 0362): pendência visível na lista. */}
+                        {!lead.bitrix_id && (
+                          <div className="mt-1">
+                            <SeloCardBitrix
+                              lead={lead as LeadComCardBitrix}
+                              variante="lista"
+                              podeTentar={!!currentUser && (isManager || currentUser.role === "closer" || lead.owner_id === currentUser.id || lead.owner_id == null)}
+                              onMudou={() => void recarregarTudo()}
+                            />
+                          </div>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -1474,12 +1452,10 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
               </div>
             )}
 
-            {/* DOIS BOTÕES, NENHUM PADRÃO ESCONDIDO (Bruno, 09/09).
-                O cadastro manual nascia só no QS — o comercial não via o cliente
-                no funil, e ninguém sabia disso porque a tela não perguntava
-                nada. Agora a escolha é do momento do cadastro e está escrita nos
-                dois botões: quem manda o lead pro Bitrix é quem cadastrou, não
-                uma regra invisível. */}
+            {/* UM BOTÃO SÓ (12/11/2026). Até aqui havia "Cadastrar só no QS" ao
+                lado de "Cadastrar e criar no Bitrix" (09/09). A diretriz mudou:
+                todo lead do QS nasce no Bitrix. Se o Bitrix falhar, o lead fica
+                pendente e o QS tenta de novo. */}
             <div className="mt-6 pt-4 border-t border-gray-100">
               <div className="flex flex-wrap items-center justify-end gap-3">
                 <button
@@ -1489,24 +1465,17 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   Cancelar
                 </button>
                 <button
-                  // Arrow de propósito: handleCreateLead(force?, bitrix?) — o
-                  // evento do clique NÃO pode entrar como "force".
-                  onClick={() => { setCriarNoBitrix(false); void handleCreateLead(false, false); }}
-                  disabled={saving || !formFirstName.trim()}
-                  className="px-4 py-2 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                >
-                  {saving ? "Salvando..." : "Cadastrar só no QS"}
-                </button>
-                <button
-                  onClick={() => { setCriarNoBitrix(true); void handleCreateLead(false, true); }}
+                  // Arrow de propósito: handleCreateLead(force?) — o evento do
+                  // clique NÃO pode entrar como "force".
+                  onClick={() => { void handleCreateLead(false); }}
                   disabled={saving || !formFirstName.trim()}
                   className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
                 >
-                  {saving ? "Salvando..." : "Cadastrar e criar no Bitrix"}
+                  {saving ? "Salvando..." : "Cadastrar"}
                 </button>
               </div>
               <p className="mt-2 text-right text-[11.5px] text-gray-400">
-                "Criar no Bitrix" abre o negócio no funil de Pré-Vendas, com o dono do lead como responsável.
+                O lead também ganha card no Bitrix (funil de Pré-Vendas, com o dono do lead como responsável).
               </p>
             </div>
           </div>

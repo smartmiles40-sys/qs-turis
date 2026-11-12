@@ -8,6 +8,7 @@
 import { rest, insert } from './_supabaseAdmin.js';
 import { findLeadByPhone } from './_wa.js';
 import { vincularLeadAoBitrix } from './_bitrixLead.js';
+import { marcarFalha } from './_leadCardBitrix.js';
 
 // ─── HORÁRIO DE TRABALHO (verdade absoluta do agendamento) ───────────────────
 // Espelho do src/lib/workHours.ts — o mesmo runtime não deixa importar TS aqui.
@@ -419,8 +420,12 @@ export async function createInboundLead(payload, opts = {}) {
   // Duas consequências que o modo assume de propósito:
   //   • o mesmo telefone passa a existir em dois cards (o antigo e o de
   //     resgate). É o preço de separar as frentes, e foi escolhido.
-  //   • nada é criado no Bitrix (ver o bloco de vinculação lá embaixo): a lista
-  //     de resgate não abre negócio novo no funil.
+  //   • (até 12/11) nada era criado no Bitrix. Desde a diretriz "todo card do
+  //     QS nasce no Bitrix", o card de resgate nasce PENDENTE (gatilho da 0362)
+  //     e a rotina de nova tentativa (api/_leadCardBitrix.js) cria o negócio —
+  //     reaproveitando o CONTATO que já existe lá. Não é síncrono aqui de
+  //     propósito: uma carga de resgate são centenas de chamadas seguidas, e a
+  //     rotina drena em lotes pequenos respeitando o limite do Bitrix.
   const cardProprio = !!opts.cardProprio;
 
   // 0) Dedupe por bitrix_id (defensivo: se a coluna ainda não existir no banco,
@@ -674,9 +679,10 @@ export async function createInboundLead(payload, opts = {}) {
   // QS: com dono e cadência aqui, invisíveis pro comercial lá. Agora o negócio
   // é criado no mesmo instante, no funil de Pré-Vendas, com o dono do QS como
   // responsável. Best-effort: Bitrix fora não impede o lead de entrar.
-  // cardProprio NÃO abre negócio: a lista de resgate trabalha gente que já tem
-  // (ou já teve) card no Bitrix. Criar de novo encheria o funil de Pré-Vendas
-  // de duplicatas e estragaria a contagem do comercial.
+  // cardProprio (resgate &duplicar=1) não abre negócio AQUI: o card nasce
+  // PENDENTE (gatilho da 0362) e a rotina de nova tentativa cria em lote
+  // pequeno, procurando antes o contato pelo telefone — ver o comentário do
+  // cardProprio lá em cima.
   // `opts.semBitrix` (08/09): o negócio JÁ existe e foi criado por outra ponta.
   // É o caso do autoagendamento embutido nos formulários de live: o
   // /api/save-lead do STFV Forms cria contato + negócio no Bitrix ANTES de a
@@ -688,7 +694,13 @@ export async function createInboundLead(payload, opts = {}) {
   // Por que isto é uma flag e não o `bitrix_id` de verdade: o id viria do
   // NAVEGADOR, e id de negócio é inteiro sequencial — quem chutasse um id
   // existente sobrescreveria nome e telefone do lead alheio. Mentir na flag só
-  // deixa a própria pessoa sem card, o que não é ataque.
+  // deixa a própria pessoa sem card, o que não é ataque. (12/11: o lead
+  // semBitrix nasce PENDENTE pelo gatilho da 0362; se o webhook não adotar, a
+  // rotina de nova tentativa ACHA o negócio pelo telefone e vincula.)
+  //
+  // FALHA = PENDÊNCIA VISÍVEL (12/11/2026). Antes o erro ia só pro log e o lead
+  // ficava sem card pra sempre. Agora a falha fica gravada no lead (selo na
+  // ficha, alerta da gestão) e a rotina tenta de novo com recuo.
   if (lead && !bitrixId && !cardProprio && !opts.semBitrix) {
     try {
       // `bitrixContatoId`: quem já perguntou ao Bitrix (o wa-webhook) achou o
@@ -699,9 +711,15 @@ export async function createInboundLead(payload, opts = {}) {
       const novoId = await vincularLeadAoBitrix({
         ...lead, ...utmDoPayload(payload), owner_id: finalOwner, bitrix_contato_id: opts.bitrixContatoId || null,
       });
-      if (novoId) lead.bitrix_id = novoId;
+      if (novoId) {
+        lead.bitrix_id = novoId;
+      } else {
+        console.warn(`[leads] lead ${lead.id} entrou sem card no Bitrix — ficou pendente pra nova tentativa`);
+        await marcarFalha(lead.id, 'o Bitrix não criou o negócio na entrada do lead (fora do ar, recusou ou integração desligada)', 0);
+      }
     } catch (e) {
       console.warn('[leads] criação no Bitrix falhou (o lead entrou mesmo assim):', e?.message);
+      await marcarFalha(lead.id, `erro ao criar no Bitrix na entrada do lead: ${e?.message || e}`, 0);
     }
   }
 

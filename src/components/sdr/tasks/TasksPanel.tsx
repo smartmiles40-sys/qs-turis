@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
 import { createMeeting, avisarBitrixDaSala, transferirLeadProCloser, vincularCardAoBitrix, somenteDigitos } from "@/lib/qs/meetings";
 import CampoBitrixId from "@/components/sdr/agenda/CampoBitrixId";
+import { criarCardNoBitrix } from "@/components/sdr/leads/cardBitrix";
 import { fetchClosers, fetchCloserConfigs, configFor, validarHorario } from "@/lib/qs/closerAgenda";
 import { getSetting } from "@/lib/qsSettings";
 import AgendaMiniatura from "@/components/sdr/agenda/AgendaMiniatura";
@@ -5323,10 +5324,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                       setTasks(prev => [...prev, ...createdTasks]);
                     }
                   }
+                  // Card no Bitrix (12/11/2026): todo lead do QS nasce no Bitrix.
+                  // Falhou → o lead fica PENDENTE (selo na ficha + nova tentativa).
+                  const card = await criarCardNoBitrix(inserted.id);
                   setSavingLead(false);
                   setShowNewLeadModal(false);
                   setNewLead({ full_name: "", phone: "", email: "", company_name: "", owner_id: currentUser?.id ?? "", cadence_id: "", notes: "" });
-                  showToast(`Lead cadastrado — ${inserted.full_name ?? ""}`);
+                  if (card.ok) {
+                    showToast(`Lead cadastrado e com card no Bitrix — ${inserted.full_name ?? ""}`);
+                  } else {
+                    notifyError(`Lead ${inserted.full_name ?? ""} cadastrado, mas o card no Bitrix NÃO foi criado: ${card.error ?? "erro desconhecido"} Ficou pendente — dá pra clicar em "Tentar agora" na ficha.`);
+                  }
                   // refreshQueue: paginado e escopado por papel. O select('*')
                   // seco que ficava aqui cortava em 1.000 (base tem 1.398) e
                   // REGREDIA o leadsMap carregado pelo fetchQueueLeads — pílula

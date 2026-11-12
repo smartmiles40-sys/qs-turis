@@ -1,6 +1,8 @@
 // api/leads-sem-card.js
 // -----------------------------------------------------------------------------
 // CONSERTA O PASSADO: lead que TEM reunião e NÃO tem número de card no QS.
+// (12/11: também a ROTINA de nova tentativa do card do lead — ?acao=retentar /
+//  ?acao=simular, ver o bloco no começo do handler.)
 //
 //   GET  /api/leads-sem-card                 → só LISTA (não escreve nada)
 //   POST /api/leads-sem-card?aplicar=1       → grava o vínculo onde tem certeza
@@ -29,6 +31,7 @@
 // -----------------------------------------------------------------------------
 import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { procurarNegocioPorTelefone, bitrixConfigurado } from './_bitrixLead.js';
+import { rodadaRetentativa } from './_leadCardBitrix.js';
 
 /** Quanto tempo entre o card e a reunião ainda conta como "o mesmo evento". */
 const JANELA_MS = 48 * 60 * 60 * 1000;
@@ -42,8 +45,47 @@ const JANELA_MS = 48 * 60 * 60 * 1000;
  */
 const ORCAMENTO_MS = 8000;
 
+/** Bearer CRON_SECRET (o que o Cron da Vercel manda) ou x-lead-secret. */
+function autorizadoParaRotina(req) {
+  const cron = String(process.env.CRON_SECRET || '').trim();
+  const veio = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '').trim();
+  if (cron && segredoConfere(veio, cron)) return true;
+  const lead = process.env.LEAD_INBOUND_SECRET;
+  return !!lead && segredoConfere(req.headers?.['x-lead-secret'], lead);
+}
+
+const sim = (v) => v === '1' || v === 'true';
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
+
+  // ── CARD DO LEAD NO BITRIX: NOVA TENTATIVA (12/11/2026, 0362) ──────────────
+  //   GET ?acao=retentar   (Cron da Vercel, Bearer CRON_SECRET, a cada 10 min)
+  //       → cria/vincula o card dos leads PENDENTES — lote de 5. Só envia com
+  //         LEADS_BITRIX_RETENTATIVA_LIGADA=1; desligada, só conta a fila.
+  //   GET ?acao=simular[&consultar=1][&perdidos=1][&limite=N][&offset=N]
+  //       → MODO SIMULAÇÃO: lista a fila e o que a rotina faria, SEM gravar
+  //         nada. consultar=1 faz só LEITURAS no Bitrix (busca por telefone).
+  //         Perdidos ficam de fora, a não ser com perdidos=1.
+  // Regras: api/_leadCardBitrix.js.
+  const acao = String(req.query?.acao || '');
+  if (acao === 'retentar' || acao === 'simular') {
+    if (!autorizadoParaRotina(req)) return res.status(401).json({ ok: false, error: 'Não autorizado' });
+    try {
+      const r = await rodadaRetentativa({
+        seco: acao === 'simular',
+        consultar: sim(req.query?.consultar),
+        perdidos: sim(req.query?.perdidos),
+        limite: req.query?.limite,
+        offset: req.query?.offset,
+      });
+      if (acao === 'retentar') console.log(`[lead-card] rodada: ${JSON.stringify({ ...r, detalhes: undefined })}`);
+      return res.status(200).json({ ok: true, ...r });
+    } catch (e) {
+      console.error('[lead-card] rodada falhou:', e?.message);
+      return res.status(502).json({ ok: false, error: String(e?.message || 'falhou').slice(0, 300) });
+    }
+  }
 
   const secret = process.env.LEAD_INBOUND_SECRET;
   if (!secret) return res.status(500).json({ ok: false, error: 'LEAD_INBOUND_SECRET não configurado' });

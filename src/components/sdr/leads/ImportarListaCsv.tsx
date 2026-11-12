@@ -21,6 +21,12 @@ import type { Cadence, LeadSource, LeadStatus, SdrUser } from "../types";
 //
 // A "lista" é a CADÊNCIA (mesma ideia do webhook ?lista=): escolher a cadência
 // cria as atividades e é por ela que a lista aparece nos filtros.
+//
+// CARD NO BITRIX (12/11/2026): todo lead do QS nasce no Bitrix. Aqui NÃO se
+// chama o Bitrix linha a linha (uma planilha de 300 viraria 300 chamadas
+// seguidas e estouraria o limite de lá): cada lead entra PENDENTE (gatilho da
+// migration 0362) e a rotina de nova tentativa do servidor cria os cards em
+// lotes pequenos — procurando antes o negócio pelo telefone, pra não duplicar.
 
 type Campo = "nome" | "sobrenome" | "telefone" | "email" | "cidade" | "estado" | "empresa" | "segmento";
 
@@ -412,7 +418,8 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
       if (semAtividade > 0) notifyError(`${semAtividade} lead(s) entraram SEM atividades. Vincule a cadência deles de novo.`);
       if (ok > 0) {
         const esp = alocador?.espalhados() ?? 0;
-        notifySuccess(`${ok} lead(s) importados.` + (esp > 0 ? ` ${esp} começam nos próximos dias (teto de leads novos por dia da cadência).` : ""));
+        notifySuccess(`${ok} lead(s) importados.` + (esp > 0 ? ` ${esp} começam nos próximos dias (teto de leads novos por dia da cadência).` : "") +
+          " Os cards no Bitrix são criados aos poucos, automaticamente.");
       }
       setResultado({ ok, falhas, semAtividade, porSdr });
       await onImported();
@@ -456,6 +463,11 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
         {resultado ? (
           <div className="text-center py-6">
             <p className="text-lg font-semibold text-gray-900 mb-1">{resultado.ok} lead{resultado.ok !== 1 ? "s" : ""} importado{resultado.ok !== 1 ? "s" : ""}</p>
+            {resultado.ok > 0 && (
+              <p className="text-sm text-gray-500 mb-2">
+                Os cards no Bitrix são criados aos poucos, automaticamente. Até lá, cada lead mostra o selo "Sem card no Bitrix".
+              </p>
+            )}
             {(resultado.falhas > 0 || resultado.semAtividade > 0) && (
               <p className="text-sm text-red-600 mb-2">
                 {resultado.falhas > 0 && <>{resultado.falhas} não entraram. </>}
