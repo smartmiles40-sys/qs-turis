@@ -29,6 +29,7 @@
 import { rest } from './_supabaseAdmin.js';
 import { guardarMidia, rotuloDaMidia } from './_waMidia.js';
 import { INSTANCIA, evo, ehGrupo } from './_relGruposEvo.js';
+import { contextoDoEvento, grupoCitadoDoEvento } from './_relGruposLer.js';
 
 const MAX_MIDIA = 16 * 1024 * 1024;
 
@@ -69,13 +70,8 @@ export function variantesBr(d) {
   return [d];
 }
 
-/** contextInfo: a Evolution põe no topo (d.contextInfo) e o Baileys dentro da mensagem. */
-function contextoDe(d) {
-  if (d?.contextInfo && (d.contextInfo.stanzaId || d.contextInfo.remoteJid)) return d.contextInfo;
-  const m = d?.message || {};
-  for (const v of Object.values(m)) if (v && typeof v === 'object' && v.contextInfo?.stanzaId) return v.contextInfo;
-  return d?.contextInfo || null;
-}
+/** contextInfo: a Evolution põe no topo (d.contextInfo) e o Baileys dentro da mensagem (api/_relGruposLer.js). */
+const contextoDe = (d) => contextoDoEvento(d);
 
 /** Partes da mensagem do Baileys que não são conteúdo (não viram bolha). */
 const SEM_BOLHA = new Set([
@@ -85,9 +81,6 @@ const SEM_BOLHA = new Set([
   'base64', 'mediaUrl',
   'templateMessage', // anúncio de outra empresa pro número do Rel (o modelo que o Rel manda vem pela Meta)
 ]);
-
-const textoCitado = (q) => q?.conversation || q?.extendedTextMessage?.text || q?.imageMessage?.caption || q?.videoMessage?.caption
-  || (q?.imageMessage ? '📷 foto' : q?.videoMessage ? '🎬 vídeo' : q?.audioMessage ? '🎤 áudio' : q?.documentMessage ? '📎 arquivo' : '');
 
 /**
  * Uma mensagem 1:1 da Evolution → o que o QS grava. null = não é conversa com
@@ -147,9 +140,7 @@ export function lerPrivado(d) {
   if (!tipo) return null; // reação, voto de enquete, chaves de criptografia, protocolo…
 
   const ctx = contextoDe(d);
-  const grupoCitado = ctx && ehGrupo(ctx.remoteJid)
-    ? { jid: String(ctx.remoteJid), msg_id: ctx.stanzaId || null, autor: ctx.participant || null, texto: textoCitado(ctx.quotedMessage).slice(0, 300) }
-    : null;
+  const grupoCitado = grupoCitadoDoEvento(d);
   const ts = Number(d.messageTimestamp);
   const alt = [key.remoteJidAlt, key.senderPn].map((x) => String(x || '')).find((x) => x.endsWith('@s.whatsapp.net')) || '';
   return {
@@ -210,12 +201,15 @@ async function conversaDe(phoneId, fone) {
   return (await rest(`rel_wa_conversas?select=id,telefone,ultima_entrada_em,ultima_saida_em&phone_number_id=eq.${encodeURIComponent(phoneId)}&telefone=in.(${lista})&order=ultima_entrada_em.desc.nullslast&limit=1`))?.[0] || null;
 }
 
+/** O aviso que a entrada da Meta grava quando ela não repassa o conteúdo (api/_metaEntrada.js). */
+export const ehAvisoDaMeta = (t) => /^⚠️ Mensagem( do tipo "[^"]*")? que o WhatsApp não repassa ao sistema/.test(String(t || ''));
+
 /** As mensagens da conversa perto da hora (pra achar a cópia da Meta e a citada). */
 async function vizinhas(conversaId, quando) {
   const t = new Date(quando).getTime();
   const de = new Date(t - 2 * 86400_000).toISOString();
   const ate = new Date(t + 2 * 86400_000).toISOString();
-  return (await rest(`rel_wa_mensagens?select=id,wamid,via,grupo_citado&conversa_id=eq.${conversaId}&enviada_em=gte.${de}&enviada_em=lte.${ate}&limit=1000`).catch(async () =>
+  return (await rest(`rel_wa_mensagens?select=id,wamid,via,grupo_citado,texto&conversa_id=eq.${conversaId}&enviada_em=gte.${de}&enviada_em=lte.${ate}&limit=1000`).catch(async () =>
     rest(`rel_wa_mensagens?select=id,wamid&conversa_id=eq.${conversaId}&enviada_em=gte.${de}&enviada_em=lte.${ate}&limit=1000`))) || [];
 }
 
@@ -265,10 +259,14 @@ export async function gravarPrivado(d, { baixar = true, seco = false } = {}) {
   const msgs = conv ? await vizinhas(conv.id, p.quando) : [];
   const ja = msgs.find((m) => chaveDoWamid(m.wamid) === p.id);
   if (ja) {
+    const extra = {};
     // A Meta não diz que era resposta a um GRUPO; a Evolution diz. Completa a linha.
-    if (p.grupoCitado && com0231 && !ja.grupo_citado && !seco) {
-      const g = { ...p.grupoCitado, nome: await nomeDoGrupo(p.grupoCitado.jid) };
-      await rest(`rel_wa_mensagens?id=eq.${ja.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { grupo_citado: g } }).catch(() => null);
+    if (p.grupoCitado && com0231 && !ja.grupo_citado) extra.grupo_citado = { ...p.grupoCitado, nome: await nomeDoGrupo(p.grupoCitado.jid) };
+    // 11/11: a Meta às vezes entrega só o aviso "tipo unknown que o WhatsApp não
+    // repassa" — a Evolution tem o conteúdo de verdade: troca o aviso pelo texto.
+    if (ehAvisoDaMeta(ja.texto) && p.texto && !p.midia && !p.texto.startsWith('⚠️')) extra.texto = p.texto;
+    if (Object.keys(extra).length && !seco) {
+      await rest(`rel_wa_mensagens?id=eq.${ja.id}`, { method: 'PATCH', prefer: 'return=minimal', body: extra }).catch(() => null);
       return { r: 'enriquecida', p, telefone };
     }
     return { r: 'repetida', p, telefone };
@@ -323,10 +321,11 @@ export async function varrerPrivado({ desde, ate = new Date(Date.now() - 2 * 60_
   const achadas = [];
   // As chaves que o banco já tem na janela (uma consulta só, em vez de duas por mensagem).
   const conhecidas = new Set();
+  const comAviso = new Set(); // a Meta só deu o aviso "não repassa" → a Evolution pode ter o texto
   const de = new Date(new Date(desde).getTime() - 30 * 60_000).toISOString();
   for (let off = 0; ; off += 1000) {
-    const lote = await rest(`rel_wa_mensagens?select=wamid&enviada_em=gte.${de}&order=enviada_em.asc,id.asc&offset=${off}&limit=1000`);
-    for (const m of lote || []) { const k = chaveDoWamid(m.wamid); if (k) conhecidas.add(k); }
+    const lote = await rest(`rel_wa_mensagens?select=wamid,texto&enviada_em=gte.${de}&order=enviada_em.asc,id.asc&offset=${off}&limit=1000`);
+    for (const m of lote || []) { const k = chaveDoWamid(m.wamid); if (k) { conhecidas.add(k); if (ehAvisoDaMeta(m.texto)) comAviso.add(k); } }
     if (!lote || lote.length < 1000) break;
   }
   for (let page = 1; page <= maxPaginas; page++) {
@@ -340,8 +339,9 @@ export async function varrerPrivado({ desde, ate = new Date(Date.now() - 2 * 60_
       conta.lidas++;
       if (ehGrupo(d?.key?.remoteJid) || !ehPessoa(d?.key?.remoteJid)) continue;
       conta.pessoas++;
-      // já está no banco e não traz citação de grupo pra completar → nada a fazer
-      if (conhecidas.has(String(d?.key?.id)) && !lerPrivado(d)?.grupoCitado) { conta.repetida++; continue; }
+      // já está no banco e não traz nada pra completar (citação de grupo / texto no lugar do aviso da Meta) → nada a fazer
+      const chave = String(d?.key?.id);
+      if (conhecidas.has(chave) && !comAviso.has(chave) && !lerPrivado(d)?.grupoCitado) { conta.repetida++; continue; }
       if (Date.now() > prazo) { conta.cortou = true; break; }
       try {
         const g = await gravarPrivado(d, { seco, baixar });

@@ -24,6 +24,10 @@
 // situação e vai no endereço (#rel/viagens?tipo=pacote). Em Pacotes, embaixo,
 // os pacotes cadastrados como expedição (abrem o cockpit). O item "Pacotes" do
 // menu saiu; #rel/exp-pacotes sem id cai aqui.
+//
+// 11/11 (Bruno): duas visões novas — CHECK-INS (só aéreo, em ordem de abertura
+// do check-in) e SERVIÇOS (cada serviço separado por tipo, com as ações do
+// cliente por data/hora: check-in/out do hotel, passeio, transfer, voo…).
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
@@ -40,6 +44,8 @@ import PainelViagens from "./PainelViagens";
 import CalendarioViagens from "./CalendarioViagens";
 import ConferirRepetidas from "./ConferirRepetidas";
 import ConferirVoos from "./ConferirVoos";
+import CheckinsViagens from "./CheckinsViagens";
+import ServicosViagens from "./ServicosViagens";
 import SeletorServico from "./SeletorServico";
 import { ProximoVooCurto } from "./ProximoVoo";
 import { COR_EXP, MarcaTipo } from "./MapaMundi";
@@ -52,18 +58,21 @@ import FaxinaAtalhos, { type MarcarAoAbrir } from "./FaxinaAtalhos";
 import { podeGerirRelacionamento } from "../equipe/permissao";
 import { SeloCurto } from "@/prioridades/SeloPrioridade";
 
-type Visao = "painel" | "calendario" | "lista" | "repetidas" | "voos";
+type Visao = "painel" | "calendario" | "lista" | "checkins" | "servicos" | "repetidas" | "voos";
 const VISOES: { id: Visao; rotulo: string }[] = [
   { id: "painel", rotulo: "Painel" },
   { id: "calendario", rotulo: "Calendário" },
   { id: "lista", rotulo: "Lista" },
+  // 11/11: só aéreo, na ordem dos check-ins · serviços separados por tipo, por data/hora da ação
+  { id: "checkins", rotulo: "Check-ins" },
+  { id: "servicos", rotulo: "Serviços" },
   { id: "repetidas", rotulo: "Conferir repetidas" },
   // 0154: voo que não bate com as datas da venda
   { id: "voos", rotulo: "Conferir voos" },
 ];
 const CHAVE_VISAO = "rel_viagens_visao";
 function visaoSalva(): Visao {
-  try { const v = localStorage.getItem(CHAVE_VISAO); return v === "calendario" || v === "lista" || v === "repetidas" || v === "voos" ? v : "painel"; } catch { return "painel"; }
+  try { const v = localStorage.getItem(CHAVE_VISAO); return v === "calendario" || v === "lista" || v === "checkins" || v === "servicos" || v === "repetidas" || v === "voos" ? v : "painel"; } catch { return "painel"; }
 }
 
 const FILTROS: { id: FiltroViagens; rotulo: string }[] = [
@@ -518,10 +527,10 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, onAbrirPaco
 
       {sync.msg && <div className="mb-3"><Aviso tom={sync.erro ? "erro" : "ok"}>{sync.msg}</Aviso></div>}
 
-      <div className="flex gap-1 mb-4 border-b" style={{ borderColor: "var(--line)" }} role="tablist" aria-label="Visão das viagens">
+      <div className="flex gap-1 mb-4 border-b overflow-x-auto" style={{ borderColor: "var(--line)" }} role="tablist" aria-label="Visão das viagens">
         {VISOES.map((x) => (
           <button key={x.id} role="tab" aria-selected={visao === x.id} onClick={() => setVisao(x.id)}
-            className="px-4 py-2.5 text-[13px] font-semibold -mb-px"
+            className="px-4 py-2.5 text-[13px] font-semibold -mb-px whitespace-nowrap"
             style={visao === x.id ? { color: "var(--rel-ink)", borderBottom: "2px solid var(--rel)" } : { color: "var(--ink2)", borderBottom: "2px solid transparent" }}>
             {x.rotulo}
           </button>
@@ -532,6 +541,8 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, onAbrirPaco
       {visao === "calendario" && <CalendarioViagens key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "repetidas" && <ConferirRepetidas key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "voos" && <ConferirVoos key={versao} onAbrirViagem={onAbrirViagem} />}
+      {visao === "checkins" && <CheckinsViagens key={versao} onAbrirViagem={onAbrirViagem} onAbrirCliente={onAbrirCliente} />}
+      {visao === "servicos" && <ServicosViagens key={versao} onAbrirViagem={onAbrirViagem} onAbrirCliente={onAbrirCliente} />}
       {visao === "lista" && <>
 
       <FaxinaAtalhos filtro={filtro} onFiltro={setFiltro} onTarefa={fazerTarefa} gestor={gestor} versao={versao} onMudou={() => setVersao((x) => x + 1)}

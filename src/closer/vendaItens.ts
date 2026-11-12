@@ -15,6 +15,7 @@ import {
 } from "@/propostas/lib";
 import { erroAmigavel, preVendaNoBitrix } from "./lib";
 import type { PaxJson } from "@/venda/vendaRegras";
+import { comTrechos, dadosParaBanco, lerTrechos } from "@/venda/iata";
 
 export type StatusItem = "vendido" | "emitido" | "cancelado";
 export interface ItemVenda {
@@ -64,7 +65,8 @@ export async function listarItensDaVenda(negocioId: string): Promise<ItemVenda[]
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     id: r.id as string, k: r.id as string, tipo: r.tipo as TipoItem, nome: (r.nome as string) ?? "",
     data_inicio: (r.data_inicio as string) ?? "", data_fim: (r.data_fim as string) ?? "",
-    dados: Object.fromEntries(Object.entries((r.dados as Record<string, unknown>) ?? {}).map(([k, v]) => [k, typeof v === "string" ? v : v == null ? "" : String(v)])),
+    // Objeto/array (ex.: dados.trechos do aéreo, src/venda/iata.ts) volta como JSON texto — nunca "[object Object]".
+    dados: Object.fromEntries(Object.entries((r.dados as Record<string, unknown>) ?? {}).map(([k, v]) => [k, typeof v === "string" ? v : v == null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v)])),
     passageiros: Array.isArray(r.passageiros)
       ? (r.passageiros as ItemVenda["passageiros"]).filter((p) => p && typeof p === "object").map((p) => ({ ...p, nome: p.nome ?? "" }))
       : [],
@@ -77,8 +79,8 @@ export async function salvarItensDaVenda(negocioId: string, itens: ItemVenda[]):
   const corpo = itens.map((i) => ({
     id: i.id ?? null, tipo: i.tipo, nome: i.nome.trim() || nomeSugerido(i),
     data_inicio: i.data_inicio || null, data_fim: i.data_fim || null,
-    // Só o que tem valor (o servidor junta com o que o Rel já gravou).
-    dados: Object.fromEntries(Object.entries(i.dados).filter(([, v]) => String(v ?? "").trim() !== "")),
+    // Só o que tem valor (o servidor junta com o que o Rel já gravou); trechos do aéreo viram array (src/venda/iata.ts).
+    dados: dadosParaBanco(i.dados),
     passageiros: i.passageiros.filter((p) => p.nome.trim()),
     valor: i.valor, custo: i.custo, fornecedor: i.fornecedor,
   }));
@@ -150,6 +152,8 @@ function deItemDaProposta(i: ItemProposta): ItemVenda {
     if (!dados.voos) dados.voos = textoDosTrechos(t);
     if (!dados.companhia) dados.companhia = [...new Set(t.map((x) => x.cia).filter(Boolean))].join(" / ");
     if (!dados.classe) dados.classe = t.find((x) => x.classe)?.classe ?? "";
+    // 11/11: os trechos estruturados da proposta (IATA) vão pro aéreo da venda.
+    if (!dados.trechos) Object.assign(dados, comTrechos({}, lerTrechos({ trechos: t })));
   }
   let ini = i.data_inicio, fim = i.data_fim;
   if (i.tipo === "aereo" && Array.isArray(i.detalhes?.trechos)) {

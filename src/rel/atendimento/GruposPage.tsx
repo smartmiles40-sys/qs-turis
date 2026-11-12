@@ -187,7 +187,7 @@ export default function GruposPage({ grupoJid, abrir, abrirConversa }: {
           </div>
         </aside>
         <section className={`${grupoJid ? "flex" : "hidden lg:flex"} flex-1 flex-col min-w-0 min-h-0`}>
-          {aberto ? <ConversaGrupo key={aberto.jid} grupo={aberto} onVoltar={() => abrir(null)} onMudou={carregar} onPrivado={(t, n) => void chamarNoPrivado(t, n)} agendadasLigadas={estado?.agendadas ?? null} />
+          {aberto ? <ConversaGrupo key={aberto.jid} grupo={aberto} onVoltar={() => abrir(null)} onMudou={carregar} onPrivado={(t, n) => void chamarNoPrivado(t, n)} onAbrirConversa={abrirConversa} agendadasLigadas={estado?.agendadas ?? null} />
             : (
               <div className="flex-1 flex items-center justify-center px-8 text-center wa-cab">
                 <p className="text-[14px] max-w-sm" style={{ color: "var(--wa-meta)" }}>

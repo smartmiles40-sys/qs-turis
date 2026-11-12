@@ -8,7 +8,8 @@
 // pelo supabase-js e abre por link assinado de poucos minutos.
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
-import { TIPOS_FILTRO, condicaoDoTipo, type TipoFiltro } from "./tiposViagem";
+import { TIPOS_FILTRO, condicaoDoTipo, type TipoFiltro } from "./tiposViagem";
+
 import { lotes } from "@/lib/lotes";
 
 export type TipoViagem = "expedicao" | "pacote" | "aereo" | "hospedagem" | "outro";
@@ -85,6 +86,8 @@ export interface Viagem {
   volta_real?: string | null;
   voos_internos?: number;
   alertas_ignorados?: Record<string, { motivo?: string | null; por?: string | null; em?: string | null }> | null;
+  /** 0359: a venda tem aéreo? (serviço + "Passagem Aérea" do Bitrix) — a data do Bitrix só é voo se tiver. */
+  aereo_vendido?: boolean | null;
 }
 
 // ── Serviço vendido × acompanhamento (0148, Bruno 20/10) ───────────────────
@@ -614,7 +617,7 @@ export const concluirPeloLink = (token: string) => apiDocs("POST", token, { acao
 
 // ── Trechos (voos, trens, transfers) e check-in — migration 0106 ───────────
 
-export type TipoTrecho = "voo_internacional" | "voo_interno" | "trem" | "transfer" | "hospedagem" | "passeio" | "outro";
+export type TipoTrecho = "voo_internacional" | "voo_interno" | "trem" | "transfer" | "hospedagem" | "passeio" | "seguro" | "outro";
 
 export const TIPOS_TRECHO: Record<TipoTrecho, string> = {
   voo_internacional: "Voo internacional",
@@ -623,6 +626,7 @@ export const TIPOS_TRECHO: Record<TipoTrecho, string> = {
   transfer: "Transfer",
   hospedagem: "Hospedagem",
   passeio: "Passeio",
+  seguro: "Seguro",
   outro: "Outro",
 };
 
@@ -639,8 +643,10 @@ export interface Trecho {
   numero: string | null;
   localizador: string | null;
   checkin_abre_em: string | null;
-  /** De onde veio o trecho (0115): manual, expedicoes, bitrix ou ia. */
-  fonte?: "manual" | "expedicoes" | "bitrix" | "ia";
+  /** De onde veio o trecho (0115): manual, expedicoes, bitrix, ia — ou venda (0361: itens da venda consolidada). */
+  fonte?: "manual" | "expedicoes" | "bitrix" | "ia" | "venda";
+  /** Venda que criou o trecho (0361). */
+  venda_id?: string | null;
   /** Documento de onde a IA tirou o trecho (0115) — passeio sem ele = sem voucher. */
   documento_id?: string | null;
   checkin_feito_em: string | null;
@@ -670,6 +676,12 @@ export interface Trecho {
   status_manual_em?: string | null;
   corrigido_em?: string | null;
   corrigido_por?: string | null;
+  /** 0359 (view): a venda tem aéreo / o trecho é um voo que vale (aéreo de verdade, não a data do hotel). */
+  viagem_aereo_vendido?: boolean | null;
+  conta_como_voo?: boolean | null;
+  /** 0360: de onde veio o check-in (o Rel ou o sistema de Expedições) e quem marcou */
+  checkin_origem?: "rel" | "expedicoes" | null;
+  checkin_feito_por_nome?: string | null;
   // da view rel_trechos_v
   checkin_em: string | null;
   viagem_tipo: TipoViagem;

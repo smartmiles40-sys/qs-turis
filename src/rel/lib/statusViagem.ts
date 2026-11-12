@@ -26,6 +26,11 @@
 //   • CHECK-IN a fazer = voo futuro, não feito, com a janela aberta (abre 48h
 //     antes, ou no horário que a cia informou). Voo que já decolou não pede
 //     check-in.
+//   • 0359 (Bruno 11/11: "só apareça o que realmente for aéreo"): a data de
+//     ida/volta do Bitrix só é voo quando a VENDA TEM AÉREO (serviço aéreo, ou
+//     pacote/expedição sem "Passagem Aérea: Não inclusa"). Em venda de hotel,
+//     seguro, passeio… essa data é do check-in/cobertura — não vira voo.
+//     Voo de verdade (Expedições / IA / à mão) vale sempre.
 //   • Correção manual (0227) manda: trecho voado/cancelado à mão e status da
 //     viagem forçado com motivo.
 // -----------------------------------------------------------------------------
@@ -89,6 +94,8 @@ export interface ViagemDatas {
   titulo?: string | null;
   expedicao?: string | null;
   servico?: string | null;
+  /** 0359: a venda tem aéreo (view rel_viagens_v). Sem a migration: decide pelo serviço. */
+  aereo_vendido?: boolean | null;
   /** 0227: status forçado pelo supervisor. */
   fase_manual?: FaseReal | null;
   fase_manual_motivo?: string | null;
@@ -108,6 +115,24 @@ export const diasEntre = (de: string, ate: string) => diaAbs(ate) - diaAbs(de);
 const somaDias = (d: string, n: number) => new Date((diaAbs(d) + n) * 86_400_000).toISOString().slice(0, 10);
 
 export const ehVoo = (t: { tipo: string }) => t.tipo === "voo_internacional" || t.tipo === "voo_interno";
+
+/** Serviços que nunca têm aéreo nosso (mesma lista do rel_venda_tem_aereo, 0359). */
+const SERVICOS_SEM_AEREO = new Set(["hospedagem", "passeio", "seguro", "concierge", "conta_liminar", "outro"]);
+
+/**
+ * A venda tem aéreo? Vale o que a view calculou (aereo_vendido, 0359 — olha
+ * também a "Passagem Aérea" do card do Bitrix); sem a migration, pelo serviço:
+ * aéreo/pacote/expedição = sim; hotel, seguro, passeio… = não; sem classificação
+ * (null) = não; serviço nem informado (undefined) = sim, como antes da 0359.
+ */
+export function vendaTemAereo(v: Pick<ViagemDatas, "servico" | "aereo_vendido">): boolean {
+  if (typeof v.aereo_vendido === "boolean") return v.aereo_vendido;
+  // nada informado (quem chama não tem a venda): o comportamento de antes — conta
+  if (v.servico === undefined) return true;
+  if (v.servico === "aereo" || v.servico === "pacote" || v.servico === "expedicao") return true;
+  if (v.servico && SERVICOS_SEM_AEREO.has(v.servico)) return false;
+  return false;
+}
 
 /** Voo do Bitrix (só o dia) ou gravado à meia-noite: o horário não é conhecido. */
 export function semHora(t: Pick<TrechoVoo, "fonte" | "partida_em">): boolean {
@@ -151,6 +176,8 @@ export interface VoosDaViagem<T extends TrechoVoo> {
   /** O mesmo voo repetido (um por passageiro) — só o 1º entra em `validos`. */
   repetidos: T[];
   cancelados: T[];
+  /** 0359: data do Bitrix numa venda SEM aéreo (hotel, seguro, "Não inclusa"…) — não é voo. */
+  semAereo: T[];
 }
 
 export function janelaDaViagem(v: Pick<ViagemDatas, "data_embarque" | "data_retorno">): { de: string; ate: string } | null {
@@ -161,8 +188,12 @@ export function janelaDaViagem(v: Pick<ViagemDatas, "data_embarque" | "data_reto
 
 const chaveVoo = (t: TrechoVoo) => `${new Date(t.partida_em).getTime()}|${(t.numero || "").replace(/\s+/g, "").toUpperCase() || `${t.origem ?? ""}>${t.destino ?? ""}`}`;
 
-export function separarVoos<T extends TrechoVoo>(v: Pick<ViagemDatas, "data_embarque" | "data_retorno">, trechos: T[]): VoosDaViagem<T> {
-  const voos = trechos.filter(ehVoo).filter((t) => t.partida_em).sort((a, b) => a.partida_em.localeCompare(b.partida_em) || a.id.localeCompare(b.id));
+export function separarVoos<T extends TrechoVoo>(v: Pick<ViagemDatas, "data_embarque" | "data_retorno" | "servico" | "aereo_vendido">, trechos: T[]): VoosDaViagem<T> {
+  const todosVoos = trechos.filter(ehVoo).filter((t) => t.partida_em).sort((a, b) => a.partida_em.localeCompare(b.partida_em) || a.id.localeCompare(b.id));
+  // 0359: venda sem aéreo → a data do Bitrix não é voo (é a do hotel/cobertura)
+  const comAereo = vendaTemAereo(v);
+  const semAereo = comAereo ? [] : todosVoos.filter((t) => t.fonte === "bitrix" && t.status_manual !== "cancelado");
+  const voos = comAereo ? todosVoos : todosVoos.filter((t) => !semAereo.includes(t));
   const jan = janelaDaViagem(v);
   const dentro = (t: T) => !jan || (diaSP(t.partida_em) >= jan.de && diaSP(t.partida_em) <= jan.ate);
   const cancelados = voos.filter((t) => t.status_manual === "cancelado");
@@ -181,9 +212,9 @@ export function separarVoos<T extends TrechoVoo>(v: Pick<ViagemDatas, "data_emba
   }
   // sem data de embarque: só confia nos voos se cabem numa viagem (≤ 60 dias)
   if (!jan && validos.length > 1 && diasEntre(diaSP(validos[0].partida_em), diaSP(validos[validos.length - 1].partida_em)) > DIAS_DEPOIS_RETORNO) {
-    return { validos: [], fora: [...fora, ...validos], genericos, repetidos, cancelados };
+    return { validos: [], fora: [...fora, ...validos], genericos, repetidos, cancelados, semAereo };
   }
-  return { validos, fora, genericos, repetidos, cancelados };
+  return { validos, fora, genericos, repetidos, cancelados, semAereo };
 }
 
 // ── papel de cada voo (ida / interno / volta) ───────────────────────────────
@@ -311,7 +342,8 @@ export function resumirVoos<T extends TrechoVoo>(v: ViagemDatas, trechos: T[], a
   for (const t of sep.genericos) motivoFora.set(t.id, "data genérica do Bitrix (já tem o voo de verdade)");
   for (const t of sep.repetidos) motivoFora.set(t.id, "repetido (mesmo voo de outro passageiro)");
   for (const t of sep.cancelados) motivoFora.set(t.id, "cancelado");
-  const todos = [...sep.validos, ...sep.fora, ...sep.genericos, ...sep.repetidos, ...sep.cancelados]
+  for (const t of sep.semAereo) motivoFora.set(t.id, "data da venda no Bitrix — a venda não tem aéreo (não é voo)");
+  const todos = [...sep.validos, ...sep.fora, ...sep.genericos, ...sep.repetidos, ...sep.cancelados, ...sep.semAereo]
     .sort((a, b) => a.partida_em.localeCompare(b.partida_em) || a.id.localeCompare(b.id));
   const voos = todos.map((t) => ({ t, papel: papeis.get(t.id) ?? null, estado: estadoTrecho(t, agora), valido: validosIds.has(t.id), motivoFora: motivoFora.get(t.id) }));
 
@@ -347,7 +379,7 @@ export function resumirVoos<T extends TrechoVoo>(v: ViagemDatas, trechos: T[], a
     add({ chave: "embarque_antes_voo", nivel: "info", titulo: "A venda diz que já embarcou, o 1º voo ainda não saiu", detalhe: `Embarque ${BR(v.data_embarque)} × 1º voo ${BR(ida)}.`, trechos: [] });
   if (ativa && v.data_embarque && !v.data_retorno)
     add({ chave: "sem_volta", nivel: "info", titulo: "Sem data de volta", detalhe: "Sem a volta, o \"em viagem\" depende só dos voos.", trechos: [] });
-  if (ativa && !sep.validos.length && (v.servico === "pacote" || v.servico === "aereo") && v.data_embarque && diasEntre(hoje, v.data_embarque) <= 30 && diasEntre(hoje, v.data_retorno || v.data_embarque) >= 0)
+  if (ativa && !sep.validos.length && (v.servico === "pacote" || v.servico === "aereo") && vendaTemAereo(v) && v.data_embarque && diasEntre(hoje, v.data_embarque) <= 30 && diasEntre(hoje, v.data_retorno || v.data_embarque) >= 0)
     add({ chave: "sem_voos", nivel: "alta", titulo: "Viagem próxima sem voos", detalhe: "Pacote/aéreo a 30 dias ou menos (ou em andamento) sem nenhum voo cadastrado.", trechos: [] });
   if (sep.validos.length && sep.validos.every((t) => t.fonte === "bitrix"))
     add({ chave: "so_bitrix", nivel: "info", titulo: "Só as datas do Bitrix (sem horário, sem nº do voo)", detalhe: "Suba o bilhete ou cadastre os voos pra ter horário e check-in certo.", trechos: sep.validos.map((t) => t.id) });

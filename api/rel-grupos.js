@@ -30,6 +30,7 @@ import { INSTANCIA, evo, ehGrupo, safeParse, grupoLiberado, chaveDe, meusIds, as
 import { atualizarGrupos, gravarParticipantes, sincronizarGrupos, rodizioInfo } from './_relGruposSync.js';
 import { acaoMais, enviarAgendadas, agendadasLigadas } from './_relGruposMais.js';
 import { gravarPrivado, varrerPrivado } from './_relGruposPrivado.js';
+import { lerConteudoGrupo, citacaoDoGrupo, textoDaCitada, desembrulhar } from './_relGruposLer.js';
 
 export { sincronizarGrupos };
 
@@ -58,24 +59,8 @@ async function enviarNoGrupo(jid, texto, { citada = null, mencoes = [], todos = 
 
 // ── Entrada ──────────────────────────────────────────────────────────────────
 
-/** Tipo + texto + "tem arquivo?" de uma mensagem do Baileys. null = ignorar. */
-function lerConteudo(m) {
-  if (!m || typeof m !== 'object') return null;
-  if (m.reactionMessage || m.protocolMessage) return null;
-  if (m.conversation) return { tipo: 'texto', texto: m.conversation };
-  if (m.extendedTextMessage) return { tipo: 'texto', texto: m.extendedTextMessage.text || '' };
-  if (m.imageMessage) return { tipo: 'imagem', texto: m.imageMessage.caption || '', midia: true };
-  if (m.videoMessage) return { tipo: 'video', texto: m.videoMessage.caption || '', midia: true };
-  if (m.audioMessage) return { tipo: 'audio', texto: '', midia: true };
-  if (m.stickerMessage) return { tipo: 'figurinha', texto: '', midia: true };
-  const doc = m.documentMessage || m.documentWithCaptionMessage?.message?.documentMessage;
-  if (doc) return { tipo: 'arquivo', texto: doc.caption || '', midia: true, nome: doc.fileName || null };
-  const enquete = m.pollCreationMessage || m.pollCreationMessageV3;
-  if (enquete) return { tipo: 'enquete', texto: `📊 ${enquete.name || 'Enquete'}` };
-  if (m.locationMessage) return { tipo: 'local', texto: '📍 localização' };
-  if (m.contactMessage) return { tipo: 'contato', texto: `👤 ${m.contactMessage.displayName || 'contato'}` };
-  return null;
-}
+// lerConteudo / contexto / citação: api/_relGruposLer.js (11/11 — a citação de
+// TEXTO vem no topo do evento, data.contextInfo; ver o comentário de lá).
 
 const ROTULO = { imagem: '📷 imagem', video: '🎬 vídeo', audio: '🎤 áudio', figurinha: '🏷️ figurinha', arquivo: '📎 arquivo' };
 
@@ -118,14 +103,7 @@ function mencoesDe(m) {
   return out;
 }
 
-/** contextInfo de qualquer tipo de mensagem (citação e @). */
-function contextoDe(m) {
-  if (!m || typeof m !== 'object') return null;
-  for (const v of Object.values(m)) if (v && typeof v === 'object' && v.contextInfo) return v.contextInfo;
-  return null;
-}
-const textoDe = (m) => m?.conversation || m?.extendedTextMessage?.text || m?.imageMessage?.caption || m?.videoMessage?.caption
-  || (m?.imageMessage ? '📷 foto' : m?.videoMessage ? '🎬 vídeo' : m?.audioMessage ? '🎤 áudio' : m?.stickerMessage ? '🏷️ figurinha' : m?.documentMessage ? '📎 arquivo' : '');
+const textoDe = (m) => textoDaCitada(m);
 
 /** Reação nova/trocada/retirada na mensagem alvo (reações ficam numa lista por pessoa). */
 async function aplicarReacao(alvoId, de, nome, emoji) {
@@ -158,7 +136,8 @@ async function gravarMensagem(d) {
   const key = d?.key || {};
   const jid = key.remoteJid;
   if (!ehGrupo(jid)) return gravarPessoa(d); // pessoa: só GRAVA (cópia de reserva da Cloud API)
-  const msg = d.message || {};
+  const bruta = d.message || {};
+  const msg = desembrulhar(bruta);
   // reação de alguém (ou do celular do número)
   if (msg.reactionMessage) {
     const r = msg.reactionMessage;
@@ -180,9 +159,9 @@ async function gravarMensagem(d) {
     }
     return 'ignorada';
   }
-  const c = lerConteudo(msg);
+  const c = lerConteudoGrupo(bruta);
   if (!c || !key.id) return 'ignorada';
-  const ctx = contextoDe(msg);
+  const cit = citacaoDoGrupo(d);
 
   await garantirGrupo(jid);
   const ja = (await rest(`rel_wa_grupo_mensagens?select=id&msg_id=eq.${encodeURIComponent(key.id)}&limit=1`))?.[0];
@@ -201,16 +180,13 @@ async function gravarMensagem(d) {
       autor_participante: key.participant || null,
       autor_nome: key.fromMe ? null : (d.pushName || null),
       tipo: c.tipo, texto, anexo_url: anexo, anexo_nome: c.nome || null, criado_em: quando,
-      responde_a: ctx?.stanzaId || null,
-      citado_texto: ctx?.quotedMessage ? textoDe(ctx.quotedMessage).slice(0, 300) : null,
-      citado_autor: ctx?.participant || null,
-      mencoes: Array.isArray(ctx?.mentionedJid) ? ctx.mentionedJid.map(String) : [],
+      ...cit,
     },
   });
   const previa = (texto || ROTULO[c.tipo] || '').slice(0, 140);
   // não lidas + "@" (0142): mensagem nossa zera; dos outros soma e vê se marcou o número
   const meus = await meusIds(key);
-  const marcados = [...mencoesDe(d.message)];
+  const marcados = [...new Set([...mencoesDe(d.message), ...mencoesDe(d.contextInfo ? { contextInfo: d.contextInfo } : null), ...cit.mencoes])];
   const digitos = [...meus].map((x) => x.split('@')[0]);
   const mencionou = !key.fromMe && (marcados.some((m) => meus.has(m) || digitos.includes(m.split('@')[0]))
     || digitos.some((n) => n && texto.includes(`@${n}`)));

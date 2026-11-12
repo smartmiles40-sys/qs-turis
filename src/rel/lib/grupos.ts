@@ -202,6 +202,40 @@ export async function telefoneDoAutor(m: Pick<MensagemGrupo, "autor_jid" | "auto
 
 export interface Participante { telefone: string; nome: string; admin: string | null }
 /** Quem está no grupo, com o nome da ficha (ou o que a pessoa usa no WhatsApp). */
+/**
+ * "Responder em particular" do WhatsApp (11/11): mensagens do 1:1 do
+ * Relacionamento que citam uma mensagem DESTE grupo (rel_wa_mensagens.grupo_citado,
+ * 0231). Na tela do grupo aparecem embaixo da mensagem citada, com atalho pra
+ * conversa. Sem a 0231 (coluna não existe) devolve lista vazia.
+ */
+export interface RespostaNoPrivado {
+  id: string;
+  conversa_id: string;
+  direcao: "in" | "out";
+  texto: string;
+  enviada_em: string;
+  msg_id: string | null;
+  nome: string | null;
+  telefone: string | null;
+}
+export async function respostasNoPrivado(jid: string): Promise<RespostaNoPrivado[]> {
+  const { data, error } = await supabase.from("rel_wa_mensagens")
+    .select("id, conversa_id, direcao, texto, enviada_em, grupo_citado, rel_wa_conversas(telefone, nome_contato)")
+    .eq("grupo_citado->>jid", jid)
+    .order("enviada_em", { ascending: true })
+    .limit(300);
+  if (error) return [];
+  type Linha = { id: string; conversa_id: string; direcao: "in" | "out"; texto: string | null; enviada_em: string;
+    grupo_citado: { msg_id?: string | null } | null; rel_wa_conversas: { telefone: string | null; nome_contato: string | null } | { telefone: string | null; nome_contato: string | null }[] | null };
+  return ((data ?? []) as unknown as Linha[]).map((l) => {
+    const c = Array.isArray(l.rel_wa_conversas) ? l.rel_wa_conversas[0] : l.rel_wa_conversas;
+    return {
+      id: l.id, conversa_id: l.conversa_id, direcao: l.direcao, texto: l.texto || "", enviada_em: l.enviada_em,
+      msg_id: l.grupo_citado?.msg_id || null, nome: c?.nome_contato || null, telefone: c?.telefone || null,
+    };
+  });
+}
+
 export async function participantesDoGrupo(jid: string): Promise<Participante[]> {
   const { data } = await supabase.from("rel_wa_grupo_participantes").select("telefone, admin").eq("grupo_jid", jid).not("telefone", "is", null).limit(1100);
   const lista = (data ?? []) as { telefone: string; admin: string | null }[];
