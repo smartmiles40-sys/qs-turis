@@ -146,4 +146,5 @@ test("alerta e selo", () => {
   assert.equal(seloDoCard({ id: "1", bitrix_card_status: "pendente" })?.texto, "Sem card no Bitrix — tentando de novo");
   assert.equal(seloDoCard({ id: "1", bitrix_card_status: "falhou", bitrix_card_erro: "recusou" })?.texto, "Falhou: recusou");
   assert.equal(seloDoCard({ id: "1", status: "perdido" })?.texto, "Sem card no Bitrix");
+  assert.equal(seloDoCard({ id: "1", bitrix_card_status: "so_qs" }), null);
 });

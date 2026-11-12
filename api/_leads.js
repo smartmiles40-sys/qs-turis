@@ -420,12 +420,10 @@ export async function createInboundLead(payload, opts = {}) {
   // Duas consequências que o modo assume de propósito:
   //   • o mesmo telefone passa a existir em dois cards (o antigo e o de
   //     resgate). É o preço de separar as frentes, e foi escolhido.
-  //   • (até 12/11) nada era criado no Bitrix. Desde a diretriz "todo card do
-  //     QS nasce no Bitrix", o card de resgate nasce PENDENTE (gatilho da 0362)
-  //     e a rotina de nova tentativa (api/_leadCardBitrix.js) cria o negócio —
-  //     reaproveitando o CONTATO que já existe lá. Não é síncrono aqui de
-  //     propósito: uma carga de resgate são centenas de chamadas seguidas, e a
-  //     rotina drena em lotes pequenos respeitando o limite do Bitrix.
+  //   • nada é criado no Bitrix. Exceção EXPLÍCITA à diretriz "todo card do QS
+  //     nasce no Bitrix" (Bruno, 12/11/2026: "o resgate só deve reiniciar no QS
+  //     e não no Bitrix"): o card nasce com bitrix_card_status='so_qs' (0362),
+  //     fica fora da rotina de nova tentativa e do alerta de lead sem card.
   const cardProprio = !!opts.cardProprio;
 
   // 0) Dedupe por bitrix_id (defensivo: se a coluna ainda não existir no banco,
@@ -640,7 +638,8 @@ export async function createInboundLead(payload, opts = {}) {
     // resgate é uma frente de trabalho nova; o vínculo com o negócio do Bitrix
     // continua no card original.
     const gravarBitrix = bitrixId && !cardProprio;
-    created = await insert('qs_leads', gravarBitrix ? { ...leadRow, bitrix_id: bitrixId } : leadRow);
+    const linha = cardProprio ? { ...leadRow, bitrix_card_status: 'so_qs' } : leadRow;
+    created = await insert('qs_leads', gravarBitrix ? { ...linha, bitrix_id: bitrixId } : linha);
   } catch (e) {
     const code = e?.details?.code || e?.code || '';
     if (bitrixId && code === '23505') {
@@ -679,10 +678,8 @@ export async function createInboundLead(payload, opts = {}) {
   // QS: com dono e cadência aqui, invisíveis pro comercial lá. Agora o negócio
   // é criado no mesmo instante, no funil de Pré-Vendas, com o dono do QS como
   // responsável. Best-effort: Bitrix fora não impede o lead de entrar.
-  // cardProprio (resgate &duplicar=1) não abre negócio AQUI: o card nasce
-  // PENDENTE (gatilho da 0362) e a rotina de nova tentativa cria em lote
-  // pequeno, procurando antes o contato pelo telefone — ver o comentário do
-  // cardProprio lá em cima.
+  // cardProprio (resgate &duplicar=1) não abre negócio nunca: reinicia só no
+  // QS (so_qs) — ver o comentário do cardProprio lá em cima.
   // `opts.semBitrix` (08/09): o negócio JÁ existe e foi criado por outra ponta.
   // É o caso do autoagendamento embutido nos formulários de live: o
   // /api/save-lead do STFV Forms cria contato + negócio no Bitrix ANTES de a

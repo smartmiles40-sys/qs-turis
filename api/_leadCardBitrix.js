@@ -109,7 +109,8 @@ async function lerLead(leadId) {
 export async function marcarFalha(leadId, erro, tentativasAntes = 0) {
   if (!leadId) return false;
   try {
-    await rest(`qs_leads?id=eq.${id(leadId)}&bitrix_id=is.null`, {
+    // Resgate (so_qs) fica só no QS por decisão: nunca vira pendência.
+    await rest(`qs_leads?id=eq.${id(leadId)}&bitrix_id=is.null&or=(bitrix_card_status.is.null,bitrix_card_status.neq.so_qs)`, {
       method: 'PATCH', prefer: 'return=minimal', body: planoDaFalha(tentativasAntes, erro),
     });
     return true;
@@ -158,6 +159,7 @@ export async function garantirCardDoLead(leadId, { origem = 'rotina', leadPronto
   const lead = leadPronto || await lerLead(leadId);
   if (!lead) return { resultado: 'inexistente', motivo: 'lead não existe' };
   if (lead.bitrix_id) return { resultado: 'ja_tinha', bitrixId: String(lead.bitrix_id) };
+  if (lead.bitrix_card_status === 'so_qs') return { resultado: 'so_qs', motivo: 'lead de resgate: fica só no QS (decisão de 12/11)' };
   if (!bitrixConfigurado()) return { resultado: 'desligado', motivo: 'integração com o Bitrix desligada (BITRIX_WEBHOOK_BASE)' };
 
   const agoraMs = Date.now();

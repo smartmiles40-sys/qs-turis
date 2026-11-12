@@ -496,6 +496,7 @@ export default async function handler(req, res) {
     if (r.resultado === 'criado' || r.resultado === 'vinculado' || r.resultado === 'ja_tinha') {
       return res.status(200).json({ success: true, code: r.resultado, bitrix_id: r.bitrixId || null, motivo: r.motivo || null });
     }
+    if (r.resultado === 'so_qs') return res.status(200).json({ success: false, code: 'so_qs', error: 'Lead de resgate: fica só no QS e não é enviado ao Bitrix.' });
     if (r.resultado === 'desligado') return res.status(200).json({ success: false, code: 'not_configured', error: r.motivo });
     if (r.resultado === 'ocupado') return res.status(409).json({ success: false, code: 'ocupado', error: 'Já estou criando o card deste lead — confira em alguns segundos.' });
     if (r.resultado === 'inexistente') return res.status(404).json({ success: false, error: 'Esse lead não existe mais no QS.' });
@@ -511,6 +512,13 @@ export default async function handler(req, res) {
     // nova tentativa criar o card. O evento em si NÃO fica guardado: depois
     // que o card nascer, quem disparou precisa reenviar (o desfecho da reunião
     // tem botão de reenvio; perdido/ganho o espelho da etapa resolve).
+    if (lead && lead.bitrix_card_status === 'so_qs') {
+      // Resgate: vive só no QS por decisão (12/11). Não é pendência.
+      return res.status(200).json({
+        success: false, code: 'skipped_no_bitrix_id', soQs: true,
+        error: 'Lead de resgate: fica só no QS e não é enviado ao Bitrix.',
+      });
+    }
     if (lead && !lead.bitrix_card_status) {
       await marcarFalha(leadId, `uma atualização (${event}) não foi pro Bitrix porque o lead não tem card`, 0);
     }

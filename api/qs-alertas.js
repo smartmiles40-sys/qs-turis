@@ -315,9 +315,10 @@ async function checarLeadsSemAtividade(agoraMs) {
 }
 
 async function checarLeadsSemCard(agoraMs) {
-  // Só bitrix_id nulo (não depende da 0362): aberto = não perdido.
+  // bitrix_id nulo, aberto = não perdido; resgate (so_qs, 0362) fica só no QS.
   const qtd = await contar(
     `qs_leads?select=id&bitrix_id=is.null&status=in.(nao_iniciado,em_prospeccao,ganho)` +
+    `&or=(bitrix_card_status.is.null,bitrix_card_status.neq.so_qs)` +
     `&created_at=lt.${iso(agoraMs - LEADS_SEM_CARD_MIN * MIN)}`);
   const rotinaLigada = ['1', 'true', 'sim', 'on'].includes(String(process.env.LEADS_BITRIX_RETENTATIVA_LIGADA || '').trim().toLowerCase());
   return { dados: { leadsSemCard: qtd, rotinaLigada }, alerta: regraLeadsSemCard(qtd, { rotinaLigada }) };

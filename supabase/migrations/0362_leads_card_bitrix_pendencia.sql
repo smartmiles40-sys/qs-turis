@@ -13,7 +13,9 @@
 -- tentativa (api/leads-sem-card.js?acao=retentar, cron da Vercel), que só envia
 -- com LEADS_BITRIX_RETENTATIVA_LIGADA=1.
 --
---   bitrix_card_status    'ok' | 'pendente' | 'falhou' | null
+--   bitrix_card_status    'ok' | 'pendente' | 'falhou' | 'so_qs' | null
+--                          so_qs = card de resgate (&duplicar=1): reinicia só
+--                          no QS e nunca vai pro Bitrix (Bruno, 12/11/2026).
 --                          null = lead antigo, nunca avaliado (a rotina trata
 --                          aberto sem bitrix_id e status null como pendente;
 --                          perdido fica de fora por padrão).
@@ -58,12 +60,12 @@ begin
   ) then
     alter table public.qs_leads
       add constraint qs_leads_bitrix_card_status_check
-      check (bitrix_card_status is null or bitrix_card_status in ('ok', 'pendente', 'falhou'));
+      check (bitrix_card_status is null or bitrix_card_status in ('ok', 'pendente', 'falhou', 'so_qs'));
   end if;
 end $$;
 
 comment on column public.qs_leads.bitrix_card_status is
-  'Espelho do card no Bitrix (0362): ok | pendente | falhou | null (antigo, nunca avaliado).';
+  'Espelho do card no Bitrix (0362): ok | pendente | falhou | so_qs (resgate, só no QS) | null (antigo, nunca avaliado).';
 comment on column public.qs_leads.bitrix_card_erro is
   'Último motivo de falha ao criar/vincular o negócio no Bitrix (0362).';
 comment on column public.qs_leads.bitrix_card_tentativas is
@@ -93,6 +95,10 @@ begin
       new.bitrix_card_proxima := null;
       new.bitrix_card_trava := null;
     end if;
+  elsif tg_op = 'INSERT' and new.bitrix_card_status = 'so_qs' then
+    -- Resgate (&duplicar=1): reinicia SÓ no QS, nunca abre negócio no Bitrix
+    -- (Bruno, 12/11/2026). Fica fora da fila e do alerta.
+    new.bitrix_card_proxima := null;
   elsif tg_op = 'INSERT' then
     -- Nasceu sem card: pendência até o servidor criar ou vincular.
     if new.bitrix_card_status is null or new.bitrix_card_status = 'ok' then
