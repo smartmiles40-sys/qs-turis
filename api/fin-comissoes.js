@@ -22,6 +22,7 @@
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { getSupabaseUserId } from './_wa.js';
+import { pulso } from './_rotinaPulso.js';
 
 const LOTE = 500;
 
@@ -123,13 +124,17 @@ export default async function handler(req, res) {
   try {
     const r = await sincronizar(desde);
     if (!r.configurado) {
+      // 12/11: antes pulava calado (por isso a parada de 09/11 não apareceu) — o pulso avisa o qs-alertas.
+      await pulso('fin-comissoes', { status: 'pulado', motivo: 'Faltam as envs do Dashboard na Vercel (DASHBOARD_SUPABASE_URL/ANON_KEY/COMISSOES_SECRET).' });
       return res.status(200).json({ ok: false, error: 'Dashboard não configurado (envs DASHBOARD_SUPABASE_URL, DASHBOARD_SUPABASE_ANON_KEY e DASHBOARD_COMISSOES_SECRET).' });
     }
     await registrar({ cards: r.cards, erro: null });
+    await pulso('fin-comissoes');
     return res.status(200).json({ ok: true, desde, cards: r.cards });
   } catch (e) {
     console.error('[fin-comissoes]', e?.message);
     await registrar({ erro: String(e?.message || 'falhou').slice(0, 300) });
+    await pulso('fin-comissoes', { status: 'erro', motivo: e?.message || 'falhou' });
     return res.status(500).json({ ok: false, error: e?.message });
   }
 }

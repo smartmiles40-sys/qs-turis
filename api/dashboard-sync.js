@@ -17,6 +17,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
+import { pulso } from './_rotinaPulso.js';
 
 const JANELA_MIN = 30;
 const LOTE = 500;
@@ -107,10 +108,16 @@ export default async function handler(req, res) {
 
   try {
     const r = await sincronizar(desde);
-    if (!r.configurado) return res.status(200).json({ ok: false, error: 'Dashboard não configurado (envs DASHBOARD_*).' });
+    if (!r.configurado) {
+      // 12/11: pulava calado — o pulso faz o qs-alertas cobrar.
+      await pulso('dashboard-sync', { status: 'pulado', motivo: 'Faltam as envs DASHBOARD_* na Vercel.' }, { minIntervaloMs: 30 * 60_000 });
+      return res.status(200).json({ ok: false, error: 'Dashboard não configurado (envs DASHBOARD_*).' });
+    }
+    await pulso('dashboard-sync', {}, { minIntervaloMs: 15 * 60_000 });
     return res.status(200).json({ ok: true, desde, enviadas: r.enviadas });
   } catch (e) {
     console.error('[dashboard-sync]', e?.message);
+    await pulso('dashboard-sync', { status: 'erro', motivo: e?.message || 'falhou' });
     return res.status(500).json({ error: e?.message });
   }
 }

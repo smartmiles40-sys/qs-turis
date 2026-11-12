@@ -23,6 +23,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
+import { pulso } from './_rotinaPulso.js';
 import { getSupabaseUserId } from './_wa.js';
 import { lerConexao, conferirCandidata, travaMkt, evoMkt, ehAInstancia } from './_mktGruposEvo.js';
 import { rodada, envioLigadoNoAmbiente, lerGruposETags } from './_mktGruposMotor.js';
@@ -291,9 +292,18 @@ export default async function handler(req, res) {
       const links = await rodadaLinks({ prazoMs: 12_000 }).catch((e) => ({ erro: String(e?.message || e).slice(0, 200) }));
       const r = await rodada({ prazoMs: 40_000 });
       console.log(`[mkt-grupos] cron: ${JSON.stringify({ ...r, links })}`);
+      // 12/11: sem MKT_GRUPOS_SECRET o webhook da Evolution (linha ~55) recusa
+      // tudo em silêncio — nenhuma confirmação de envio chega. O motor parado por
+      // decisão (envio desligado/pausado, fora da janela) NÃO é falha: conta como ok.
+      const semSegredo = String(process.env.MKT_GRUPOS_SECRET || '').length < 16
+        && Boolean((await lerConexao().catch(() => null))?.instancia); // sem chip configurado não há o que cobrar
+      await pulso('mkt-grupos', semSegredo
+        ? { status: 'pulado', motivo: 'Falta MKT_GRUPOS_SECRET (16+ caracteres) na Vercel — o webhook da Evolution recusa tudo.' }
+        : {}, { minIntervaloMs: 5 * 60_000 });
       return res.status(200).json({ ...r, links });
     } catch (e) {
       console.error('[mkt-grupos] cron:', e?.message);
+      await pulso('mkt-grupos', { status: 'erro', motivo: e?.message || 'falhou' }, { minIntervaloMs: 5 * 60_000 });
       return res.status(502).json({ error: 'falhou' });
     }
   }

@@ -20,9 +20,19 @@
 //
 // `?seco=1` → devolve o que alertaria, sem mandar nada nem gravar estado (roda
 // fora do horário também, pra dar pra testar).
+//
+// f) (12/11/2026) automações paradas/pulando/falhando — regra e catálogo em
+//    api/_rotinaPulso.js (cada cron grava um pulso em qs_settings 'rotina_pulso:*').
+//
+// COMO PÔR UM ALERTA NOVO (sem mexer no resto): escreva a regra pura e uma
+// função `checarX(agoraMs)` que devolve { dados, alerta } (um alerta ou null) ou
+// { dados, alertas: [...] } (vários), e acrescente UMA linha em CHECAGENS.
+// Cada alerta = { id (estável — é a chave do dedupe), nivel: 'alto'|'baixo',
+// titulo, texto }. Uma checagem que lança não derruba as outras.
 // -----------------------------------------------------------------------------
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
+import { checarRotinas } from './_rotinaPulso.js';
 
 const MIN = 60_000;
 const HORA = 60 * MIN;
@@ -254,6 +264,11 @@ async function enviarAviso(userId, alerta, agoraMs) {
   });
 }
 
+// Checagens que moram em outro arquivo (cada uma com seu catálogo/teste).
+const CHECAGENS_EXTERNAS = {
+  rotinas: checarRotinas,
+};
+
 // ---------------------------------------------------------------- handler
 
 const CHECAGENS = {
@@ -280,11 +295,12 @@ export default async function handler(req, res) {
   }
 
   const saida = { seco, dados: {}, erros: {}, alertas: [] };
-  for (const [id, fn] of Object.entries(CHECAGENS)) {
+  for (const [id, fn] of Object.entries({ ...CHECAGENS, ...CHECAGENS_EXTERNAS })) {
     try {
       const r = await fn(agoraMs);
       saida.dados[id] = r.dados;
       if (r.alerta) saida.alertas.push(r.alerta);
+      if (Array.isArray(r.alertas)) saida.alertas.push(...r.alertas.filter(Boolean));
     } catch (e) {
       saida.erros[id] = String(e?.message || 'falhou').slice(0, 200);
     }

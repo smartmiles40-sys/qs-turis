@@ -23,6 +23,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
+import { pulso } from './_rotinaPulso.js';
 import { googleConfigurado, motivoNaoConfigurado } from './_google.js';
 import { comentarNoNegocio, bitrixConfigurado } from './_bitrixLead.js';
 import {
@@ -177,7 +178,11 @@ export default async function handler(req, res) {
   const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
   if (!segredo || !segredoConfere(veio, segredo)) return res.status(401).json({ error: 'Não autorizado' });
 
-  if (!googleConfigurado()) return res.status(200).json({ ok: false, error: motivoNaoConfigurado() });
+  if (!googleConfigurado()) {
+    // 12/11: pulava calado — o pulso faz o qs-alertas cobrar.
+    await pulso('meet-gravacoes', { status: 'pulado', motivo: motivoNaoConfigurado() });
+    return res.status(200).json({ ok: false, error: motivoNaoConfigurado() });
+  }
 
   const q = req.query || {};
   const seco = String(q.seco || '') === '1';
@@ -197,6 +202,7 @@ export default async function handler(req, res) {
       lista = await candidatas({ desdeIso, id, refazer });
     } catch (e) {
       if (/gravacao_|transcricao_/.test(String(e?.message || ''))) {
+        await pulso('meet-gravacoes', { status: 'pulado', motivo: 'Falta aplicar a migration 0314.' });
         return res.status(200).json({ ok: false, error: 'Falta aplicar a migration 0314 (colunas de gravação em qs_meetings).' });
       }
       throw e;
@@ -237,12 +243,14 @@ export default async function handler(req, res) {
 
     const bitrix = await mandarProBitrix({ desdeIso, seco, inicio }).catch((e) => ({ ligado: true, erro: e?.message }));
     const contagem = feitas.reduce((acc, f) => ({ ...acc, [f.status]: (acc[f.status] || 0) + 1 }), {});
+    if (!seco) await pulso('meet-gravacoes');
     return res.status(200).json({
       ok: true, seco, desde: desdeIso, candidatas: lista.length, na_fila: fila.length, puladas,
       processadas: feitas.length, contagem, feitas, bitrix,
     });
   } catch (e) {
     console.error('[meet-gravacoes]', e?.message);
+    await pulso('meet-gravacoes', { status: 'erro', motivo: e?.message || 'falhou' });
     return res.status(500).json({ error: e?.message });
   } finally {
     clearTimeout(timer);

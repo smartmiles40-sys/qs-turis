@@ -22,6 +22,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
+import { pulso } from './_rotinaPulso.js';
 import { quemChama } from './_relWa.js';
 
 const BUCKET = 'rel-documentos';
@@ -359,13 +360,18 @@ export default async function handler(req, res) {
     const segredo = String(process.env.CRON_SECRET || '').trim();
     const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
     if (!segredo || veio !== segredo) return res.status(401).json({ error: 'Não autorizado' });
-    if (!temChave) return res.status(200).json({ pulado: 'Falta a chave da OpenAI na Vercel' });
+    if (!temChave) {
+      await pulso('rel-docs-ia', { status: 'pulado', motivo: 'Falta a chave da OpenAI na Vercel (OPENAI_API_KEY).' });
+      return res.status(200).json({ pulado: 'Falta a chave da OpenAI na Vercel' });
+    }
     try {
       const r = await conferirLote({});
       console.log(`[rel-docs-ia] cron: ${JSON.stringify(r)}`);
+      await pulso('rel-docs-ia');
       return res.status(200).json(r);
     } catch (e) {
       console.error('[rel-docs-ia] cron falhou:', String(e?.message || '').slice(0, 160));
+      await pulso('rel-docs-ia', { status: 'erro', motivo: e?.message || 'falhou' });
       return res.status(500).json({ error: e?.message || 'Falhou' });
     }
   }

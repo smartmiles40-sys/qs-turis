@@ -66,17 +66,33 @@ export default function EquipeMktPage() {
     if (!nome) return setErroAcao("Informe o nome.");
     if (!EMAIL_OK.test(email)) return setErroAcao("E-mail inválido.");
     if (novo.senha.length < 8) return setErroAcao("A senha precisa de pelo menos 8 caracteres.");
+    const { senha, papeis } = novo;
     setSalvando("novo"); setErroAcao(null); setOk(null);
+    let criada = false;
     try {
-      const r = await createQsAuthUser({ name: nome, email, password: novo.senha, role: "marketing", setores: ["comercial", "marketing"], is_active: true });
+      const r = await createQsAuthUser({ name: nome, email, password: senha, role: "marketing", setores: ["comercial", "marketing"], is_active: true });
       if (!r.success) throw new Error(/already|registered|duplicate/i.test(r.error ?? "") ? "Esse e-mail já tem conta no QS." : r.error || "Não consegui criar a conta.");
-      const id = (r.user as { id?: string } | undefined)?.id;
-      if (id && novo.papeis.length) await definirPapeis(id, novo.papeis);
-      setOk(`Conta criada. Passe pra ${nome}: e-mail ${email} · senha ${novo.senha} (peça pra trocar no 1º acesso).`);
+      // 12/11/2026: a conta JÁ existe a partir daqui. Antes, se os papéis falhassem, o
+      // erro caía no catch com o formulário aberto e a senha nunca aparecia — e o
+      // "Criar acesso" de novo só dizia "Esse e-mail já tem conta". Agora a senha
+      // sempre aparece e a falha dos papéis vira um aviso à parte.
+      criada = true;
+      setOk(`Conta criada. Passe pra ${nome}: e-mail ${email} · senha ${senha} (peça pra trocar no 1º acesso).`);
       setNovo(null);
-      await tudo();
+      const id = (r.user as { id?: string } | undefined)?.id;
+      if (papeis.length) {
+        try {
+          if (!id) throw new Error("o servidor não devolveu o id da conta");
+          await definirPapeis(id, papeis);
+        } catch (e) {
+          setErroAcao(`A conta foi criada, mas os papéis (${papeis.map((p) => (p === "gestor" ? "Gestor" : NOME_PAPEL_MKT[p])).join(", ")}) não foram salvos: ${erroDe(e)} Marque-os na lista abaixo.`);
+        }
+      }
     } catch (e) { setErroAcao(erroDe(e)); }
-    finally { setSalvando(null); }
+    finally {
+      if (criada) await tudo().catch(() => undefined);
+      setSalvando(null);
+    }
   }
 
   async function trocarSenha(c: Conta) {

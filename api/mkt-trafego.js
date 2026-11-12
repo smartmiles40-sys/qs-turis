@@ -17,6 +17,7 @@
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { getSupabaseUserId } from './_wa.js';
 import { faltaConfigurar } from './_metaAds.js';
+import { pulso } from './_rotinaPulso.js';
 import { sincronizar, agir, montarPainel, reativar } from './_mktTrafegoMotor.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -55,7 +56,11 @@ export default async function handler(req, res) {
     const segredo = String(process.env.CRON_SECRET || '').trim();
     const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
     if (!segredo || !segredoConfere(veio, segredo)) return res.status(401).json({ error: 'Não autorizado' });
-    if (faltaConfigurar().length) return res.status(200).json({ ok: true, pulado: `Meta não configurada (${faltaConfigurar().join(', ')})` });
+    if (faltaConfigurar().length) {
+      // 12/11: pulava calado — o pulso faz o qs-alertas cobrar.
+      await pulso('mkt-trafego', { status: 'pulado', motivo: `Meta não configurada na Vercel (${faltaConfigurar().join(', ')})` });
+      return res.status(200).json({ ok: true, pulado: `Meta não configurada (${faltaConfigurar().join(', ')})` });
+    }
     const saida = {};
     try {
       saida.leitura = await sincronizar({ orcamentoMs: 35_000 });
@@ -72,6 +77,8 @@ export default async function handler(req, res) {
       saida.erroTravas = String(e?.message || 'falhou').slice(0, 300);
     }
     console.log(`[mkt-trafego] ${JSON.stringify({ ...saida, leitura: saida.leitura && { ...saida.leitura, mudancas: saida.leitura.mudancas?.length } })}`);
+    const erroCron = saida.erroLeitura || saida.erroTravas;
+    await pulso('mkt-trafego', erroCron ? { status: 'erro', motivo: erroCron } : {});
     return res.status(saida.erroTravas ? 500 : 200).json(saida);
   }
 
