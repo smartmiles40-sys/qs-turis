@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import * as F from "../../api/_closerBitrixFamilia.js";
-import { cartaoComEstadoDaVenda, espelharCartao, MARCA_CANCELADA } from "../../api/_closerEspelho.js";
+import { cartaoComEstadoDaVenda, espelharCartao, MARCA_CANCELADA, responsavelPendente } from "../../api/_closerEspelho.js";
 
 const FUNIS = JSON.parse(readFileSync(new URL("./funis-03-11.json", import.meta.url), "utf8"));
 const C1 = FUNIS["0"];
@@ -267,4 +267,13 @@ test("venda CANCELADA com o cartão em etapa de venda: pai e filhos vão pra 'Ca
   assert.equal(r.body.ok, true, JSON.stringify(r.body));
   assert.equal(m.deals.get("9001").STAGE_ID, CANCELAMENTO);
   assert.equal(m.deals.get("8100").STAGE_ID, CANCELAMENTO);
+});
+
+// ── Revisão 12/11: troca de responsável só vai pro Bitrix uma vez ───────────
+test("responsavelPendente: troca depois do último envio (ou nunca enviado)", () => {
+  assert.equal(responsavelPendente({ closer_id: "c", closer_trocado_em: "2026-11-12T10:00:00Z", bitrix_enviado_em: "2026-11-12T09:00:00Z" }), true);
+  assert.equal(responsavelPendente({ closer_id: "c", closer_trocado_em: "2026-11-12T10:00:00Z", bitrix_enviado_em: null }), true);
+  assert.equal(responsavelPendente({ closer_id: "c", closer_trocado_em: "2026-11-12T10:00:00Z", bitrix_enviado_em: "2026-11-12T11:00:00Z" }), false);
+  assert.equal(responsavelPendente({ closer_id: "c", closer_trocado_em: null, bitrix_enviado_em: null }), false);
+  assert.equal(responsavelPendente({}), false);
 });

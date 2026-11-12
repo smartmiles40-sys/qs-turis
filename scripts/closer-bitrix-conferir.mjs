@@ -11,6 +11,10 @@
 // --enviar chama a MESMA rodada que o Vercel Cron faz a cada 10 min (até 25
 // cartões por vez, com as travas de api/_closerBitrixPlano.js). Repita até zerar.
 //
+// ⚠️ --enviar ESCREVE no Bitrix e só funciona com CLOSER_CRON_BITRIX_LIGADO=1 na
+// Vercel (sem ela a rota responde { pulado } e nada é enviado).
+// 12/11: o SECO é paginado (60 por chamada); o script repete até o fim.
+//
 // --url=https://...  muda o endereço (padrão: QS_URL ou https://qs-turis.vercel.app)
 // -----------------------------------------------------------------------------
 const args = process.argv.slice(2);
@@ -23,26 +27,43 @@ if (!segredo) {
   process.exit(1);
 }
 
-const acao = enviar ? 'cron-bitrix' : `conferir-bitrix${todos ? '&escopo=todos' : ''}`;
-const r = await fetch(`${url}/api/closer?acao=${acao}`, { headers: { Authorization: `Bearer ${segredo}` } });
-const j = await r.json().catch(() => ({}));
-if (!r.ok) {
-  console.error(`HTTP ${r.status}:`, j.error || j);
-  process.exit(1);
+async function chamar(acao) {
+  const r = await fetch(`${url}/api/closer?acao=${acao}`, { headers: { Authorization: `Bearer ${segredo}` } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    console.error(`HTTP ${r.status}:`, j.error || j);
+    process.exit(1);
+  }
+  return j;
 }
 
 if (enviar) {
-  console.log('Rodada enviada:', j);
+  console.log('Rodada enviada:', await chamar('cron-bitrix'));
   process.exit(0);
 }
 
-const { resumo, itens = [] } = j;
-console.log(`\nMODO SECO — nada foi enviado. ${resumo.conferidos} conferidos` +
-  `${resumo.naoConferidos ? ` (+${resumo.naoConferidos} ficaram pra próxima, tempo)` : ''}.`);
+// 12/11: paginado — repete com &pular= até a rota devolver proximo = null.
+const itens = [];
+let pular = 0;
+let total = null;
+for (let volta = 0; volta < 50 && pular !== null; volta++) {
+  const j = await chamar(`conferir-bitrix${todos ? '&escopo=todos' : ''}&pular=${pular}`);
+  itens.push(...(j.itens || []));
+  total = j.resumo?.total ?? total;
+  console.error(`  … ${itens.length}${total != null ? ` de ${total}` : ''} conferidos`);
+  pular = j.proximo ?? null;
+}
+const resumo = {
+  conferidos: itens.length,
+  enviaria: itens.filter((i) => i.envia).length,
+  jaIgual: itens.filter((i) => i.ok && !i.envia).length,
+  bloqueados: itens.filter((i) => !i.ok).length,
+};
+console.log(`\nMODO SECO — nada foi enviado. ${resumo.conferidos} conferidos${total != null ? ` (fila: ${total})` : ''}.`);
 console.log(`  enviaria: ${resumo.enviaria}   já igual: ${resumo.jaIgual}   não mexe: ${resumo.bloqueados}\n`);
 const linha = (i) => `${String(i.dealId || '—').padEnd(6)} ${String(i.cliente || '—').slice(0, 28).padEnd(28)} ${String(i.closer || '—').slice(0, 16).padEnd(16)} ${String(i.etapaQs).padEnd(20)}`;
 const grupos = [
-  ['ENVIARIA', itens.filter((i) => i.envia), (i) => `${i.de?.nome || '?'} → ${i.para?.nome || '?'}${i.para?.funil !== i.de?.funil ? ` (funil ${i.de?.funil} → ${i.para?.funil})` : ''}${i.campos?.OPPORTUNITY ? ` · valor ${i.campos.OPPORTUNITY}` : ''}`],
+  ['ENVIARIA', itens.filter((i) => i.envia), (i) => `${i.de?.nome || '?'} → ${i.para?.nome || '?'}${i.para?.funil !== i.de?.funil ? ` (funil ${i.de?.funil} → ${i.para?.funil})` : ''}${i.campos?.OPPORTUNITY ? ` · valor ${i.campos.OPPORTUNITY}` : ''}${i.campos?.UF_CRM_1744663824797 || i.campos?.UF_CRM_1789683835018 ? ' · motivo' : ''}${i.campos?.ASSIGNED_BY_ID ? ' · responsável' : ''}`],
   ['JÁ IGUAL', itens.filter((i) => i.ok && !i.envia), (i) => i.de?.nome || ''],
   ['NÃO MEXE', itens.filter((i) => !i.ok), (i) => i.motivo || ''],
 ];
