@@ -87,6 +87,8 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
   const [registrarAberto, setRegistrarAberto] = useState(false);
   // 0295: recarrega a lista de propostas anexadas depois de subir a venda
   const [versaoAnexos, setVersaoAnexos] = useState(0);
+  // 12/11: muda quando a família (quem vai) muda — o bloco do contrato relê quem recebe.
+  const [versaoFamilia, setVersaoFamilia] = useState(0);
   // Motivo pedido ao mover pra Perdido ou Venda cancelada.
   const [perdendo, setPerdendo] = useState<{ etapa: Etapa; motivo: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -221,7 +223,7 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
 
           {/* ── 0351: a PASTA — quem vai nesta venda (família), com o card de cada um no Bitrix ── */}
           <FamiliaDaVenda negocioId={n.id} versao={versaoAnexos} nomeTitular={nome} podeEditar={!encerrado && !consolidada}
-            onMudou={(r) => { setAviso({ tom: r.tom, t: r.t }); void carregar(); }} />
+            onMudou={(r) => { setAviso({ tom: r.tom, t: r.t }); setVersaoFamilia((v) => v + 1); void carregar(); }} />
 
           {/* ── 2. Fechar: pagamento e contrato (ficha de fechamento) ── */}
           {(vendaRegistrada || encerrado) && (
@@ -244,7 +246,7 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
           )}
           {/* Contrato à parte da venda (29/10): sempre no cartão, antes ou depois de consolidar; sem ZapSign, modo manual. */}
           {(!encerrado || n.status_contrato) && (
-            <ContratoBloco negocio={n} onMudou={() => void carregar()} />
+            <ContratoBloco negocio={n} versaoFamilia={versaoFamilia + versaoAnexos} onMudou={() => void carregar()} />
           )}
 
           {/* ── 0295: a proposta enviada ao cliente, anexada ao registrar a venda ── */}

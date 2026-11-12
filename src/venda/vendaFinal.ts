@@ -156,6 +156,8 @@ export const PASSO = { quem: 0, oque: 1, detalhes: 2, pagamento: 3, analise: 4 }
 export function passoDaFalta(f: string): number {
   const t = normNome(f);
   if (/pagamento|soma|parcela|forma de pag|financeiro|total|valor da venda/.test(t)) return PASSO.pagamento;
+  // "falta a data de nascimento" é da PESSOA (antes caía em Detalhes pelo "data").
+  if (/nascimento|cpf|vinculo|telefone|e-?mail/.test(t)) return PASSO.quem;
   if (/o que (o cliente )?(comprou|vendeu)|nenhum item|tipo de venda/.test(t)) return PASSO.oque;
   if (/expedic|item|voo|aereo|hotel|hosped|data|quarto|seguro|pacote/.test(t)) return PASSO.detalhes;
   return PASSO.quem; // pessoa, vínculo, CPF, nascimento, nome…
@@ -165,28 +167,45 @@ export function passoDaFalta(f: string): number {
 export const primeiroPassoDasFaltas = (fs: string[]) => (fs.length ? Math.min(...fs.map(passoDaFalta)) : PASSO.analise);
 
 export interface EntradaFaltas {
-  comprador: Pick<PessoaVenda, "nome">;
+  comprador: Pick<PessoaVenda, "nome"> & Partial<Pick<PessoaVenda, "cpf" | "nascimento" | "telefone" | "email">>;
   /** Todos que vão junto (sem o comprador). */
-  acompanhantes: Pick<Viajante, "nome" | "vinculo">[];
+  acompanhantes: (Pick<Viajante, "nome" | "vinculo"> & Partial<Pick<Viajante, "cpf" | "nascimento">>)[];
   itens: { tipo: string; rotulo: string; expedicaoEscolhida?: boolean }[];
   total: number;
   linhas: LinhaPagamento[];
 }
 
-/** O que falta pra consolidar (a venda_consolidar confere de novo no banco). Vazio = pode. */
+const vazio = (v: string | null | undefined) => !String(v ?? "").trim();
+
+/**
+ * O que falta pra consolidar. Vazio = pode.
+ * 12/11: confere AS MESMAS coisas que a venda_consolidar do banco (CPF, nascimento,
+ * telefone/e-mail do comprador, data de cada pagamento). Antes a tela deixava passar,
+ * já reservava a vaga e só o banco barrava — o closer achava que tinha consolidado.
+ */
 export function faltasParaConsolidar(e: EntradaFaltas): string[] {
   const f: string[] = [];
+  const quem = e.comprador.nome.trim() || "Quem comprou";
   if (e.comprador.nome.trim().length < 3) f.push("Quem comprou: falta o nome completo.");
+  if ("cpf" in e.comprador && vazio(e.comprador.cpf)) f.push(`${quem}: falta o CPF.`);
+  if ("nascimento" in e.comprador && vazio(e.comprador.nascimento)) f.push(`${quem}: falta a data de nascimento.`);
+  if (("telefone" in e.comprador || "email" in e.comprador) && vazio(e.comprador.telefone) && vazio(e.comprador.email)) f.push(`${quem}: falta telefone ou e-mail.`);
   e.acompanhantes.forEach((a, i) => {
     const nome = a.nome.trim() || `Acompanhante ${i + 1}`;
     if (a.nome.trim().length < 3) f.push(`${nome}: falta o nome completo.`);
     if (!a.vinculo) f.push(`${nome}: falta o vínculo (cônjuge, filho, amigo…).`);
+    if ("cpf" in a && vazio(a.cpf)) f.push(`${nome}: falta o CPF.`);
+    if ("nascimento" in a && vazio(a.nascimento)) f.push(`${nome}: falta a data de nascimento.`);
   });
   if (!e.itens.length) f.push("O que vendeu: nenhum item marcado.");
   for (const i of e.itens) if (i.tipo === "expedicao" && i.expedicaoEscolhida === false) f.push(`${i.rotulo}: escolha qual expedição foi vendida.`);
   const c = conferirPagamento(e.linhas, e.total);
   if (c.total <= 0) f.push("Pagamento: o total da venda está zerado.");
-  e.linhas.forEach((l, i) => { const p = problemaDaLinha(l, i + 1); if (p) f.push(p); });
+  e.linhas.forEach((l, i) => {
+    const p = problemaDaLinha(l, i + 1);
+    if (p) f.push(p);
+    else if (!linhaEmBranco(l) && vazio(l.data)) f.push(`Pagamento ${i + 1}: falta a data.`);
+  });
   if (!e.linhas.some((l) => !linhaEmBranco(l))) f.push("Pagamento: lance pelo menos uma linha (forma, valor e data).");
   else if (c.total > 0 && !c.bate) f.push(`Pagamento: soma ${brl(c.soma)} ≠ total ${brl(c.total)}.`);
   return f;

@@ -65,12 +65,34 @@ test("faltas pra consolidar + passo de cada falta", () => {
   assert.ok(f.includes("Maria Souza: falta o vínculo (cônjuge, filho, amigo…)."));
   assert.ok(f.some((x) => /soma R\$\s?15\.000,00 ≠ total R\$\s?17\.000,00/.test(x)), f.join(" | "));
   assert.equal(F.primeiroPassoDasFaltas(f), F.PASSO.quem);
-  assert.deepEqual(F.faltasParaConsolidar({ ...base, acompanhantes: [{ nome: "Maria Souza", vinculo: "filho" }], linhas: [L({ forma: "pix", valor: "17000" })] }), []);
+  assert.deepEqual(F.faltasParaConsolidar({ ...base, acompanhantes: [{ nome: "Maria Souza", vinculo: "filho" }], linhas: [L({ forma: "pix", valor: "17000", data: "2026-11-12" })] }), []);
   assert.equal(F.passoDaFalta("Pagamento: soma R$ 1 ≠ total R$ 2"), F.PASSO.pagamento);
   assert.equal(F.passoDaFalta("O que vendeu: nenhum item marcado."), F.PASSO.oque);
   assert.equal(F.passoDaFalta("Expedição: escolha qual expedição foi vendida."), F.PASSO.detalhes);
   assert.equal(F.passoDaFalta("João: falta o CPF"), F.PASSO.quem);
   assert.equal(F.primeiroPassoDasFaltas([]), F.PASSO.analise);
+});
+
+test("12/11: a tela confere o mesmo que o banco (CPF, nascimento, contato, data do pagamento)", () => {
+  // O caso do teste do Bruno: titular sem CPF/nascimento, amiga sem nascimento, pagamentos sem data.
+  const f = F.faltasParaConsolidar({
+    comprador: { nome: "TESTE CLAUDE", cpf: "", nascimento: "", telefone: "11999990000", email: "" },
+    acompanhantes: [{ nome: "teste 1", vinculo: "amigo", cpf: "11111111111", nascimento: "" }],
+    itens: [{ tipo: "expedicao", rotulo: "Expedição", expedicaoEscolhida: true }],
+    total: 20,
+    linhas: [L({ forma: "pix", valor: "5" }), L({ forma: "cartao", valor: "15" })],
+  });
+  assert.ok(f.includes("TESTE CLAUDE: falta o CPF."), f.join(" | "));
+  assert.ok(f.includes("TESTE CLAUDE: falta a data de nascimento."));
+  assert.ok(f.includes("teste 1: falta a data de nascimento."));
+  assert.ok(!f.some((x) => /teste 1: falta o CPF/.test(x)));
+  assert.ok(f.includes("Pagamento 1: falta a data.") && f.includes("Pagamento 2: falta a data."));
+  assert.ok(!f.some((x) => /telefone ou e-mail/.test(x)), "tem telefone");
+  assert.equal(F.passoDaFalta("teste 1: falta a data de nascimento."), F.PASSO.quem);
+  assert.equal(F.passoDaFalta("Pagamento 2: falta a data."), F.PASSO.pagamento);
+  const sem = F.faltasParaConsolidar({ comprador: { nome: "Ana Souza", cpf: "1", nascimento: "2000-01-01", telefone: "", email: "" },
+    acompanhantes: [], itens: [{ tipo: "outro", rotulo: "Outro" }], total: 10, linhas: [L({ forma: "pix", valor: "10", data: "2026-11-12" })] });
+  assert.deepEqual(sem, ["Ana Souza: falta telefone ou e-mail."]);
 });
 
 test("juntar família ↔ expedição: atualiza por chave/CPF/nome, adiciona e nunca apaga", () => {

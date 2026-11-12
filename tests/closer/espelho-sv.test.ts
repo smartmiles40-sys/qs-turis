@@ -248,6 +248,15 @@ test("cartaoComEstadoDaVenda: cancelada em etapa de venda vira 'venda_cancelada'
   assert.equal(cartaoComEstadoDaVenda({ etapa: "em_negociacao" }, { estado: "negociacao" }).etapa, "em_negociacao");
 });
 
+test("12/11 mapa do Bruno: consolidada → 'venda_realizada' (WON); reservada segue Em emissão; cancelada não", () => {
+  const consol = { etapa: "aguardando_emissao", consolidada_em: "2026-11-12T15:00:00Z", pre_venda_em: "x" };
+  assert.equal(cartaoComEstadoDaVenda(consol, { estado: "consolidada" }).etapa, "venda_realizada");
+  assert.equal(cartaoComEstadoDaVenda(consol, null).etapa, "venda_realizada", "consolidada pela ficha antiga (sem qs_vendas)");
+  assert.equal(cartaoComEstadoDaVenda(consol, { estado: "cancelada" }).etapa, "venda_cancelada");
+  assert.equal(cartaoComEstadoDaVenda({ etapa: "em_negociacao", consolidada_em: null }, { estado: "reservada", reservada_em: "r" }).etapa, "em_negociacao");
+  assert.equal(cartaoComEstadoDaVenda({ etapa: "venda_realizada", consolidada_em: "c" }, { estado: "consolidada" }).etapa, "venda_realizada");
+});
+
 test("venda CANCELADA com o cartão em etapa de venda: pai e filhos vão pra 'Cancelamento/Desistência'", async () => {
   const filho = pessoa({ bitrix_deal_id: "8100" });
   const m = mundo({

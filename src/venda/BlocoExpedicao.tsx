@@ -63,8 +63,14 @@ export default function BlocoExpedicao({ item, viajantes, expedicoes, carregando
 
   function escolher(e: ExpedicaoVaga | null) {
     if (!e) { onItem({ dados: { ...item.dados, expedicao_id: "" } }); return; }
+    // 12/11: trocou a expedição → o nome automático acompanha (antes ficava "Islândia" com a Tailândia escolhida).
+    // Nome digitado à mão (diferente do automático da expedição anterior) fica.
+    const automaticoAnterior = item.dados.expedicao ? `Expedição ${item.dados.expedicao}` : "";
+    const nomeAtual = (item.nome || "").trim();
+    // Sem o nome da anterior guardado (rascunho velho), "Expedição …" também conta como automático.
+    const trocarNome = !nomeAtual || nomeAtual === automaticoAnterior || (!item.dados.expedicao && /^Expedição /.test(nomeAtual));
     onItem({
-      nome: item.nome || `Expedição ${e.nome}`,
+      nome: trocarNome ? `Expedição ${e.nome}` : item.nome,
       data_inicio: e.data_embarque ?? "", data_fim: e.data_retorno ?? "",
       dados: { ...item.dados, expedicao_id: e.id, expedicao: e.nome, codigo: e.codigo, edicao: mesAno(e.data_embarque) },
     });

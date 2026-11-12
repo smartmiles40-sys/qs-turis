@@ -67,7 +67,7 @@ function BotaoPdf({ contratoId, qual, rotulo }: { contratoId: string; qual: "ger
   );
 }
 
-export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; onMudou: () => void }) {
+export default function ContratoBloco({ negocio, onMudou, versaoFamilia = 0 }: { negocio: Negocio; onMudou: () => void; versaoFamilia?: number }) {
   const [envios, setEnvios] = useState<EnvioContrato[] | null>(null);
   // 0352: família → contrato por pessoa (familia=false: venda de 1 pessoa, o bloco de sempre).
   const [familia, setFamilia] = useState<FamiliaContrato | null>(null);
@@ -79,11 +79,16 @@ export default function ContratoBloco({ negocio, onMudou }: { negocio: Negocio; 
   const [texto, setTexto] = useState("");
 
   const carregar = useCallback(async () => {
-    const fam = familiaDoContrato(negocio.id).catch(() => ({ familia: false }) as FamiliaContrato);
+    // 12/11: erro ao ler a família NÃO vira "venda de 1 pessoa" calado — avisa (senão o closer manda 1 contrato achando que é o certo).
+    const fam = familiaDoContrato(negocio.id).catch((e: Error) => {
+      setAviso({ tom: "erro", t: `Não deu pra ler quem vai na viagem (${e.message}). Recarregue antes de enviar o contrato.` });
+      return { familia: false } as FamiliaContrato;
+    });
     try { setEnvios(await enviosDoCartao(negocio.id)); } catch (e) { setEnvios([]); setAviso({ tom: "erro", t: (e as Error).message }); }
     setFamilia(await fam);
   }, [negocio.id]);
-  useEffect(() => { void carregar(); }, [carregar, negocio.status_contrato]);
+  // versaoFamilia (12/11): pessoa adicionada/removida com o cartão aberto → relê quem recebe contrato.
+  useEffect(() => { void carregar(); }, [carregar, negocio.status_contrato, versaoFamilia]);
 
   const lista = envios ?? [];
   const atual = lista.find((e) => !["erro", "cancelado"].includes(e.status)) ?? null;

@@ -57,7 +57,8 @@ export function resumoDaFicha(f, parcelas) {
  * O cartão como o Bitrix deve vê-lo, levando em conta qs_vendas.estado. Puro.
  *   reservada  → pré-venda (coluna de venda + valor da venda), se ainda não consolidou.
  *   cancelada  → sem pré-venda; cartão em etapa de venda vira 'venda_cancelada'.
- *   negociacao/consolidada/sem estado → o cartão como está.
+ *   consolidada (cartão em 'aguardando_emissao') → 'venda_realizada' (WON) — 12/11.
+ *   negociacao/sem estado → o cartão como está.
  */
 export function cartaoComEstadoDaVenda(n, venda) {
   const estado = venda?.estado || null;
@@ -75,6 +76,12 @@ export function cartaoComEstadoDaVenda(n, venda) {
       pre_venda_em: null, pre_venda_valor: null,
       etapa: ETAPAS_DE_VENDA.includes(n.etapa) ? 'venda_cancelada' : n.etapa,
     };
+  }
+  // Mapa do Bruno (12/11): reservou → "Em emissão / Pix Expedição"; CONSOLIDOU → "Venda realizada".
+  // O closer_consolidar deixa o cartão do QS em 'aguardando_emissao' (o Ops ainda emite);
+  // no Bitrix a venda consolidada já é Venda realizada — pai e filhos da família.
+  if ((estado === 'consolidada' || (n.consolidada_em && estado !== 'cancelada')) && n.etapa === 'aguardando_emissao') {
+    return { ...n, etapa: 'venda_realizada' };
   }
   return n;
 }
