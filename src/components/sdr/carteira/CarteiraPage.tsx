@@ -19,6 +19,14 @@
 //   3. A BUSCA — achar alguém específico (nome, telefone ou ID do Bitrix) e
 //      reiniciar, sozinho ou em lote.
 //
+// -- FILTROS (12/11/2026) -----------------------------------------------------
+//
+// Lead Score, tempo sem contato e cadência — os mesmos do Gerenciamento de
+// Leads. O "Iniciar leads hoje" sorteia SÓ dentro dos filtros da tela: "30
+// quentes sem contato há 30+ dias" em vez de 30 quaisquer. "Sem contato" é a
+// última atividade CONCLUÍDA (view qs_lead_ultimo_contato, 0375), não o
+// updated_at — que muda com qualquer sync do Bitrix.
+//
 // -- O RETRABALHO NÃO PODE VIRAR DÍVIDA --------------------------------------
 //
 // A atividade criada aqui nasce pra HOJE e morre hoje (decisão do Bruno,
@@ -45,14 +53,28 @@ import {
   type ReguaVelocidade, type SaudeSdr, type PontoSerie,
 } from "@/lib/qs/carteiraSaude";
 import { fetchActivityGoals, fetchAllRows } from "@/lib/qs/queries";
+import {
+  casaFiltrosCarteira, diasSemContato, temFiltroCarteira,
+  FILTROS_CARTEIRA_VAZIOS, SEM_CADENCIA, SEM_SCORE, SEM_CONTATO_OPCOES,
+  type FiltrosCarteira, type SemContatoFiltro,
+} from "@/lib/qs/carteiraFiltro";
+import { normalizeTemperature, type LeadTemperature } from "@/lib/leadScore";
 import SaudeCarteira from "./SaudeCarteira";
 
 /** O pedaço do lead que a carteira usa. */
 interface LeadDaCarteira {
   id: string; full_name: string | null; phone: string | null; bitrix_id: string | null;
   status: string; segment: string | null; owner_id: string | null; cadence_id: string | null;
+  lead_score: string | null;
   updated_at: string; created_at: string;
 }
+
+// Mesmos rótulos do filtro de temperatura do Gerenciamento de Leads.
+const TEMP_ROTULO: Record<LeadTemperature, string> = {
+  quente: "🔥 Quente",
+  morno: "🌤️ Morno",
+  frio: "❄️ Frio",
+};
 
 interface Props {
   onOpenLead: (leadId: string) => void;
@@ -73,7 +95,14 @@ interface ItemCarteira {
   bitrixId: string | null;
   status: string | null;
   segmento: string | null;
+  /** Lead Score cru do Bitrix (normalizado no filtro/chip). */
+  leadScore: string | null;
+  /**
+   * Última atividade CONCLUÍDA (view qs_lead_ultimo_contato, 0375). null = nunca
+   * houve contato. Sem a view no banco, cai no updated_at do lead (aproximado).
+   */
   ultimoContato: string | null;
+  cadenceId: string | null;
   temAtividadeAberta: boolean;
   temCadencia: boolean;
 }
@@ -86,11 +115,6 @@ const STATUS_ROTULO: Record<string, string> = {
   ganho: "Ganho",
   perdido: "Perdido",
 };
-
-function diasDesde(iso: string | null): number | null {
-  if (!iso) return null;
-  return Math.floor((Date.now() - new Date(iso).getTime()) / 864e5);
-}
 
 /** Só dígitos — pra busca por telefone casar "(11) 99999-8888" com "1199999". */
 function digitos(s: string): string {
@@ -106,7 +130,11 @@ export default function CarteiraPage({ onOpenLead }: Props) {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [busca, setBusca] = useState("");
-  const [filtro, setFiltro] = useState<"todos" | "esquecidos" | "parados" | "sem_resposta">("todos");
+  const [filtro, setFiltro] = useState<"todos" | "esquecidos" | "sem_resposta">("todos");
+  /** Lead Score, tempo sem contato e cadência — os mesmos do Gerenciamento de Leads. */
+  const [filtros, setFiltros] = useState<FiltrosCarteira>(FILTROS_CARTEIRA_VAZIOS);
+  /** true = a view 0375 não respondeu e o "sem contato" está usando updated_at. */
+  const [contatoAproximado, setContatoAproximado] = useState(false);
   /** Quando o card de um SDR manda "ver esquecidos", a lista também filtra por ele. */
   const [donoFiltro, setDonoFiltro] = useState<string | null>(null);
 
@@ -148,6 +176,11 @@ export default function CarteiraPage({ onOpenLead }: Props) {
         fetchAllRows<{ lead_id: string }>((de, ate) =>
           supabase.from("qs_tasks").select("lead_id").in("status", ["pendente", "atrasada"]).order("id").range(de, ate)
         ),
+        // Último contato = última atividade concluída (0375). Se a view ainda
+        // não existe, devolve null e a tela cai no updated_at, avisando.
+        fetchAllRows<{ lead_id: string; ultimo_contato: string }>((de, ate) =>
+          supabase.from("qs_lead_ultimo_contato").select("lead_id, ultimo_contato").order("lead_id").range(de, ate)
+        ).catch((e) => { console.warn("[carteira/ultimo_contato]", e); return null; }),
       ]);
       extrasP.catch(() => { /* tratado no await lá embaixo */ });
       const linhas = await fetchAllRows<{
@@ -174,17 +207,19 @@ export default function CarteiraPage({ onOpenLead }: Props) {
       const leads = await fetchAllRows<LeadDaCarteira>((de, ate) =>
         supabase
           .from("qs_leads")
-          .select("id, full_name, phone, bitrix_id, status, segment, owner_id, cadence_id, updated_at, created_at")
+          .select("id, full_name, phone, bitrix_id, status, segment, owner_id, cadence_id, lead_score, updated_at, created_at")
           .in("owner_id", donos)
           .order("created_at", { ascending: false })
           .order("id")
           .range(de, ate)
       );
 
-      const [{ data: usuarios }, { data: cads }, abertas] = await extrasP;
+      const [{ data: usuarios }, { data: cads }, abertas, contatos] = await extrasP;
 
       const nomeDe = new Map((usuarios ?? []).map((u: { id: string; name: string }) => [u.id, u.name]));
       const comAtividade = new Set((abertas ?? []).map((t: { lead_id: string }) => t.lead_id));
+      const ultimoContatoDe = contatos ? new Map(contatos.map((c) => [c.lead_id, c.ultimo_contato])) : null;
+      setContatoAproximado(!ultimoContatoDe);
       setCadencias((cads ?? []) as Cadencia[]);
 
       // O card MAIS RECENTE de cada dono+telefone. Sem a chave do banco aqui, o
@@ -219,7 +254,11 @@ export default function CarteiraPage({ onOpenLead }: Props) {
           bitrixId: lead?.bitrix_id ?? null,
           status: lead?.status ?? null,
           segmento: lead?.segment ?? null,
-          ultimoContato: lead?.updated_at ?? null,
+          leadScore: lead?.lead_score ?? null,
+          ultimoContato: lead
+            ? (ultimoContatoDe ? ultimoContatoDe.get(lead.id) ?? null : lead.updated_at)
+            : null,
+          cadenceId: lead?.cadence_id ?? null,
           temAtividadeAberta: lead ? comAtividade.has(lead.id) : false,
           temCadencia: !!lead?.cadence_id,
         });
@@ -282,17 +321,13 @@ export default function CarteiraPage({ onOpenLead }: Props) {
   // por abertura de tela, no mesmo espírito do sweepOutcomeTasks.
   useEffect(() => { void varrerRetrabalhoVencido(); }, []);
 
-  /** Quem pode receber atividade nova: sem nada aberto na fila. */
-  const disponiveis = useMemo(
-    () => itens.filter((i) => i.leadId && !i.temAtividadeAberta && i.status !== "ganho"),
-    [itens]
-  );
-
   const visiveis = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     const termoDigitos = digitos(termo);
+    const agora = Date.now();
     return itens.filter((i) => {
       if (donoFiltro && i.donoId !== donoFiltro) return false;
+      if (!casaFiltrosCarteira(i, filtros, agora)) return false;
       if (termo) {
         // Três chaves de busca, e a do Bitrix é exata: digitar "123" não pode
         // trazer o lead 51234 no meio de quem procura o card 123.
@@ -304,14 +339,41 @@ export default function CarteiraPage({ onOpenLead }: Props) {
       if (filtro === "esquecidos") {
         return !i.temAtividadeAberta && i.status !== "ganho" && i.status !== "perdido";
       }
-      if (filtro === "parados") {
-        const d = diasDesde(i.ultimoContato);
-        return !i.temAtividadeAberta && d !== null && d >= 15 && i.status !== "ganho";
-      }
       if (filtro === "sem_resposta") return i.status === "perdido" || i.status === "nao_iniciado";
       return true;
     });
-  }, [itens, busca, filtro, donoFiltro]);
+  }, [itens, busca, filtro, donoFiltro, filtros]);
+
+  /**
+   * Quem pode receber atividade nova, DENTRO DOS FILTROS da tela (12/11): o
+   * "Iniciar leads hoje" sorteia daqui. Antes sorteava da carteira inteira — o
+   * SDR não tinha como dizer "quero 30 quentes, sem contato há 30+ dias".
+   */
+  const disponiveis = useMemo(
+    () => visiveis.filter((i) => i.leadId && !i.temAtividadeAberta && i.status !== "ganho"),
+    [visiveis]
+  );
+
+  const nomeCadencia = useMemo(() => new Map(cadencias.map((c) => [c.id, c.name])), [cadencias]);
+
+  /** Os filtros ativos, em texto — o modal do sorteio diz de onde ele vai tirar. */
+  const resumoFiltros = useMemo(() => {
+    const partes: string[] = [];
+    if (filtros.temp) partes.push(filtros.temp === SEM_SCORE ? "sem Lead Score" : TEMP_ROTULO[filtros.temp]);
+    if (filtros.semContato) {
+      partes.push(SEM_CONTATO_OPCOES.find((o) => o.valor === filtros.semContato)?.rotulo.toLowerCase() ?? "");
+    }
+    if (filtros.cadenceId) {
+      partes.push(filtros.cadenceId === SEM_CADENCIA
+        ? "sem cadência"
+        : `cadência ${nomeCadencia.get(filtros.cadenceId) ?? "?"}`);
+    }
+    if (filtro === "esquecidos") partes.push("parados sem atividade");
+    if (filtro === "sem_resposta") partes.push("perdidos / não iniciados");
+    if (donoFiltro) partes.push(`só ${saude.find((s) => s.owner_id === donoFiltro)?.nome ?? "um SDR"}`);
+    if (busca.trim()) partes.push(`busca "${busca.trim()}"`);
+    return partes;
+  }, [filtros, filtro, donoFiltro, busca, nomeCadencia, saude]);
 
   const listados = useMemo(() => visiveis.slice(0, 200), [visiveis]);
 
@@ -393,11 +455,13 @@ export default function CarteiraPage({ onOpenLead }: Props) {
     const alvos = sortear(disponiveis, n);
     setSorteioAberto(false);
     if (alvos.length === 0) {
-      notifyError("Não há lead livre na carteira pra iniciar — todos já têm atividade aberta.");
+      notifyError(resumoFiltros.length
+        ? "Nenhum lead livre nesses filtros — afrouxe algum filtro e tente de novo."
+        : "Não há lead livre na carteira pra iniciar — todos já têm atividade aberta.");
       return;
     }
     if (alvos.length < n) {
-      notifySuccess(`Só havia ${alvos.length} lead(s) livre(s) na carteira. Vou com esses.`);
+      notifySuccess(`Só havia ${alvos.length} lead(s) livre(s) ${resumoFiltros.length ? "nesses filtros" : "na carteira"}. Vou com esses.`);
     }
     await rodarLote(alvos, sorteioCadencia || null);
   }
@@ -432,10 +496,10 @@ export default function CarteiraPage({ onOpenLead }: Props) {
           disabled={disponiveis.length === 0 || !!progresso}
           className="shrink-0 px-4 py-2.5 rounded-xl bg-[#0147FF] text-white text-sm font-bold hover:bg-[#0139cc] disabled:opacity-50"
           title={disponiveis.length === 0
-            ? "Todos os leads da carteira já têm atividade aberta"
-            : `Sorteia leads da sua carteira e joga na fila de hoje (${disponiveis.length} livres)`}
+            ? (resumoFiltros.length ? "Nenhum lead livre nos filtros atuais" : "Todos os leads da carteira já têm atividade aberta")
+            : `Sorteia leads ${resumoFiltros.length ? "dos filtros atuais" : "da sua carteira"} e joga na fila de hoje (${disponiveis.length} livres)`}
         >
-          Iniciar leads hoje
+          Iniciar leads hoje{resumoFiltros.length ? ` (${disponiveis.length} no filtro)` : ""}
         </button>
       </header>
 
@@ -463,7 +527,6 @@ export default function CarteiraPage({ onOpenLead }: Props) {
         {([
           ["todos", `Todos (${itens.length})`],
           ["esquecidos", `Parados sem atividade (${totalEsquecidos})`],
-          ["parados", "Parados há 15+ dias"],
           ["sem_resposta", "Perdidos / não iniciados"],
         ] as const).map(([k, rotulo]) => (
           <button
@@ -483,6 +546,67 @@ export default function CarteiraPage({ onOpenLead }: Props) {
           >
             Só {saude.find((s) => s.owner_id === donoFiltro)?.nome ?? "um SDR"} ✕
           </button>
+        )}
+      </div>
+
+      {/* ── Lead Score, tempo sem contato e cadência (mesmos do Gerenciamento de Leads) ── */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {(Object.keys(TEMP_ROTULO) as LeadTemperature[]).map((k) => (
+          <button
+            key={k}
+            onClick={() => setFiltros((f) => ({ ...f, temp: f.temp === k ? "" : k }))}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              filtros.temp === k ? "bg-[#0147FF] text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            {TEMP_ROTULO[k]}
+          </button>
+        ))}
+        <button
+          onClick={() => setFiltros((f) => ({ ...f, temp: f.temp === SEM_SCORE ? "" : SEM_SCORE }))}
+          className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+            filtros.temp === SEM_SCORE ? "bg-[#0147FF] text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+          }`}
+        >
+          Sem score
+        </button>
+
+        <span className="w-px h-5 bg-gray-200" />
+
+        <select
+          value={filtros.semContato}
+          onChange={(e) => setFiltros((f) => ({ ...f, semContato: e.target.value as SemContatoFiltro }))}
+          aria-label="Tempo sem contato"
+          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
+        >
+          <option value="">Tempo sem contato</option>
+          {SEM_CONTATO_OPCOES.map((o) => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
+        </select>
+
+        <select
+          value={filtros.cadenceId}
+          onChange={(e) => setFiltros((f) => ({ ...f, cadenceId: e.target.value }))}
+          aria-label="Cadência"
+          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 max-w-[220px]"
+        >
+          <option value="">Cadência</option>
+          <option value={SEM_CADENCIA}>Sem cadência</option>
+          {cadencias.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+
+        {temFiltroCarteira(filtros) && (
+          <button
+            onClick={() => setFiltros(FILTROS_CARTEIRA_VAZIOS)}
+            className="rounded-full px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 bg-white hover:bg-red-50"
+          >
+            Limpar filtros
+          </button>
+        )}
+
+        {contatoAproximado && (
+          <span className="text-[11px] text-amber-700" title="Aplique a migration 0375 (qs_lead_ultimo_contato)">
+            "Sem contato" aproximado pela última alteração do lead
+          </span>
         )}
       </div>
 
@@ -544,7 +668,8 @@ export default function CarteiraPage({ onOpenLead }: Props) {
 
           <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200 overflow-hidden bg-white">
             {listados.map((i) => {
-              const dias = diasDesde(i.ultimoContato);
+              const dias = diasSemContato(i.ultimoContato);
+              const temp = normalizeTemperature(i.leadScore);
               return (
                 <li key={i.chave} className="flex items-center gap-3 px-4 py-3">
                   {!i.temAtividadeAberta && (
@@ -566,8 +691,12 @@ export default function CarteiraPage({ onOpenLead }: Props) {
                     <p className="text-[11.5px] text-gray-500 truncate">
                       {STATUS_ROTULO[i.status ?? ""] ?? i.status ?? "—"}
                       {i.bitrixId ? ` · #${i.bitrixId}` : ""}
+                      {temp ? ` · ${TEMP_ROTULO[temp]}` : ""}
+                      {i.cadenceId ? ` · ${nomeCadencia.get(i.cadenceId) ?? "cadência congelada"}` : ""}
                       {i.segmento ? ` · ${i.segmento}` : ""}
-                      {dias !== null ? ` · parado há ${dias} dia${dias === 1 ? "" : "s"}` : ""}
+                      {dias !== null
+                        ? ` · sem contato há ${dias} dia${dias === 1 ? "" : "s"}`
+                        : contatoAproximado ? "" : " · nunca contatado"}
                       {gestor && i.sdrNome ? ` · ${i.sdrNome}` : ""}
                       {i.substitutoNome ? ` · coberto por ${i.substitutoNome} até ${i.substitutoAte}` : ""}
                     </p>
@@ -617,8 +746,20 @@ export default function CarteiraPage({ onOpenLead }: Props) {
             <h2 className="text-base font-bold text-gray-900">Iniciar leads hoje</h2>
             <p className="mt-1 text-[13px] text-gray-600">
               Sorteio na sua carteira, entre os <strong>{disponiveis.length}</strong> leads que não têm nenhuma
-              atividade aberta. Quem já está na fila fica de fora — senão você trabalharia o mesmo lead duas vezes.
+              atividade aberta{resumoFiltros.length ? " e batem com os filtros" : ""}. Quem já está na fila fica de
+              fora — senão você trabalharia o mesmo lead duas vezes.
             </p>
+            {resumoFiltros.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {resumoFiltros.map((p) => (
+                  <span key={p} className="rounded-full bg-[#0147FF]/10 px-2 py-0.5 text-[11px] font-medium text-[#0147FF]">{p}</span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-[12px] text-gray-500">
+                Sem filtro: sorteia da carteira inteira. Feche e use Lead Score, tempo sem contato ou cadência pra escolher melhor.
+              </p>
+            )}
 
             <label className="block mt-4 text-xs font-medium text-gray-700 mb-1">Quantos leads</label>
             <input
