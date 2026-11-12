@@ -5,7 +5,8 @@
 //
 //   • Pagamento em LINHAS: forma, valor, data, nº de parcelas; soma = total;
 //   • Estado da venda: negociação → reservada → consolidada (ou cancelada);
-//   • Vagas: quem já é desta venda não conta contra ela mesma;
+//   • Vagas: quem já é desta venda não conta contra ela mesma (fila do espelho inclusa, 0368);
+//   • Cancelar venda (0367): leitura do retorno e a frase da tela;
 //   • Faltas pra consolidar (a mesma ideia da venda_consolidar do banco) e em
 //     qual passo da tela cada falta se resolve;
 //   • Rascunho da tela inteira (localStorage + qs_vendas.rascunho);
@@ -145,9 +146,57 @@ export function estadoDaVenda(gravado: unknown, cartao?: { consolidada?: boolean
 /** Quantos desta venda JÁ ocupam vaga na expedição (têm linha em `passageiros`). */
 export const jaOcupamVaga = (vs: Pick<Viajante, "passageiro_id">[]) => vs.filter((v) => !!v.passageiro_id).length;
 
-/** Vagas livres PRA ESTA VENDA = vagas da expedição + quem já é desta venda (reabrir não trava). */
-export function vagasParaEstaVenda(vagasDaExpedicao: number, vs: Pick<Viajante, "passageiro_id">[]): number {
-  return Math.max(0, Number(vagasDaExpedicao) || 0) + jaOcupamVaga(vs);
+/**
+ * Vagas livres PRA ESTA VENDA = vagas da expedição + quem já é desta venda (reabrir não trava).
+ * `destaVenda` (0368, exp_vagas_para_venda(p_venda).desta_venda) conta também quem desta venda
+ * ainda espera na fila do espelho (sem passageiro_id). Sem ele, vale o passageiro_id da tela.
+ */
+export function vagasParaEstaVenda(vagasDaExpedicao: number, vs: Pick<Viajante, "passageiro_id">[], destaVenda?: number | null): number {
+  const proprios = destaVenda != null && Number.isFinite(Number(destaVenda)) ? Math.max(0, Number(destaVenda)) : jaOcupamVaga(vs);
+  return Math.max(0, Number(vagasDaExpedicao) || 0) + proprios;
+}
+
+/** "2 reservadas aguardando a troca do sistema" (0368: na fila do espelho). Vazio quando não há. */
+export function textoNaFila(naFila?: number | null): string {
+  const n = Math.max(0, Number(naFila) || 0);
+  if (!n) return "";
+  return `${n} reservada${n > 1 ? "s" : ""} aguardando a troca do sistema`;
+}
+
+// ── Cancelar venda (0367) ───────────────────────────────────────────────────
+export interface ResultadoCancelamento {
+  jaEstava: boolean;
+  passageiros: number;
+  parcelas: number;
+  parcelaPaga: boolean;
+  viagemCancelada: boolean;
+  cartaoMovido: boolean;
+}
+
+/** Retorno da venda_cancelar (jsonb) → objeto da tela. Banco antigo (0357) devolve menos campos: viram 0/false. */
+export function lerCancelamento(j: unknown): ResultadoCancelamento {
+  const o = (j && typeof j === "object" ? j : {}) as Record<string, unknown>;
+  return {
+    jaEstava: o.ja_estava === true,
+    passageiros: Number(o.passageiros_cancelados) || 0,
+    parcelas: Number(o.parcelas_canceladas) || 0,
+    parcelaPaga: o.parcela_paga === true,
+    viagemCancelada: o.viagem_cancelada === true,
+    cartaoMovido: o.cartao_movido === true,
+  };
+}
+
+/** A frase que a tela mostra depois de cancelar. */
+export function mensagemDoCancelamento(r: ResultadoCancelamento): string {
+  if (r.jaEstava) return "Esta venda já estava cancelada.";
+  const partes = ["Venda cancelada."];
+  partes.push(r.passageiros ? `${r.passageiros} vaga${r.passageiros > 1 ? "s voltaram" : " voltou"} para a expedição.` : "A reserva de vaga foi desfeita.");
+  partes.push("Deixou de contar na comissão.");
+  if (r.parcelas) partes.push(`${r.parcelas} parcela${r.parcelas > 1 ? "s" : ""} a receber cancelada${r.parcelas > 1 ? "s" : ""} no Financeiro.`);
+  if (r.parcelaPaga) partes.push("Atenção: já tem parcela PAGA — combine o reembolso com o Financeiro.");
+  if (r.viagemCancelada) partes.push("A viagem no Relacionamento foi cancelada.");
+  if (r.cartaoMovido) partes.push('O cartão foi para "Venda cancelada".');
+  return partes.join(" ");
 }
 
 // ── Faltas pra consolidar ───────────────────────────────────────────────────

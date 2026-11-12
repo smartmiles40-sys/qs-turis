@@ -13,6 +13,7 @@ import type { ResultadoPreVenda } from "@/closer/vendaItens";
 import { ajustarVagas, listarExpedicoesParaVenda, type ExpedicaoVaga } from "./api";
 import { BotaoSubirVenda } from "./SubirVenda";
 import VendasComPendencia from "./VendasComPendencia";
+import { textoNaFila } from "./vendaFinal";
 
 export default function SubirVendaOps() {
   const [lista, setLista] = useState<ExpedicaoVaga[] | null>(null);
@@ -45,7 +46,7 @@ export default function SubirVendaOps() {
       <section className="rel-card p-4">
         <h2 className="text-[15px] font-bold mb-1" style={{ color: "var(--ink)" }}>Vagas das expedições</h2>
         <p className="text-[12.5px] mb-3" style={{ color: "var(--ink3)" }}>
-          Vaga = pax planejados − pagantes em pré-reserva ou confirmados. Sem vaga, ninguém consegue vender: abra aqui (fica registrado quem abriu e por quê).
+          Vaga = pax planejados − pagantes em pré-reserva ou confirmados (inclusive os reservados pelo QS que aguardam a troca do sistema). Sem vaga, ninguém consegue vender: abra aqui (fica registrado quem abriu e por quê).
         </p>
         {lista === null ? <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p> : (
           <div className="overflow-x-auto">
@@ -64,7 +65,10 @@ export default function SubirVendaOps() {
                   <tr key={e.id} className="border-t" style={{ borderColor: "var(--line)" }}>
                     <td className="py-2 pr-3" style={{ color: "var(--ink)" }}><b>{e.nome}</b> <span style={{ color: "var(--ink3)" }}>{e.codigo}</span></td>
                     <td className="py-2 pr-3" style={{ color: "var(--ink2)" }}>{dataBr(e.data_embarque)}</td>
-                    <td className="py-2 pr-3" style={{ color: "var(--ink2)" }}>{e.ocupados}/{e.pax_planejados}</td>
+                    <td className="py-2 pr-3" style={{ color: "var(--ink2)" }}>
+                      {e.ocupados}/{e.pax_planejados}
+                      {textoNaFila(e.na_fila) && <span className="block text-[11.5px]" style={{ color: "var(--ink3)" }}>{textoNaFila(e.na_fila)}</span>}
+                    </td>
                     <td className="py-2 pr-3">{e.vagas > 0 ? <Etiqueta tom={e.vagas > 2 ? "rel" : "aviso"}>{e.vagas}</Etiqueta> : <Etiqueta tom="erro">lotada</Etiqueta>}</td>
                     <td className="py-2 text-right"><Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setAbrindo(e)}>Mudar vagas</Botao></td>
                   </tr>

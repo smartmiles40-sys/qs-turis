@@ -36,6 +36,8 @@ import PagamentoBloco from "./PagamentoBloco";
 import SubirVenda from "@/venda/SubirVenda";
 import { ListaPropostasAnexadas } from "@/venda/PropostasAnexadas";
 import FamiliaDaVenda from "@/venda/FamiliaDaVenda";
+import { cancelarVenda, vendaAtivaDoCartao } from "@/venda/api";
+import { mensagemDoCancelamento } from "@/venda/vendaFinal";
 import { PROPOSTAS_NO_QS } from "@/propostas/disponivel";
 import { SeloEmBreve } from "@/propostas/EmBreve";
 import CadastroDoLead from "@/clientes/cadastro/CadastroDoLead";
@@ -91,6 +93,9 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
   const [versaoFamilia, setVersaoFamilia] = useState(0);
   // Motivo pedido ao mover pra Perdido ou Venda cancelada.
   const [perdendo, setPerdendo] = useState<{ etapa: Etapa; motivo: string } | null>(null);
+  // 0367: a venda (qs_vendas) que ainda vale neste cartão + a janela "Cancelar venda".
+  const [vendaAtiva, setVendaAtiva] = useState<{ id: string; estado: string } | null>(null);
+  const [cancelando, setCancelando] = useState<{ motivo: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   // 0334: trocar o responsável (gestor: qualquer cartão; closer: o próprio).
   const { currentUser } = useQsAuth();
@@ -120,6 +125,7 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
         eventosDoNegocio(id),
       ]);
       setItensVenda(await listarItensDaVenda(id).catch(() => []));
+      setVendaAtiva(await vendaAtivaDoCartao(id).catch(() => null));
       setPropostas((p.data ?? []) as PropostaLinha[]);
       setMsgs((m.data ?? []) as Mensagem[]);
       setEventos(ev);
@@ -147,6 +153,9 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
   const selo = seloDaVenda(n);
   const gestao = currentUser?.role === "admin" || currentUser?.role === "gestor";
   const podeTrocar = gestao || (!!currentUser?.id && n.closer_id === currentUser.id);
+  // 0367: cancelar a venda = mesma regra do banco (closer dono do cartão ou gestão). Venda só em negociação não ocupa nada.
+  const vendaQueVale = vendaAtiva && vendaAtiva.estado !== "negociacao" ? vendaAtiva : null;
+  const podeCancelarVenda = !!vendaQueVale && (gestao || (!!currentUser?.id && n.closer_id === currentUser.id && currentUser.role === "closer"));
   /** Venda registrada (pré-venda) ou fechada: daí em diante aparecem pagamento e contrato. */
   const vendaRegistrada = preVenda || consolidada;
   async function rodarPreVenda(f: () => Promise<{ tom: "ok" | "aviso"; mensagem: string }>) {
@@ -218,6 +227,15 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
                   Em negociação: ainda não conta como venda. Clique em "Continuar registro" e use "Reservar vaga" ou "Consolidar venda".
                 </p>
               ) : null}
+              {/* 0367: cancelar a venda de verdade (vaga volta, sai da comissão, Financeiro/Rel/Bitrix avisados). */}
+              {podeCancelarVenda && (
+                <div className="mt-3 pt-2 border-t flex flex-wrap items-center gap-2" style={{ borderColor: "var(--line)" }}>
+                  <span className="text-[12px] flex-1 min-w-0" style={{ color: "var(--ink3)" }}>
+                    O cliente desistiu? Cancelar libera a vaga e tira a venda da comissão.
+                  </span>
+                  <Botao variante="perigo" disabled={ocupado} onClick={() => setCancelando({ motivo: "" })}>Cancelar venda</Botao>
+                </div>
+              )}
             </Bloco>
           )}
 
@@ -420,11 +438,51 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
               if (!perdendo) return;
               const { etapa, motivo } = perdendo;
               setPerdendo(null);
-              void rodar(() => moverEEspelhar(etapa, motivo), `Movido para ${NOME_ETAPA[etapa]}.`);
+              void rodar(() => moverEEspelhar(etapa, motivo),
+                `Movido para ${NOME_ETAPA[etapa]}.${vendaQueVale ? " A venda foi cancelada junto: a vaga voltou e ela saiu da comissão." : ""}`);
             }}>{perdendo?.etapa === "venda_cancelada" ? "Cancelar venda" : "Marcar perdido"}</Botao>
         </>}>
         <label className="block text-[13px] font-semibold mb-1" style={{ color: "var(--ink2)" }} htmlFor="motivo-perda-painel">{perdendo?.etapa === "venda_cancelada" ? "Por que a venda foi cancelada?" : "Por que não fechou?"}</label>
         <textarea id="motivo-perda-painel" className="rel-input" rows={3} value={perdendo?.motivo ?? ""} onChange={(e) => perdendo && setPerdendo({ ...perdendo, motivo: e.target.value })} />
+        {vendaQueVale && (
+          <Aviso tom="aviso">
+            Este cartão tem uma venda {vendaQueVale.estado === "consolidada" ? "consolidada" : "com vaga reservada"}. Ao confirmar, a venda é
+            cancelada junto: a vaga volta, sai da comissão e as parcelas a receber são canceladas no Financeiro.
+          </Aviso>
+        )}
+      </Modal>
+
+      <Modal aberto={cancelando !== null} titulo="Cancelar a venda" onFechar={() => setCancelando(null)}
+        rodape={<>
+          <Botao variante="fantasma" onClick={() => setCancelando(null)}>Voltar</Botao>
+          <Botao variante="perigo" disabled={(cancelando?.motivo.trim().length ?? 0) < 3 || ocupado || !vendaQueVale}
+            onClick={() => {
+              if (!cancelando || !vendaQueVale) return;
+              const motivo = cancelando.motivo.trim();
+              const vendaId = vendaQueVale.id;
+              setCancelando(null);
+              void rodarPreVenda(async () => {
+                const r = await cancelarVenda(vendaId, motivo);
+                // O Bitrix acompanha agora (se falhar, o cron reenvia: o cartão ficou "pendente").
+                await espelharNoBitrix(n.id).catch(() => null);
+                return { tom: r.parcelaPaga ? "aviso" : "ok", mensagem: mensagemDoCancelamento(r) };
+              });
+            }}>Cancelar venda</Botao>
+        </>}>
+        <div className="space-y-3 text-[13px]" style={{ color: "var(--ink2)" }}>
+          <p>Ao cancelar:</p>
+          <ul className="list-disc pl-5 space-y-0.5">
+            <li>a vaga na expedição volta (inclusive a que aguardava a troca do sistema);</li>
+            <li>a venda deixa de contar na comissão;</li>
+            <li>as parcelas a receber são canceladas no Financeiro (parcela já paga fica, com aviso);</li>
+            {vendaQueVale?.estado === "consolidada" && <li>a viagem no Relacionamento é cancelada e o cartão vai para "Venda cancelada";</li>}
+            <li>o Bitrix é atualizado.</li>
+          </ul>
+          <p>Nada é apagado: fica tudo no histórico. Se o cliente voltar, dá pra reabrir pelo "Registrar venda".</p>
+          <label className="block font-semibold" style={{ color: "var(--ink2)" }} htmlFor="motivo-cancelar-venda">Por que a venda foi cancelada? *</label>
+          <textarea id="motivo-cancelar-venda" className="rel-input" rows={3} value={cancelando?.motivo ?? ""}
+            onChange={(e) => cancelando && setCancelando({ motivo: e.target.value })} placeholder="Ex.: cliente desistiu da viagem" />
+        </div>
       </Modal>
       {trocando && (
         <TrocarResponsavel atual={n.closer_id} atualNome={n.closer?.name ?? null} onFechar={() => setTrocando(false)}
