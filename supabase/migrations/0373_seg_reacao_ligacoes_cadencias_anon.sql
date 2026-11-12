@@ -87,6 +87,7 @@ begin
     'public.fin_mudar(uuid, text, text, boolean, text)',
     'public.qs_carteira_redistribuir(uuid)',
     'public.qs_encerrar_confirmacao(uuid, text)',
+    'public.qs_encerrar_confirmacao(uuid, text, boolean)',  -- assinatura nova da 0370
     'public.qs_gloria_entrar_no_pipeline(uuid)',
     'public.qs_gloria_tirar_do_pipeline(uuid, uuid)',
     'public.qs_transferir_lead(uuid, uuid, text)',

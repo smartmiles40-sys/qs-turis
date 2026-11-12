@@ -67,7 +67,10 @@ begin
 end;
 $function$;
 
-grant execute on function public.qs_encerrar_confirmacao(uuid, text, boolean) to authenticated;
+-- Integração 12/11: a função nova nasce com EXECUTE para public; fecha anon já aqui
+-- (a 0373 fecha a mesma função, mas só conhecia a assinatura antiga de 2 parâmetros).
+revoke execute on function public.qs_encerrar_confirmacao(uuid, text, boolean) from public, anon;
+grant execute on function public.qs_encerrar_confirmacao(uuid, text, boolean) to authenticated, service_role;
 
 -- ── Como conferir ───────────────────────────────────────────────────────────
 -- select oid::regprocedure from pg_proc where proname = 'qs_encerrar_confirmacao';
