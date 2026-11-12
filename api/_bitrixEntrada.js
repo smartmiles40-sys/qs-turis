@@ -141,6 +141,58 @@ export function telefoneResgate(v) {
   return d.length === 12 || d.length === 13 ? d : null;
 }
 
+// ── UTM: o texto que chega nem sempre é o texto da campanha (12/11/2026) ─────
+// A UTM passa por URL de LP, campo do Bitrix e URL de robô; no caminho ela pode
+// chegar codificada ("Jap%C3%A3o", "+" no lugar de espaço), com acento quebrado
+// por leitura latin-1 ("JapÃ£o"), em forma decomposta (NFD) ou com emoji na
+// frente (bandeira). Aqui ela volta a ser o texto que a pessoa digitou na Meta.
+// O casamento com a campanha (api/_mktTrafegoCalc.js › normalizarNome) já
+// ignora acento e emoji — isto aqui é para o que fica GRAVADO no lead.
+const MOJIBAKE = /[ÃÂ][\u0080-\u00BF]/;
+const EMOJI_INICIO = /^(?:[\uD800-\uDFFF]|[\u2600-\u27BF]|\uFE0F|\u200D|\s)+/;
+export function normalizarUtm(v) {
+  let s = String(v ?? '').trim();
+  if (!s || /^\{\{.*\}\}$/.test(s)) return null;
+  if (/%[0-9A-Fa-f]{2}/.test(s)) {
+    try { s = decodeURIComponent(s.replace(/\+/g, ' ')); } catch { /* % solto: fica como veio */ }
+  }
+  // Só texto 100% latin-1 pode ser relido como UTF-8 (emoji junto = não mexe).
+  if (MOJIBAKE.test(s) && [...s].every((ch) => ch.charCodeAt(0) <= 0xff)) {
+    const conserto = Buffer.from(s, 'latin1').toString('utf8');
+    if (!conserto.includes('\uFFFD')) s = conserto;
+  }
+  s = s.normalize('NFC').replace(EMOJI_INICIO, '').replace(/\s+/g, ' ').trim();
+  return s ? s.slice(0, 300) : null;
+}
+
+const CAMPOS_UTM = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
+
+/** As UTMs do negócio do Bitrix (campos padrão UTM_*), já normalizadas. */
+export function utmDoNegocio(deal) {
+  const out = {};
+  for (const k of CAMPOS_UTM) {
+    const v = normalizarUtm(deal?.[k.toUpperCase()]);
+    if (v) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Junta as UTMs da URL do robô com as do negócio. A da URL VENCE quando é boa
+ * (veio preenchida); o negócio só completa o que faltou. Devolve também de onde
+ * veio cada uma, pro log (sem PII).
+ */
+export function juntarUtm(lead, doNegocio) {
+  const origem = {};
+  for (const k of CAMPOS_UTM) {
+    const daUrl = normalizarUtm(lead[k]);
+    if (daUrl) { lead[k] = daUrl; origem[k] = 'url'; continue; }
+    delete lead[k];
+    if (doNegocio?.[k]) { lead[k] = doNegocio[k]; origem[k] = 'negocio'; }
+  }
+  return origem;
+}
+
 /**
  * O lead no formato do /api/lead-inbound. Junta as três versões do nó
  * "Normalizar" que existiam no n8n (qs-bitrix-completo, qs-inbound-leads e o
@@ -179,11 +231,11 @@ export function leadDoBitrix(mapa, opts = {}) {
     source: opts.resgate ? 'resgate' : 'integracao',
     // UTM (0265): se o robô do Bitrix mandar na URL (&utm_campaign={{UTM_CAMPAIGN}}…),
     // o QS grava no lead pra casar com a campanha da Meta (Tráfego › Meta Ads).
-    utm_source: pegar(mapa, 'utm_source', 'UTM_SOURCE'),
-    utm_medium: pegar(mapa, 'utm_medium', 'UTM_MEDIUM'),
-    utm_campaign: pegar(mapa, 'utm_campaign', 'UTM_CAMPAIGN'),
-    utm_content: pegar(mapa, 'utm_content', 'UTM_CONTENT'),
-    utm_term: pegar(mapa, 'utm_term', 'UTM_TERM'),
+    utm_source: normalizarUtm(pegar(mapa, 'utm_source', 'UTM_SOURCE')),
+    utm_medium: normalizarUtm(pegar(mapa, 'utm_medium', 'UTM_MEDIUM')),
+    utm_campaign: normalizarUtm(pegar(mapa, 'utm_campaign', 'UTM_CAMPAIGN')),
+    utm_content: normalizarUtm(pegar(mapa, 'utm_content', 'UTM_CONTENT')),
+    utm_term: normalizarUtm(pegar(mapa, 'utm_term', 'UTM_TERM')),
   };
   for (const k of Object.keys(lead)) if (lead[k] == null || lead[k] === '') delete lead[k];
   return lead;
@@ -201,11 +253,12 @@ export function temIdentificador(lead) {
  * Só LÊ do Bitrix. `bx` vem por parâmetro (o de _bitrixLead.js em produção, um
  * falso nos testes).
  */
-export async function completarPeloNegocio(dealId, bx) {
+export async function completarPeloNegocio(dealId, bx, opts = {}) {
   const deal = await bx('crm.deal.get', { id: Number(dealId) });
   if (!deal) return null;
   let contato = null;
-  if (deal.CONTACT_ID && String(deal.CONTACT_ID) !== '0') {
+  // opts.semContato: a leitura é só pelas UTMs/funil — a pessoa já veio na URL.
+  if (!opts.semContato && deal.CONTACT_ID && String(deal.CONTACT_ID) !== '0') {
     try { contato = await bx('crm.contact.get', { id: Number(deal.CONTACT_ID) }); } catch { contato = null; }
   }
   const nome = [contato?.NAME, contato?.LAST_NAME].filter(Boolean).join(' ').trim();
@@ -214,12 +267,8 @@ export async function completarPeloNegocio(dealId, bx) {
     phone: contato?.PHONE?.[0]?.VALUE || undefined,
     email: contato?.EMAIL?.[0]?.VALUE || undefined,
     estimated_value: deal.OPPORTUNITY ? String(deal.OPPORTUNITY) : undefined,
-    // Campos padrão de UTM do negócio no Bitrix (0265).
-    utm_source: deal.UTM_SOURCE || undefined,
-    utm_medium: deal.UTM_MEDIUM || undefined,
-    utm_campaign: deal.UTM_CAMPAIGN || undefined,
-    utm_content: deal.UTM_CONTENT || undefined,
-    utm_term: deal.UTM_TERM || undefined,
+    // Campos padrão de UTM do negócio no Bitrix (0265), normalizados.
+    ...utmDoNegocio(deal),
   };
   for (const k of Object.keys(extra)) if (extra[k] == null || extra[k] === '') delete extra[k];
   return { deal, campos: extra };

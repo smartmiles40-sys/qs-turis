@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   relogioBRT, dentroDoHorario, avaliarEntrada, regraEntradaLeads, regraReunioesBitrix,
-  regraPulsoWhatsApp, regraCloserPendente, regraGravacoes, filtrarDedupe,
+  regraPulsoWhatsApp, regraCloserPendente, regraGravacoes, filtrarDedupe, regraLeadsSemAtividade,
 } from "../api/qs-alertas.js";
 
 // hora de Brasília → ms UTC (UTC-3 fixo)
@@ -77,4 +77,19 @@ test("dedupe: 6h pro alto, 24h pro baixo", () => {
   assert.equal(r.novoEstado.x, new Date(agora).toISOString());
   r = filtrarDedupe([alto], null, agora);
   assert.equal(r.enviar.length, 1);
+});
+
+test("f) leads abertos sem atividade: conta e separa por motivo; zero = sem alerta", () => {
+  const leads = [
+    { id: "a", cadence_id: "ativa" },     // tem tarefa
+    { id: "b", cadence_id: "ativa" },     // terminou a cadência ativa
+    { id: "c", cadence_id: "congelada" }, // cadência pausada
+    { id: "d", cadence_id: null },        // sem cadência
+  ];
+  const r = regraLeadsSemAtividade(leads, new Set(["a"]), new Set(["ativa"]));
+  assert.equal(r.qtd, 3);
+  assert.deepEqual([r.cadenciaAtiva, r.cadenciaPausada, r.semCadencia], [1, 1, 1]);
+  assert.equal(r.alerta?.id, "leads_sem_atividade");
+  assert.equal(r.alerta?.nivel, "baixo");
+  assert.equal(regraLeadsSemAtividade([{ id: "a", cadence_id: "ativa" }], new Set(["a"]), new Set(["ativa"])).alerta, null);
 });

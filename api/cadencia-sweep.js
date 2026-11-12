@@ -8,6 +8,13 @@
 //   1. REDIRECIONAMENTO (redirect_cadence_id): entra na cadência de destino com
 //      atividades novas. Vence a perda. Destino não "disponivel" (congelado /
 //      rascunho) = o lead ESPERA: não redireciona e também não cai na perda.
+//      1b. REVISÃO (12/11/2026): esperando, o lead ficava SEM NENHUMA tarefa e
+//      sumia da fila do SDR (180 leads da "Cadência SDR" parados atrás da
+//      "Resgate — Base Fria" congelada). Agora ganha UMA tarefa de revisão
+//      ("cadência terminou — decidir o próximo passo"), uma vez só (nota
+//      revisar-fim-cadencia), só em horário comercial e com teto por SDR por
+//      dia (?revisar_dia=N, padrão 5) — sem avalanche na fila. Se o destino
+//      voltar a "disponivel", o redirecionamento normal ainda acontece.
 //   2. PERDA AUTOMÁTICA (auto_loss_days): se passou do prazo em dias (desde
 //      cadence_started_at, ou arrived_at), vira "perdido" com o motivo
 //      "Fim de cadência" e a perda vai pro Bitrix (moverParaPerdido).
@@ -28,6 +35,7 @@
 // GET (Vercel Cron, Authorization: Bearer CRON_SECRET)
 //   ?seco=1     só conta o que faria (não grava nada, não chama o Bitrix)
 //   ?limite=N   máximo de ações por rodada (padrão 50, teto 300)
+//   ?revisar_dia=N  teto de tarefas de revisão por SDR por dia (padrão 5; 0 desliga)
 // Env: CRON_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (+ BITRIX_WEBHOOK_BASE
 // pra espelhar a perda; sem ela a perda fica só no QS, como no bitrix-sync).
 // Recomendado em vercel.json: "api/cadencia-sweep.js": { "maxDuration": 60 }.
@@ -44,6 +52,25 @@ const LIMITE_TETO = 300;
 // Para de COMEÇAR ações novas depois disto (cada ação é curta; folga pro fim).
 const PRAZO_MS = 40_000;
 const DIA_MS = 86_400_000;
+// Tarefa de revisão do lead parado atrás de destino congelado (ver 1b acima).
+const TAG_REVISAR = 'revisar-fim-cadencia';
+const REVISAR_DIA_PADRAO = 5;
+const REVISAR_DIA_TETO = 50;
+const BRT_MS = -3 * 3_600_000; // Brasil sem horário de verão desde 2019
+
+/** Seg–sex, 09:00–18:00 em Brasília: só aí nasce tarefa de revisão. */
+export function emExpediente(agoraMs) {
+  const d = new Date(agoraMs + BRT_MS);
+  const dia = d.getUTCDay();
+  const min = d.getUTCHours() * 60 + d.getUTCMinutes();
+  return dia >= 1 && dia <= 5 && min >= 9 * 60 && min < 18 * 60;
+}
+
+/** Meia-noite de hoje em Brasília, em ISO UTC (base do teto diário). */
+export function inicioDoDiaBrt(agoraMs) {
+  const d = new Date(agoraMs + BRT_MS);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - BRT_MS).toISOString();
+}
 
 function blocos(arr, n) {
   const out = [];
@@ -61,19 +88,35 @@ function blocos(arr, n) {
  * @param {Map<string,string>} p.statusDestino  status das cadências de destino
  * @param {Set<string>} p.comAbertas  leads com tarefa pendente/atrasada
  * @param {Set<string>} p.jaEncerrados  leads que já têm a nota fim-cadencia
+ * @param {Set<string>} [p.jaRevisados]  leads que já ganharam a tarefa de revisão (nota revisar-fim-cadencia)
+ * @param {Map<string,number>} [p.revisarHoje]  tarefas de revisão já criadas hoje, por SDR
+ * @param {number} [p.revisarDia]  teto de tarefas de revisão por SDR por dia (0 = desligado)
  * @param {number} p.agoraMs
- * @returns {Array<{lead, regra, acao: 'redirecionar'|'perder'|'encerrar', dias?: number}>}
+ * @returns {Array<{lead, regra, acao: 'redirecionar'|'perder'|'encerrar'|'revisar', dias?: number}>}
  */
-export function decidirFimDeCadencia({ leads, regras, statusDestino, comAbertas, jaEncerrados, agoraMs }) {
+export function decidirFimDeCadencia({
+  leads, regras, statusDestino, comAbertas, jaEncerrados,
+  jaRevisados = new Set(), revisarHoje = new Map(), revisarDia = 0, agoraMs,
+}) {
   const out = [];
+  const cota = new Map(revisarHoje); // cópia: a decisão não mexe no que recebeu
   for (const lead of leads) {
     if (comAbertas.has(lead.id)) continue; // plano ainda em andamento
     const regra = regras.get(lead.cadence_id);
     if (!regra) continue; // cadência congelada/rascunho/sumida: motor pausado
 
     if (regra.redirect_cadence_id && regra.redirect_cadence_id !== lead.cadence_id) {
-      // Destino pausado: o lead ESPERA (o redirecionamento vence a perda).
-      if (statusDestino.get(regra.redirect_cadence_id) !== 'disponivel') continue;
+      // Destino pausado: o lead ESPERA (o redirecionamento vence a perda) —
+      // mas não some: ganha UMA tarefa de revisão, dentro do teto do dono.
+      if (statusDestino.get(regra.redirect_cadence_id) !== 'disponivel') {
+        if (!(revisarDia > 0) || !lead.owner_id || jaRevisados.has(lead.id)) continue;
+        if (!emExpediente(agoraMs)) continue;
+        const usadas = cota.get(lead.owner_id) || 0;
+        if (usadas >= revisarDia) continue;
+        cota.set(lead.owner_id, usadas + 1);
+        out.push({ lead, regra, acao: 'revisar' });
+        continue;
+      }
       out.push({ lead, regra, acao: 'redirecionar' });
       continue;
     }
@@ -140,14 +183,27 @@ async function carregar() {
 
   const semAbertas = leads.filter((l) => !comAbertas.has(l.id)).map((l) => l.id);
   const jaEncerrados = new Set();
+  const jaRevisados = new Set();
   for (const ids of blocos(semAbertas, 100)) {
     const rows = await lerTudo(
-      `qs_notes?select=id,lead_id&lead_id=in.(${ids.join(',')})&tags=cs.${enc('{fim-cadencia}')}`
+      `qs_notes?select=id,lead_id,tags&lead_id=in.(${ids.join(',')})` +
+      `&tags=ov.${enc(`{fim-cadencia,${TAG_REVISAR}}`)}`
     );
-    for (const r of rows) jaEncerrados.add(r.lead_id);
+    for (const r of rows) {
+      const tags = Array.isArray(r.tags) ? r.tags : [];
+      if (tags.includes('fim-cadencia')) jaEncerrados.add(r.lead_id);
+      if (tags.includes(TAG_REVISAR)) jaRevisados.add(r.lead_id);
+    }
   }
 
-  return { regras, statusDestino, leads, comAbertas, jaEncerrados };
+  // Teto diário por SDR: quantas tarefas de revisão cada um já ganhou hoje.
+  const revisarHoje = new Map();
+  const hoje = await lerTudo(
+    `qs_tasks?select=id,owner_id&tags=cs.${enc(`{${TAG_REVISAR}}`)}&created_at=gte.${enc(inicioDoDiaBrt(Date.now()))}`
+  );
+  for (const r of hoje) if (r.owner_id) revisarHoje.set(r.owner_id, (revisarHoje.get(r.owner_id) || 0) + 1);
+
+  return { regras, statusDestino, leads, comAbertas, jaEncerrados, jaRevisados, revisarHoje };
 }
 
 async function nota(leadId, body, tags) {
@@ -175,6 +231,39 @@ async function redirecionar({ lead, regra }) {
   await nota(lead.id,
     `🔁 Fim da cadência "${regra.name}" sem desfecho — lead redirecionado automaticamente para a próxima cadência.`,
     ['bitrix', 'cadencia', 'redirecionamento']);
+  return true;
+}
+
+async function revisar({ lead, regra }, destinoNome) {
+  // Guarda de corrida: só cria se o lead continua aberto, na mesma cadência e
+  // ainda sem nenhuma tarefa aberta (o SDR pode ter agido entre a leitura e aqui).
+  const ainda = await rest(
+    `qs_leads?select=id&id=eq.${enc(lead.id)}&cadence_id=eq.${enc(lead.cadence_id)}&status=in.(${ABERTOS.join(',')})`
+  );
+  if (!Array.isArray(ainda) || ainda.length === 0) return false;
+  const abertas = await rest(`qs_tasks?select=id&lead_id=eq.${enc(lead.id)}&status=in.(pendente,atrasada)&limit=1`);
+  if (Array.isArray(abertas) && abertas.length > 0) return false;
+
+  const destino = destinoNome ? `"${destinoNome}"` : 'de destino';
+  await insert('qs_tasks', {
+    lead_id: lead.id,
+    cadence_id: lead.cadence_id,
+    owner_id: lead.owner_id,
+    channel_type: 'pesquisa', // não é contato com o cliente: é decisão interna
+    priority: 'media',
+    scheduled_at: new Date().toISOString(),
+    status: 'pendente',
+    is_extra: true,
+    notes:
+      `Cadência terminou — decidir o próximo passo. O plano da "${regra.name}" acabou sem desfecho ` +
+      `e a cadência ${destino} está pausada, então o lead não foi redirecionado. ` +
+      'Reinicie uma cadência, agende, marque como perdido ou devolva à carteira.',
+    tags: ['cadencia', TAG_REVISAR],
+  }, { returning: false });
+  await nota(lead.id,
+    `⏸️ Fim da cadência "${regra.name}" sem desfecho — a cadência ${destino} está pausada. ` +
+    'Criada uma tarefa de revisão para o SDR decidir o próximo passo.',
+    ['cadencia', TAG_REVISAR]);
   return true;
 }
 
@@ -234,6 +323,10 @@ export default async function handler(req, res) {
   const q = req.query || {};
   const seco = ['1', 'true', 'sim'].includes(String(q.seco || '').toLowerCase());
   const limite = Math.max(1, Math.min(LIMITE_TETO, Number.parseInt(q.limite, 10) || LIMITE_PADRAO));
+  const revisarParam = Number.parseInt(q.revisar_dia, 10);
+  const revisarDia = Number.isFinite(revisarParam)
+    ? Math.max(0, Math.min(REVISAR_DIA_TETO, revisarParam))
+    : REVISAR_DIA_PADRAO;
   const inicio = Date.now();
 
   let dados;
@@ -245,8 +338,8 @@ export default async function handler(req, res) {
   }
   if (!dados.leads.length) return res.status(200).json({ seco, leads_abertos: 0, candidatos: 0 });
 
-  const decisoes = decidirFimDeCadencia({ ...dados, agoraMs: Date.now() });
-  const previsto = { redirecionar: 0, perder: 0, encerrar: 0 };
+  const decisoes = decidirFimDeCadencia({ ...dados, revisarDia, agoraMs: Date.now() });
+  const previsto = { redirecionar: 0, perder: 0, encerrar: 0, revisar: 0 };
   for (const d of decisoes) previsto[d.acao]++;
 
   const saida = {
@@ -267,7 +360,17 @@ export default async function handler(req, res) {
     motivoId = (m && m[0] && m[0].id) || null;
   } catch { /* sem a 0093 a perda sai sem motivo, como no navegador */ }
 
-  const feito = { redirecionados: 0, perdidos: 0, encerrados: 0, pulados: 0, erros: 0 };
+  // Nome das cadências de destino (pausadas) para o texto da tarefa de revisão.
+  const nomeDestino = new Map();
+  const destinosRevisar = [...new Set(decisoes.filter((d) => d.acao === 'revisar').map((d) => d.regra.redirect_cadence_id))];
+  if (destinosRevisar.length) {
+    try {
+      const rows = await rest(`qs_cadences?select=id,name&id=in.(${destinosRevisar.map(enc).join(',')})`);
+      for (const r of rows || []) nomeDestino.set(r.id, r.name);
+    } catch { /* sem nome, o texto diz "de destino" */ }
+  }
+
+  const feito = { redirecionados: 0, perdidos: 0, encerrados: 0, revisoes: 0, pulados: 0, erros: 0 };
   const bitrix = {};
   let tentadas = 0;
   for (const d of decisoes) {
@@ -279,6 +382,8 @@ export default async function handler(req, res) {
       } else if (d.acao === 'perder') {
         const r = await perder(d, motivoId);
         if (r.ok) { feito.perdidos++; bitrix[r.bitrix] = (bitrix[r.bitrix] || 0) + 1; } else feito.pulados++;
+      } else if (d.acao === 'revisar') {
+        if (await revisar(d, nomeDestino.get(d.regra.redirect_cadence_id))) feito.revisoes++; else feito.pulados++;
       } else if (await encerrar(d)) {
         feito.encerrados++;
       }

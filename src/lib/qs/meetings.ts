@@ -190,7 +190,7 @@ export async function ensureConfirmTask(input: ConfirmTaskInput): Promise<void> 
 // Ela nasce JUNTO com a reunião, agendada pro fim dela + 5 minutos. Sem cron:
 // quando o horário chega, ela simplesmente aparece na fila. E não precisa ser
 // concluída na mão — registrar o desfecho na Agenda já a encerra, porque o
-// closeConfirmTask varre TODA tarefa com a tag desta reunião.
+// closeConfirmTask (sem soConfirmacao) varre TODA tarefa com a tag desta reunião.
 //
 // Dono: o CLOSER, não o SDR. Quem sabe no que deu é quem esteve na reunião.
 // Sem closer definido, cai pro SDR que agendou — melhor cobrar alguém do que
@@ -312,15 +312,30 @@ export async function sweepOutcomeTasks(): Promise<void> {
       // confirmação vencida só empilhava na fila (medido em 14/08: 11 abertas
       // de reuniões passadas). O que importa agora é o DESFECHO, garantido
       // logo acima. Idempotente: já encerrada, o update não acha linha.
-      await closeConfirmTask(m.id, "Reunião já passou — confirmação perdeu o objeto");
+      //
+      // SÓ A DE CONFIRMAÇÃO (12/11): encerrar "tudo da reunião" aqui matava a
+      // cobrança de desfecho criada uma linha acima — a próxima abertura da
+      // Agenda recriava e matava de novo (3.104 tarefas-lixo em 30 dias).
+      await closeConfirmTask(m.id, "Reunião já passou — confirmação perdeu o objeto", { soConfirmacao: true });
     }));
   } catch (e) {
     console.warn("[meetings] varredura de desfechos pendentes falhou:", e);
   }
 }
 
-/** Encerra a tarefa de confirmação (reunião cancelada, realizada, no-show ou excluída). */
-export async function closeConfirmTask(meetingId: string, motivo: string): Promise<void> {
+/**
+ * Encerra as tarefas da reunião (reunião cancelada, realizada, no-show ou excluída).
+ *
+ * `soConfirmacao: true` encerra APENAS a de confirmação (tag `confirmar`) e deixa
+ * a cobrança de desfecho viva — é o caso da reunião que já passou sem desfecho
+ * (sweepOutcomeTasks) e da reunião "confirmada", que ainda vai acontecer.
+ */
+export async function closeConfirmTask(
+  meetingId: string,
+  motivo: string,
+  opts: { soConfirmacao?: boolean } = {},
+): Promise<void> {
+  const soConfirmacao = opts.soConfirmacao === true;
   try {
     // Via RPC: a tarefa de confirmação é do SDR que agendou, e tasks_update
     // exige owner_id = auth.uid(). Quando quem registra o desfecho é o CLOSER,
@@ -328,17 +343,21 @@ export async function closeConfirmTask(meetingId: string, motivo: string): Promi
     // registrada como realizada e o SDR seguia com "confirmar reunião"
     // pendente na fila. A função da 0052 confere quem pode mexer NAQUELA
     // reunião e só encosta nas tarefas com a tag dela.
+    // p_so_confirmacao só é enviado quando true: assim a chamada "encerra tudo"
+    // segue idêntica à de antes e funciona com ou sem a 0370 no banco.
     const { error } = await supabase.rpc("qs_encerrar_confirmacao", {
       p_meeting: meetingId,
       p_motivo: motivo,
+      ...(soConfirmacao ? { p_so_confirmacao: true } : {}),
     });
     if (error) {
-      // Enquanto a 0052 não estiver aplicada, mantém o caminho antigo — que
-      // funciona pro SDR dono e é inofensivo pros demais.
+      // Enquanto a 0052/0370 não estiver aplicada, mantém o caminho antigo — que
+      // funciona pro SDR dono e é inofensivo pros demais. Com o MESMO filtro:
+      // sem a 0370, o soConfirmacao cai aqui e continua poupando o desfecho.
       await supabase
         .from("qs_tasks")
         .update({ status: "ignorada", skip_reason: motivo })
-        .contains("tags", [meetingTag(meetingId)])
+        .contains("tags", soConfirmacao ? [meetingTag(meetingId), "confirmar"] : [meetingTag(meetingId)])
         .in("status", ["pendente", "atrasada"]);
     }
   } catch (e) {
@@ -1322,13 +1341,14 @@ async function gravarStatusDaReuniao(
   if (!data) return { ok: false, error: "Você não tem permissão para alterar esta reunião." };
 
   // "Confirmada" ainda vai acontecer: a atividade de confirmação já cumpriu o
-  // papel dela (o SDR confirmou), então também encerra.
+  // papel dela (o SDR confirmou), então também encerra — mas SÓ ela (12/11):
+  // a cobrança de desfecho é do depois da reunião e precisa sobreviver.
   if (status !== "agendada") {
     const comoFechou =
       status === "no_show" ? "com no-show"
       : status === "desistencia" ? "encerrada por desistência do cliente"
       : status;
-    await closeConfirmTask(meeting.id, `Reunião ${comoFechou}`);
+    await closeConfirmTask(meeting.id, `Reunião ${comoFechou}`, { soConfirmacao: status === "confirmada" });
   }
 
   // Status que NÃO são desfecho (confirmada, cancelada…) seguem como sempre:
