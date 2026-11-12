@@ -60,6 +60,8 @@ import VendaDoCliente from "@/closer/VendaDoCliente";
 import CotandoAereo from "@/components/sdr/aereo/CotandoAereo";
 import CadastroDoLead from "@/clientes/cadastro/CadastroDoLead";
 import LigacoesDoLead from "@/components/sdr/leads/LigacoesDoLead";
+import SeloCardBitrix from "@/components/sdr/leads/SeloCardBitrix";
+import type { LeadComCardBitrix } from "@/components/sdr/leads/cardBitrix";
 import type {
   Lead,
   LeadStatus,
@@ -1719,6 +1721,8 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
                 botao={savingScore ? "..." : temperaturaSdr ? `SDR: ${temperaturaSdr.emoji} ${temperaturaSdr.label}` : "SDR: classificar"}
                 itens={TEMPERATURAS.map((t) => ({ rotulo: chipDaTemperatura(t).label, cor: chipDaTemperatura(t).color, disabled: savingScore, onClick: () => void setTemperaturaSdr(t) }))} />
               <span className={`fl-selo${seloStatus.tom ? ` fl-selo--${seloStatus.tom}` : ""}`}>{seloStatus.texto}</span>
+              {/* Card no Bitrix (12/11, 0362): pendência visível + "Tentar agora". */}
+              <SeloCardBitrix lead={lead as LeadComCardBitrix} podeTentar={canView} onMudou={() => void fetchLead()} />
             </div>
             <div className="fl-cab__dados">
               {/* Cargo/empresa quando existem (raros no fluxo do Bitrix). */}
