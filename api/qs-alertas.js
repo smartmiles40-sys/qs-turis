@@ -12,7 +12,10 @@
 //      partir das 8h30, pra não acusar o silêncio da madrugada);
 //   d) cartões do closer com bitrix_status='pendente' criados há > 24h, acima de 20;
 //   e) gravações achadas (gravacao_status='achada') que não foram pro Bitrix
-//      (bitrix_gravacao_em nulo) há > 1 dia — aviso baixo.
+//      (bitrix_gravacao_em nulo) há > 1 dia — aviso baixo;
+//   f) leads ABERTOS sem card no Bitrix (bitrix_id nulo) criados há mais de 30 min
+//      (12/11/2026, diretriz "todo card do QS nasce no Bitrix"; rotina de nova
+//      tentativa em api/_leadCardBitrix.js).
 //
 // Canal: o sininho do QS (qs_avisos via rpc qs_aviso_criar, o mesmo dos avisos de
 // prazo/reunião). Dedupe: cada alerta no máximo 1x a cada 6h (aviso baixo: 24h);
@@ -145,6 +148,21 @@ export function regraGravacoes(qtd) {
   };
 }
 
+/** f) leads abertos sem card no Bitrix há mais de X min (12/11/2026). */
+export const LEADS_SEM_CARD_MIN = 30;
+export function regraLeadsSemCard(qtd, { rotinaLigada = false, minutos = LEADS_SEM_CARD_MIN } = {}) {
+  if (qtd <= 0) return null;
+  return {
+    id: 'leads_sem_card',
+    nivel: 'alto',
+    titulo: 'Leads sem card no Bitrix',
+    texto: `${qtd} lead(s) aberto(s) sem card no Bitrix há mais de ${minutos} min. ` +
+      (rotinaLigada
+        ? 'A rotina está tentando de novo; se o número não cair, conferir o Bitrix.'
+        : 'A rotina de nova tentativa está DESLIGADA (LEADS_BITRIX_RETENTATIVA_LIGADA) — ninguém está criando esses cards.'),
+  };
+}
+
 /** Dedupe: devolve os alertas que podem sair agora e o estado novo. */
 export function filtrarDedupe(alertas, estado, agoraMs) {
   const base = estado && typeof estado === 'object' && !Array.isArray(estado) ? estado : {};
@@ -217,6 +235,15 @@ async function checarGravacoes(agoraMs) {
   return { dados: { gravacoes: qtd }, alerta: regraGravacoes(qtd) };
 }
 
+async function checarLeadsSemCard(agoraMs) {
+  // Só bitrix_id nulo (não depende da 0362): aberto = não perdido.
+  const qtd = await contar(
+    `qs_leads?select=id&bitrix_id=is.null&status=in.(nao_iniciado,em_prospeccao,ganho)` +
+    `&created_at=lt.${iso(agoraMs - LEADS_SEM_CARD_MIN * MIN)}`);
+  const rotinaLigada = ['1', 'true', 'sim', 'on'].includes(String(process.env.LEADS_BITRIX_RETENTATIVA_LIGADA || '').trim().toLowerCase());
+  return { dados: { leadsSemCard: qtd, rotinaLigada }, alerta: regraLeadsSemCard(qtd, { rotinaLigada }) };
+}
+
 // ---------------------------------------------------------------- envio
 
 async function destinatarios() {
@@ -262,6 +289,7 @@ const CHECAGENS = {
   whatsapp_parado: checarPulso,
   closer_pendente: checarCloser,
   gravacoes_sem_bitrix: checarGravacoes,
+  leads_sem_card: checarLeadsSemCard,
 };
 
 export default async function handler(req, res) {
