@@ -50,6 +50,7 @@ import ScheduleMeetingModal from "@/components/sdr/agenda/ScheduleMeetingModal";
 import MeetingDetailModal from "@/components/sdr/agenda/MeetingDetailModal";
 import { setMeetingStatus, desfechoDaOportunidadeFutura } from "@/lib/qs/meetings";
 import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
+import FaixaClienteDaCasa from "@/clientes/FaixaClienteDaCasa";
 import { DetalheDaReuniao } from "@/controle-comercial/ReunioesDoCliente";
 import OportunidadeFuturaModal, { FaixaOportunidadeFutura } from "@/components/sdr/leads/OportunidadeFuturaModal";
 import { ComCoresDoRel, EnviarFinanceiroModal, StatusNoFinanceiro } from "@/fin/EnviarFinanceiro";
@@ -1789,6 +1790,9 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
 
       {/* ── Próximo passo ── */}
       {renderProximoPasso()}
+
+      {/* Visão cruzada (0381): já é cliente da casa? Some quando não há nada. */}
+      <FaixaClienteDaCasa leadId={lead.id} />
 
       <div className="fl-colunas">
         {/* ── Coluna esquerda ── */}

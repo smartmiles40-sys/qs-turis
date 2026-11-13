@@ -13,8 +13,12 @@
 //     resolução, o link aparece aqui sozinho.
 //     09/11 (0338): o pedido já vem com valor, nº de parcelas e 1º vencimento
 //     do plano (Financeiro → ficha → pagamento da venda registrada).
+//   • 13/11 (visão cruzada, 0384): as PARCELAS REAIS do plano no Financeiro
+//     (pagas / vencidas / a receber), achado pelo negócio, pela venda ou pela
+//     viagem consolidada. Com plano, o selo do topo segue o Financeiro; sem
+//     plano (ou sem a 0384), fica o status manual de sempre.
 // -----------------------------------------------------------------------------
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "@/rel/ui";
 import { FORMAS_PAGAMENTO, brl, dataBr, dataHoraBr, hojeISO, vendaDoCartao, type FormaPagamento, type Negocio, type VendaDoCartao } from "./lib";
@@ -23,6 +27,13 @@ import {
   MODALIDADES, pagamentoLimpar, pagamentoLink, pagamentoPago, parcelasDoCartao, pedirLinkAoFinanceiro,
   type Modalidade, type ParcelaAberta,
 } from "./contrato";
+import { parcelasDoNegocio } from "@/clientes/visaoCruzada";
+import { resumoDasParcelas, seloDasParcelas, situacaoParcela, type ParcelaReal } from "@/clientes/visaoCruzadaRegras";
+
+const SITUACAO: Record<ReturnType<typeof situacaoParcela>, { t: string; cor: string }> = {
+  paga: { t: "paga", cor: "var(--ok)" }, vencida: { t: "vencida", cor: "var(--danger)" },
+  a_receber: { t: "a receber", cor: "var(--muted)" }, cancelada: { t: "cancelada", cor: "var(--subtle)" },
+};
 
 const STATUS_PAG: Record<string, { t: string; tom: "neutro" | "rel" | "aviso" | "erro" }> = {
   enviado: { t: "Link enviado", tom: "aviso" }, parcial: { t: "Pago em parte", tom: "aviso" }, pago: { t: "Pago", tom: "rel" }, cancelado: { t: "Cancelado", tom: "neutro" },
@@ -36,6 +47,8 @@ interface PedidoFin { id: string; numero: number; status: string; resolucao: str
 
 export default function PagamentoBloco({ negocio, onMudou, onAbrirSolicitacao }: { negocio: Negocio; onMudou: () => void; onAbrirSolicitacao: (id: string) => void }) {
   const [parcelas, setParcelas] = useState<ParcelaAberta[]>([]);
+  // 0384: parcelas reais (com pago_em/pago_valor). null = RPC ausente → usa as de parcelasDoCartao.
+  const [reais, setReais] = useState<ParcelaReal[] | null>(null);
   const [venda, setVenda] = useState<VendaDoCartao | null>(null);
   const [pedido, setPedido] = useState<PedidoFin | null>(null);
   const [aviso, setAviso] = useState<{ tom: "ok" | "aviso" | "erro"; t: string } | null>(null);
@@ -47,6 +60,7 @@ export default function PagamentoBloco({ negocio, onMudou, onAbrirSolicitacao }:
 
   const carregar = useCallback(async () => {
     setParcelas(await parcelasDoCartao(negocio.id).catch(() => []));
+    setReais(await parcelasDoNegocio(negocio.id));
     setVenda(await vendaDoCartao(negocio.id).catch(() => null));
     if (negocio.pagamento_solicitacao_id) {
       const { data } = await supabase.from("qs_solicitacoes").select("id, numero, status, resolucao, prazo").eq("id", negocio.pagamento_solicitacao_id).maybeSingle();
@@ -64,7 +78,11 @@ export default function PagamentoBloco({ negocio, onMudou, onAbrirSolicitacao }:
   }
 
   const abertas = parcelas.filter((p) => p.status === "a_receber");
-  const st = negocio.status_pagamento ? STATUS_PAG[negocio.status_pagamento] : null;
+  const hoje = hojeISO();
+  const plano = useMemo<ParcelaReal[]>(() => reais ?? parcelas.map((p) => ({ ...p, plano_id: "", pago_em: null, pago_valor: null })), [reais, parcelas]);
+  const resumoPlano = useMemo(() => resumoDasParcelas(plano, hoje), [plano, hoje]);
+  // Com plano no Financeiro o selo segue o dado real; sem plano, o status manual.
+  const st = seloDasParcelas(resumoPlano) ?? (negocio.status_pagamento ? STATUS_PAG[negocio.status_pagamento] : null);
   const perdido = negocio.etapa === "perdido" || negocio.etapa === "venda_cancelada";
   const valorBase = negocio.ficha?.valor_total ?? (venda?.valor_total || null) ?? negocio.valor_previsto ?? null;
 
@@ -133,10 +151,30 @@ export default function PagamentoBloco({ negocio, onMudou, onAbrirSolicitacao }:
         </div>
       )}
 
-      {parcelas.length > 0 && (
-        <p className="text-[12px] mt-2" style={{ color: "var(--ink3)" }}>
-          Plano no Financeiro: {parcelas.filter((p) => p.status === "pago").length} de {parcelas.length} {parcelas.length === 1 ? "parcela paga" : "parcelas pagas"}.
-        </p>
+      {resumoPlano.total > 0 && (
+        <div className="mt-3 pt-2 border-t" style={{ borderColor: "var(--line)" }}>
+          <p className="text-[12px] mb-1.5" style={{ color: "var(--ink2)" }}>
+            Plano no Financeiro: <b style={{ color: "var(--ink)" }}>{resumoPlano.pagas} de {resumoPlano.total} {resumoPlano.total === 1 ? "parcela paga" : "parcelas pagas"}</b>
+            {resumoPlano.vencidas > 0 && <> · <b style={{ color: "var(--danger)" }}>{brl(resumoPlano.vencidoValor)} vencido</b></>}
+            {resumoPlano.aReceber > 0 && <> · {brl(resumoPlano.aReceberValor)} a receber</>}
+          </p>
+          <ul className="space-y-0.5">
+            {plano.filter((p) => p.status !== "cancelado").map((p) => {
+              const s = SITUACAO[situacaoParcela(p, hoje)];
+              return (
+                <li key={p.id} className="flex flex-wrap items-baseline gap-x-2 text-[12px]" style={{ color: "var(--ink2)" }}>
+                  <span className="w-[72px] flex-shrink-0" style={{ color: "var(--ink3)" }}>{p.numero === 0 ? "Entrada" : `Parcela ${p.numero}`}</span>
+                  <span className="qs-num" style={{ color: "var(--ink)" }}>{brl(Number(p.valor))}</span>
+                  <span>vence {dataBr(p.vencimento)}</span>
+                  <span style={{ color: "var(--ink3)" }}>{FORMAS_PAGAMENTO[p.forma as FormaPagamento] ?? p.forma}</span>
+                  <span className="font-semibold" style={{ color: s.cor }}>
+                    {s.t}{p.status === "pago" && p.pago_em ? ` em ${dataBr(p.pago_em)}` : ""}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
 
       {!perdido && (
