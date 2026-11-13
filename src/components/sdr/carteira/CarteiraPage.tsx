@@ -22,8 +22,9 @@
 // -- FILTROS (12/11/2026) -----------------------------------------------------
 //
 // Lead Score, tempo sem contato e cadência — os mesmos do Gerenciamento de
-// Leads. O "Iniciar leads hoje" sorteia SÓ dentro dos filtros da tela: "30
-// quentes sem contato há 30+ dias" em vez de 30 quaisquer. "Sem contato" é a
+// Leads. Moram DENTRO da janela "Iniciar leads hoje" (13/11, pedido do Bruno):
+// o SDR escolhe ali "30 quentes sem contato há 30+ dias" em vez de 30
+// quaisquer, vendo na hora quantos leads livres batem. "Sem contato" é a
 // última atividade CONCLUÍDA (view qs_lead_ultimo_contato, 0375), não o
 // updated_at — que muda com qualquer sync do Bitrix.
 //
@@ -324,10 +325,8 @@ export default function CarteiraPage({ onOpenLead }: Props) {
   const visiveis = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     const termoDigitos = digitos(termo);
-    const agora = Date.now();
     return itens.filter((i) => {
       if (donoFiltro && i.donoId !== donoFiltro) return false;
-      if (!casaFiltrosCarteira(i, filtros, agora)) return false;
       if (termo) {
         // Três chaves de busca, e a do Bitrix é exata: digitar "123" não pode
         // trazer o lead 51234 no meio de quem procura o card 123.
@@ -342,38 +341,35 @@ export default function CarteiraPage({ onOpenLead }: Props) {
       if (filtro === "sem_resposta") return i.status === "perdido" || i.status === "nao_iniciado";
       return true;
     });
-  }, [itens, busca, filtro, donoFiltro, filtros]);
+  }, [itens, busca, filtro, donoFiltro]);
 
-  /**
-   * Quem pode receber atividade nova, DENTRO DOS FILTROS da tela (12/11): o
-   * "Iniciar leads hoje" sorteia daqui. Antes sorteava da carteira inteira — o
-   * SDR não tinha como dizer "quero 30 quentes, sem contato há 30+ dias".
-   */
-  const disponiveis = useMemo(
+  /** Quem pode receber atividade nova (sem atividade aberta), dentro da busca/aba da tela. */
+  const livres = useMemo(
     () => visiveis.filter((i) => i.leadId && !i.temAtividadeAberta && i.status !== "ganho"),
     [visiveis]
   );
 
+  /**
+   * O "Iniciar leads hoje" sorteia daqui: os livres que batem com os filtros
+   * de Lead Score / tempo sem contato / cadência escolhidos NA JANELA do sorteio.
+   */
+  const disponiveis = useMemo(() => {
+    const agora = Date.now();
+    return livres.filter((i) => casaFiltrosCarteira(i, filtros, agora));
+  }, [livres, filtros]);
+
   const nomeCadencia = useMemo(() => new Map(cadencias.map((c) => [c.id, c.name])), [cadencias]);
 
-  /** Os filtros ativos, em texto — o modal do sorteio diz de onde ele vai tirar. */
-  const resumoFiltros = useMemo(() => {
+  /** O recorte da TELA (aba, SDR, busca) que o sorteio também respeita — a janela avisa. */
+  const resumoTela = useMemo(() => {
     const partes: string[] = [];
-    if (filtros.temp) partes.push(filtros.temp === SEM_SCORE ? "sem Lead Score" : TEMP_ROTULO[filtros.temp]);
-    if (filtros.semContato) {
-      partes.push(SEM_CONTATO_OPCOES.find((o) => o.valor === filtros.semContato)?.rotulo.toLowerCase() ?? "");
-    }
-    if (filtros.cadenceId) {
-      partes.push(filtros.cadenceId === SEM_CADENCIA
-        ? "sem cadência"
-        : `cadência ${nomeCadencia.get(filtros.cadenceId) ?? "?"}`);
-    }
     if (filtro === "esquecidos") partes.push("parados sem atividade");
     if (filtro === "sem_resposta") partes.push("perdidos / não iniciados");
     if (donoFiltro) partes.push(`só ${saude.find((s) => s.owner_id === donoFiltro)?.nome ?? "um SDR"}`);
     if (busca.trim()) partes.push(`busca "${busca.trim()}"`);
     return partes;
-  }, [filtros, filtro, donoFiltro, busca, nomeCadencia, saude]);
+  }, [filtro, donoFiltro, busca, saude]);
+  const sorteioFiltrado = temFiltroCarteira(filtros) || resumoTela.length > 0;
 
   const listados = useMemo(() => visiveis.slice(0, 200), [visiveis]);
 
@@ -455,13 +451,13 @@ export default function CarteiraPage({ onOpenLead }: Props) {
     const alvos = sortear(disponiveis, n);
     setSorteioAberto(false);
     if (alvos.length === 0) {
-      notifyError(resumoFiltros.length
+      notifyError(sorteioFiltrado
         ? "Nenhum lead livre nesses filtros — afrouxe algum filtro e tente de novo."
         : "Não há lead livre na carteira pra iniciar — todos já têm atividade aberta.");
       return;
     }
     if (alvos.length < n) {
-      notifySuccess(`Só havia ${alvos.length} lead(s) livre(s) ${resumoFiltros.length ? "nesses filtros" : "na carteira"}. Vou com esses.`);
+      notifySuccess(`Só havia ${alvos.length} lead(s) livre(s) ${sorteioFiltrado ? "nesses filtros" : "na carteira"}. Vou com esses.`);
     }
     await rodarLote(alvos, sorteioCadencia || null);
   }
@@ -493,13 +489,13 @@ export default function CarteiraPage({ onOpenLead }: Props) {
         </div>
         <button
           onClick={() => { setSorteioAberto(true); setQuantidade("30"); setSorteioCadencia(""); }}
-          disabled={disponiveis.length === 0 || !!progresso}
+          disabled={livres.length === 0 || !!progresso}
           className="shrink-0 px-4 py-2.5 rounded-xl bg-[#0147FF] text-white text-sm font-bold hover:bg-[#0139cc] disabled:opacity-50"
-          title={disponiveis.length === 0
-            ? (resumoFiltros.length ? "Nenhum lead livre nos filtros atuais" : "Todos os leads da carteira já têm atividade aberta")
-            : `Sorteia leads ${resumoFiltros.length ? "dos filtros atuais" : "da sua carteira"} e joga na fila de hoje (${disponiveis.length} livres)`}
+          title={livres.length === 0
+            ? (resumoTela.length ? "Nenhum lead livre no recorte atual" : "Todos os leads da carteira já têm atividade aberta")
+            : `Escolha Lead Score, tempo sem contato e cadência e sorteie pra fila de hoje (${livres.length} livres)`}
         >
-          Iniciar leads hoje{resumoFiltros.length ? ` (${disponiveis.length} no filtro)` : ""}
+          Iniciar leads hoje
         </button>
       </header>
 
@@ -546,67 +542,6 @@ export default function CarteiraPage({ onOpenLead }: Props) {
           >
             Só {saude.find((s) => s.owner_id === donoFiltro)?.nome ?? "um SDR"} ✕
           </button>
-        )}
-      </div>
-
-      {/* ── Lead Score, tempo sem contato e cadência (mesmos do Gerenciamento de Leads) ── */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        {(Object.keys(TEMP_ROTULO) as LeadTemperature[]).map((k) => (
-          <button
-            key={k}
-            onClick={() => setFiltros((f) => ({ ...f, temp: f.temp === k ? "" : k }))}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-              filtros.temp === k ? "bg-[#0147FF] text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            {TEMP_ROTULO[k]}
-          </button>
-        ))}
-        <button
-          onClick={() => setFiltros((f) => ({ ...f, temp: f.temp === SEM_SCORE ? "" : SEM_SCORE }))}
-          className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-            filtros.temp === SEM_SCORE ? "bg-[#0147FF] text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-          }`}
-        >
-          Sem score
-        </button>
-
-        <span className="w-px h-5 bg-gray-200" />
-
-        <select
-          value={filtros.semContato}
-          onChange={(e) => setFiltros((f) => ({ ...f, semContato: e.target.value as SemContatoFiltro }))}
-          aria-label="Tempo sem contato"
-          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
-        >
-          <option value="">Tempo sem contato</option>
-          {SEM_CONTATO_OPCOES.map((o) => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
-        </select>
-
-        <select
-          value={filtros.cadenceId}
-          onChange={(e) => setFiltros((f) => ({ ...f, cadenceId: e.target.value }))}
-          aria-label="Cadência"
-          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 max-w-[220px]"
-        >
-          <option value="">Cadência</option>
-          <option value={SEM_CADENCIA}>Sem cadência</option>
-          {cadencias.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-
-        {temFiltroCarteira(filtros) && (
-          <button
-            onClick={() => setFiltros(FILTROS_CARTEIRA_VAZIOS)}
-            className="rounded-full px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 bg-white hover:bg-red-50"
-          >
-            Limpar filtros
-          </button>
-        )}
-
-        {contatoAproximado && (
-          <span className="text-[11px] text-amber-700" title="Aplique a migration 0375 (qs_lead_ultimo_contato)">
-            "Sem contato" aproximado pela última alteração do lead
-          </span>
         )}
       </div>
 
@@ -745,20 +680,90 @@ export default function CarteiraPage({ onOpenLead }: Props) {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5">
             <h2 className="text-base font-bold text-gray-900">Iniciar leads hoje</h2>
             <p className="mt-1 text-[13px] text-gray-600">
-              Sorteio na sua carteira, entre os <strong>{disponiveis.length}</strong> leads que não têm nenhuma
-              atividade aberta{resumoFiltros.length ? " e batem com os filtros" : ""}. Quem já está na fila fica de
-              fora — senão você trabalharia o mesmo lead duas vezes.
+              Escolha de onde sortear. Só entram leads sem nenhuma atividade aberta — quem já está na fila fica de
+              fora, senão você trabalharia o mesmo lead duas vezes.
             </p>
-            {resumoFiltros.length > 0 ? (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {resumoFiltros.map((p) => (
-                  <span key={p} className="rounded-full bg-[#0147FF]/10 px-2 py-0.5 text-[11px] font-medium text-[#0147FF]">{p}</span>
+            {resumoTela.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-gray-500">Respeitando a tela:</span>
+                {resumoTela.map((p) => (
+                  <span key={p} className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700">{p}</span>
                 ))}
               </div>
-            ) : (
-              <p className="mt-2 text-[12px] text-gray-500">
-                Sem filtro: sorteia da carteira inteira. Feche e use Lead Score, tempo sem contato ou cadência pra escolher melhor.
-              </p>
+            )}
+
+            {/* Lead Score, tempo sem contato e cadência (mesmos do Gerenciamento de Leads) */}
+            <label className="block mt-4 text-xs font-medium text-gray-700 mb-1">Lead Score</label>
+            <div className="flex flex-wrap gap-1.5">
+              {(Object.keys(TEMP_ROTULO) as LeadTemperature[]).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  aria-pressed={filtros.temp === k}
+                  onClick={() => setFiltros((f) => ({ ...f, temp: f.temp === k ? "" : k }))}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    filtros.temp === k ? "bg-[#0147FF] text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                  }`}
+                >
+                  {TEMP_ROTULO[k]}
+                </button>
+              ))}
+              <button
+                type="button"
+                aria-pressed={filtros.temp === SEM_SCORE}
+                onClick={() => setFiltros((f) => ({ ...f, temp: f.temp === SEM_SCORE ? "" : SEM_SCORE }))}
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                  filtros.temp === SEM_SCORE ? "bg-[#0147FF] text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                Sem score
+              </button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="sorteio-sem-contato" className="block text-xs font-medium text-gray-700 mb-1">Tempo sem contato</label>
+                <select
+                  id="sorteio-sem-contato"
+                  value={filtros.semContato}
+                  onChange={(e) => setFiltros((f) => ({ ...f, semContato: e.target.value as SemContatoFiltro }))}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm"
+                >
+                  <option value="">Qualquer</option>
+                  {SEM_CONTATO_OPCOES.map((o) => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="sorteio-cadencia-atual" className="block text-xs font-medium text-gray-700 mb-1">Cadência atual do lead</label>
+                <select
+                  id="sorteio-cadencia-atual"
+                  value={filtros.cadenceId}
+                  onChange={(e) => setFiltros((f) => ({ ...f, cadenceId: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm"
+                >
+                  <option value="">Qualquer</option>
+                  <option value={SEM_CADENCIA}>Sem cadência</option>
+                  {cadencias.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[#0147FF]/[0.06] px-3 py-2">
+              <span className="text-[13px] text-gray-800" aria-live="polite">
+                <strong>{disponiveis.length}</strong> lead(s) livre(s) {temFiltroCarteira(filtros) ? "nesses filtros" : "na carteira"}
+              </span>
+              {temFiltroCarteira(filtros) && (
+                <button
+                  type="button"
+                  onClick={() => setFiltros(FILTROS_CARTEIRA_VAZIOS)}
+                  className="text-xs font-medium text-red-600 hover:underline"
+                >
+                  Limpar filtros
+                </button>
+              )}
+            </div>
+            {contatoAproximado && (
+              <p className="mt-1 text-[11px] text-amber-700">"Sem contato" aproximado pela última alteração do lead.</p>
             )}
 
             <label className="block mt-4 text-xs font-medium text-gray-700 mb-1">Quantos leads</label>
@@ -771,7 +776,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
               className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm"
             />
 
-            <label className="block mt-3 text-xs font-medium text-gray-700 mb-1">Cadência</label>
+            <label className="block mt-3 text-xs font-medium text-gray-700 mb-1">Iniciar com a cadência</label>
             <select
               value={sorteioCadencia}
               onChange={(e) => setSorteioCadencia(e.target.value)}
