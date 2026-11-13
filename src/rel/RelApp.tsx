@@ -35,6 +35,7 @@ import { OUTROS_ID, itensDeFora, itensDoMenu, montarMenuRel, type Contagens } fr
 import { filtroDoMenu, useMenuPorPapel } from "./equipe/menuPorPapel";
 import { Segmented } from "@/components/ui";
 import { hashSemQuery } from "@/lib/hashQuery";
+import { contarDivergenciasAbertas } from "@/clientes/useContagemDivergencias";
 
 // Telas carregadas sob demanda (22/10, desempenho): o Rel abre só com o menu e
 // o Início; cada tela baixa o seu pedaço na primeira vez que é aberta (o
@@ -148,6 +149,8 @@ interface Contadores {
   gruposNovos?: number; gruposMencao?: number;
   /** 0184: viagens que eu cuido (vão acontecer) e as que ninguém cuida */
   minhasViagens?: number; semDono?: number;
+  /** ponte/pedidos (13/11): divergências ficha × expedição em aberto (cad_divergencias) e se há alguma com mais de 7 dias */
+  divergencias?: number; divergenciasAntigas?: boolean;
 }
 
 async function contarDonos(eu: string): Promise<{ minhasViagens: number; semDono: number }> {
@@ -295,13 +298,15 @@ export default function RelApp() {
         contarChamadosVencidos().catch(() => null),
         contarGruposNovos().catch(() => null),
         eu ? contarDonos(eu).catch(() => null) : Promise.resolve(null),
-      ]).then(([r, f, ac, g, d]) => {
+        contarDivergenciasAbertas().catch(() => null),
+      ]).then(([r, f, ac, g, d, dv]) => {
         if (r) setResumo(r);
         setCont({
           esperando: f?.esperando ?? 0, foraDoPrazo: f?.foraDoPrazo ?? 0, duplicados: r?.duplicados ?? 0,
           chamadosVencidos: ac?.chamadosVencidos ?? 0,
           gruposNovos: g?.grupos ?? 0, gruposMencao: g?.mencoes ?? 0,
           minhasViagens: d?.minhasViagens ?? 0, semDono: d?.semDono ?? 0,
+          divergencias: dv?.abertas ?? 0, divergenciasAntigas: !!dv?.antigas,
         });
       }).finally(() => {
         if (deNovo.current) { deNovo.current = false; rodar(); } else emCurso.current = false;
@@ -362,7 +367,8 @@ export default function RelApp() {
     chamados: { count: cont?.chamadosVencidos, late: true },
     solicitacoes: { count: sol.badge, late: sol.alerta },
     propostas: { count: aprovacoes || undefined },
-    clientes: { count: cont?.duplicados },
+    // Clientes: possíveis duplicados + divergências ficha × expedição (vermelho se alguma passou de 7 dias)
+    clientes: { count: ((cont?.duplicados ?? 0) + (cont?.divergencias ?? 0)) || undefined, late: !!cont?.divergenciasAntigas },
     faxina: { count: cont?.semDono },
   };
   const grupos = montarMenuRel(acesso, filtro, contagens);
@@ -432,7 +438,7 @@ export default function RelApp() {
                 onChange={(v) => ir({ tela: v } as Rota)}
                 options={[
                   { value: "clientes", label: "Clientes" },
-                  { value: "cadastros", label: "Arrumar cadastros", count: cont?.duplicados || undefined },
+                  { value: "cadastros", label: "Arrumar cadastros", count: ((cont?.duplicados ?? 0) + (cont?.divergencias ?? 0)) || undefined },
                 ]} />
             </div>
           )}

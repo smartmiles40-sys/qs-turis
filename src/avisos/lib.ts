@@ -11,7 +11,7 @@
 import { supabase } from "@/lib/supabase";
 import type { Setor } from "@/components/sdr/types";
 
-export type TipoAviso = "solicitacao" | "prazo" | "reuniao" | "esteira" | "tarefas" | "marketing";
+export type TipoAviso = "solicitacao" | "prazo" | "reuniao" | "esteira" | "tarefas" | "marketing" | "alerta" | "cadastro";
 
 export interface Aviso {
   id: number;
@@ -151,6 +151,8 @@ export const COR_TIPO: Record<string, string> = {
   esteira: "#0E7C6A",
   tarefas: "#B45309",
   marketing: "#BE185D", // 0240: aprovação de conteúdo, pedido do Tráfego
+  alerta: "#DC2626",    // alarmes da gestão (api/qs-alertas.js) — antes caíam no "Aviso" genérico
+  cadastro: "#0E7490",  // 0392: divergência ficha × expedição nova
 };
 export const ROTULO_TIPO: Record<string, string> = {
   solicitacao: "Solicitação",
@@ -159,6 +161,8 @@ export const ROTULO_TIPO: Record<string, string> = {
   esteira: "Esteira",
   tarefas: "Tarefas",
   marketing: "Marketing",
+  alerta: "Alarme",
+  cadastro: "Cadastro",
 };
 
 export function temNotificacao(): boolean {
