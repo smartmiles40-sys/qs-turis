@@ -33,6 +33,12 @@ export interface CardMkt {
   tags: string[];
   checklist: ItemChecklist[];
   link_publicacao: string | null;
+  /** Planejamento (0395): horário de postar, perfis onde vai, origem e link do Canva da agência. */
+  horario?: string | null;
+  perfil_ids?: string[];
+  planejamento_item_id?: string | null;
+  da_agencia?: boolean;
+  link_producao?: string | null;
   original_id: string | null;
   rodada: number;
   status_aprovacao: StatusAprovacao;

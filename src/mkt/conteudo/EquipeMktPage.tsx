@@ -17,7 +17,7 @@ import { useQsAuth } from "@/contexts/QsAuthContext";
 import { supabase } from "@/lib/supabase";
 import { createQsAuthUser, updateQsAuthUser } from "@/lib/adminUsers";
 import { useMkt } from "../contexto";
-import { NOME_PAPEL_MKT, PAPEIS_MKT, type PapelMkt } from "../menu";
+import { NOME_PAPEL_MKT, PAPEIS_ALTOS, PAPEIS_MKT, type PapelMkt } from "../menu";
 import { definirPapeis, erroDe } from "./dados";
 
 interface Conta { id: string; name: string; email: string | null; role: string; is_active: boolean }
@@ -31,7 +31,7 @@ function senhaNova(): string {
 const EMAIL_OK = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 export default function EquipeMktPage() {
-  const { pessoas, aprovador, recarregar, carregando, erro } = useMkt();
+  const { pessoas, aprovador, gestor, recarregar, carregando, erro } = useMkt();
   const { currentUser } = useQsAuth();
   const souAdmin = currentUser?.role === "admin";
   const [salvando, setSalvando] = useState<string | null>(null);
@@ -85,7 +85,7 @@ export default function EquipeMktPage() {
           if (!id) throw new Error("o servidor não devolveu o id da conta");
           await definirPapeis(id, papeis);
         } catch (e) {
-          setErroAcao(`A conta foi criada, mas os papéis (${papeis.map((p) => (p === "gestor" ? "Gestor" : NOME_PAPEL_MKT[p])).join(", ")}) não foram salvos: ${erroDe(e)} Marque-os na lista abaixo.`);
+          setErroAcao(`A conta foi criada, mas os papéis (${papeis.map((p) => NOME_PAPEL_MKT[p]).join(", ")}) não foram salvos: ${erroDe(e)} Marque-os na lista abaixo.`);
         }
       }
     } catch (e) { setErroAcao(erroDe(e)); }
@@ -157,9 +157,9 @@ export default function EquipeMktPage() {
             <span className="flex flex-wrap gap-3 mt-2">
               {PAPEIS_MKT.map((pp) => (
                 <label key={pp} className="inline-flex items-center gap-1.5 text-[13px] cursor-pointer" style={{ color: "var(--ink2)" }}>
-                  <input type="checkbox" checked={novo.papeis.includes(pp)}
+                  <input type="checkbox" checked={novo.papeis.includes(pp)} disabled={PAPEIS_ALTOS.includes(pp) && !gestor}
                     onChange={() => setNovo({ ...novo, papeis: novo.papeis.includes(pp) ? novo.papeis.filter((x) => x !== pp) : [...novo.papeis, pp] })} />
-                  {pp === "gestor" ? "Gestor" : NOME_PAPEL_MKT[pp]}
+                  {NOME_PAPEL_MKT[pp]}
                 </label>
               ))}
             </span>
@@ -183,15 +183,17 @@ export default function EquipeMktPage() {
                     <span className="block text-[14px] font-semibold truncate" style={{ color: "var(--ink)" }}>{p.nome}</span>
                     <span className="block text-[12px] truncate" style={{ color: "var(--ink3)" }}>
                       {souAdmin && c?.email ? c.email + " · " : ""}
-                      {p.role === "admin" ? "Admin (aprova sempre)" : p.role === "gestor" ? "Gestor com a área Marketing (aprova sempre)" : p.aprovador ? "Aprova" : p.papeis.length ? "" : "Sem papel definido (vê tudo, não aprova)"}
+                      {p.role === "admin" ? "Admin (aprova sempre)" : p.role === "gestor" ? "Gestor com a área Marketing (aprova sempre)" : p.aprovador ? "Aprova" : p.papeis.length ? "" : "Sem papel definido (vê tudo)"}
                     </span>
                   </span>
                 </span>
                 <span className="flex flex-wrap items-center gap-3">
                   {PAPEIS_MKT.map((pp) => (
                     <label key={pp} className="inline-flex items-center gap-1.5 text-[13px] cursor-pointer" style={{ color: "var(--ink2)" }}>
-                      <input type="checkbox" checked={p.papeis.includes(pp)} disabled={!aprovador || salvando === p.id} onChange={() => void alternar(p.id, p.papeis, pp)} />
-                      {pp === "gestor" ? "Gestor" : NOME_PAPEL_MKT[pp]}
+                      <input type="checkbox" checked={p.papeis.includes(pp)} disabled={!aprovador || salvando === p.id || (PAPEIS_ALTOS.includes(pp) && !gestor)}
+                        title={PAPEIS_ALTOS.includes(pp) && !gestor ? "Só o gestor de Marketing dá esse papel" : undefined}
+                        onChange={() => void alternar(p.id, p.papeis, pp)} />
+                      {NOME_PAPEL_MKT[pp]}
                     </label>
                   ))}
                   {/* Só a conta que é do Marketing (papel marketing): gestor/SDR com a área marcada tem outras portas — mexe em Configurações › Usuários. */}

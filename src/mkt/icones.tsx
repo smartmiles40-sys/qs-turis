@@ -7,6 +7,7 @@ const traco = (d: ReactNode) => (
 );
 
 export const ICONES_MKT: Record<string, ReactNode> = {
+  planejamento: traco(<><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><rect x="8" y="2" width="8" height="4" rx="1" /><path d="M9 12l2 2 4-4" /><line x1="9" y1="17" x2="15" y2="17" /></>),
   quadro: traco(<><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18M15 3v12" /></>),
   calendario: traco(<><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></>),
   aprovacao: traco(<><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>),

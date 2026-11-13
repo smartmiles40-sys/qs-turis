@@ -13,7 +13,8 @@
 //   componente → React.lazy(() => import("./MinhaTela")) — sem props
 //   papeis     → só mostra no menu pra quem tem um destes papéis do Marketing
 //                ('organico' | 'trafego' | 'gestor'). Sem = todo mundo.
-//                Gestor/admin e quem ainda não tem papel definido veem tudo.
+//                O menu mostra a VISÃO de um time (menu.ts, 13/11/2026):
+//                quem é dos dois times ou gestor troca a visão no topo.
 //                ESCONDE do menu; não é trava — a trava é a RLS no banco.
 // -----------------------------------------------------------------------------
 import type React from "react";
@@ -25,6 +26,7 @@ import { ROTAS_AUTOMACOES } from "./automacoes/rotas";
 import { ROTAS_EMAIL } from "./email/rotas";
 import { ROTAS_TRAFEGO } from "./trafego/rotas";
 import { ROTAS_AGENDAMENTO } from "./agendamento/rotas";
+import { ROTAS_PLANEJAMENTO } from "./planejamento/rotas";
 import { instalarIdsAntigos } from "./conteudo/idsAntigos";
 import { registrarSeletorDrive } from "./conteudo/seletorDrive";
 import { SeletorDriveDoCard } from "./drive/seletorDoCard";
@@ -66,6 +68,7 @@ instalarIdsAntigos("mkt", {
 });
 
 export const ROTAS_MKT: RotaMkt[] = [
+  ...ROTAS_PLANEJAMENTO,
   ...ROTAS_CONTEUDO,
   ...ROTAS_TRAFEGO,
   ...ROTAS_DRIVE,

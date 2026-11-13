@@ -9,16 +9,20 @@ import { PaginaComAbas } from "../Abas";
 
 const Equipe = lazy(() => import("./EquipeMktPage"));
 const Colunas = lazy(() => import("./ColunasPage"));
+const Perfis = lazy(() => import("../planejamento/PerfisPage"));
+const Agencia = lazy(() => import("../planejamento/AgenciaContasPage"));
 
 export default function AjustesPage() {
   return (
     <div className="max-w-3xl mx-auto">
       <PaginaComAbas
         titulo="Ajustes"
-        subtitulo="Quem é quem no Marketing e as etapas (colunas) do quadro de conteúdo."
+        subtitulo="Quem é quem no Marketing, as etapas do quadro, os perfis onde a gente posta e o acesso da agência."
         abas={[
           { id: "equipe", rotulo: "Equipe", componente: Equipe },
           { id: "colunas", rotulo: "Colunas", componente: Colunas },
+          { id: "perfis", rotulo: "Perfis e redes", componente: Perfis },
+          { id: "agencia", rotulo: "Agência", componente: Agencia },
         ]}
       />
     </div>

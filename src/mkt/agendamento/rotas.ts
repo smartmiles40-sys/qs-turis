@@ -4,5 +4,5 @@ import { lazy } from "react";
 import type { RotaMkt } from "../rotas";
 
 export const ROTAS_AGENDAMENTO: RotaMkt[] = [
-  { id: "links-agendamento", rotulo: "Links de agendamento", grupo: "comum", icone: "calendario", componente: lazy(() => import("./LinksAgendamento")) },
+  { id: "links-agendamento", rotulo: "Links de agendamento", grupo: "comum", icone: "calendario", componente: lazy(() => import("./LinksAgendamento")), papeis: ["trafego"] },
 ];

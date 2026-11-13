@@ -14,10 +14,11 @@ import CascaDeArea, { type GrupoDoMenu } from "@/area/CascaDeArea";
 import { REL_CSS } from "@/rel/ui";
 import { MktProvider, useMkt } from "./contexto";
 import { ICONES_MKT, ICONE_GRUPO_MKT } from "./icones";
-import { agruparRotas } from "./menu";
+import { agruparRotas, NOME_VISAO, type VisaoMkt } from "./menu";
 import { irMkt, useRotaMkt } from "./navegacao";
 import { GRUPOS_MKT, ROTAS_MKT } from "./rotas";
 import { contarEmAprovacao } from "./conteudo/dados";
+import { contarPlanejamentosParaRevisar } from "./planejamento/dados";
 import { ROTA_SOLICITACOES_MKT } from "./solicitacoes/rotas";
 import { centralTemMarketing } from "@/solicitacoes/lib";
 import { bolinhaDaCentral, useContagemSolicitacoes } from "@/solicitacoes/useContagem";
@@ -42,9 +43,23 @@ export default function MarketingApp() {
 
 function Area() {
   const { currentUser } = useQsAuth();
-  const { meusPapeis, aprovador } = useMkt();
+  const { aprovador, gestor, visao, visoes, mudarVisao, supervisorDe } = useMkt();
   const rota = useRotaMkt();
   const [pendentes, setPendentes] = useState(0);
+  const [planRevisar, setPlanRevisar] = useState(0);
+  const supOrg = supervisorDe("organico");
+  const supTraf = supervisorDe("trafego");
+
+  // Bolinha do "Planejamento de conteúdo": planejamentos enviados esperando o supervisor.
+  useEffect(() => {
+    if (!supOrg && !supTraf) { setPlanRevisar(0); return; }
+    let vivo = true;
+    const times = [supOrg && "organico", supTraf && "trafego"].filter(Boolean) as ("organico" | "trafego")[];
+    const contar = () => { void contarPlanejamentosParaRevisar(times).then((n) => { if (vivo) setPlanRevisar(n); }); };
+    contar();
+    const t = setInterval(contar, 60_000);
+    return () => { vivo = false; clearInterval(t); };
+  }, [supOrg, supTraf, rota.tela]);
 
   // Bolinha do "Aprovações" (pro gestor): recontagem leve a cada troca de tela e a cada minuto.
   useEffect(() => {
@@ -66,13 +81,15 @@ function Area() {
   const rotas = comCentral ? [...ROTAS_MKT, ROTA_SOLICITACOES_MKT] : ROTAS_MKT;
 
   if (!currentUser) return null;
-  const grupos: GrupoDoMenu[] = agruparRotas(rotas, GRUPOS_MKT, meusPapeis, aprovador).map((g) => ({
+  const grupos: GrupoDoMenu[] = agruparRotas(rotas, GRUPOS_MKT, visao, gestor).map((g) => ({
     id: g.id,
     rotulo: g.rotulo,
     icone: ICONE_GRUPO_MKT[g.id] ?? ICONES_MKT.lista,
     itens: g.rotas.map((r) => ({
       id: r.id, rotulo: r.rotulo, icone: r.icone ? ICONES_MKT[r.icone] : undefined,
-      badge: r.id === "aprovacoes" && pendentes ? pendentes : r.id === "solicitacoes" ? bCentral.badge : undefined,
+      badge: r.id === "aprovacoes" && pendentes ? pendentes
+        : r.id === "planejamentos" && planRevisar ? planRevisar
+        : r.id === "solicitacoes" ? bCentral.badge : undefined,
       ...(r.id === "solicitacoes" && bCentral.alerta ? { alerta: true } : {}),
     })),
   }));
@@ -86,9 +103,31 @@ function Area() {
   return (
     <CascaDeArea setor="marketing" nome="Marketing" subtitulo="orgânico e tráfego" css={MKT_CSS}
       grupos={grupos} inicioId={INICIO} ativo={atual?.id ?? INICIO} onIr={(t) => irMkt(t)} chaveMenu="qs_mkt_menu_aberto">
+      {visoes.length > 1 && <TrocaDeTime visao={visao} visoes={visoes} onMudar={mudarVisao} />}
       <Suspense fallback={<p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>}>
         {Tela ? <Tela key={atual?.id} /> : null}
       </Suspense>
     </CascaDeArea>
+  );
+}
+
+/** Faixa "Time: Orgânico | Tráfego | Tudo" — só pra quem tem mais de uma visão. */
+function TrocaDeTime({ visao, visoes, onMudar }: { visao: VisaoMkt; visoes: VisaoMkt[]; onMudar: (v: VisaoMkt) => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-4" role="group" aria-label="Visão do time">
+      <span className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>Time</span>
+      <div className="inline-flex rounded-lg p-0.5" style={{ background: "var(--bg2, rgba(0,0,0,.05))" }}>
+        {visoes.map((v) => {
+          const ativo = v === visao;
+          return (
+            <button key={v} type="button" aria-pressed={ativo} onClick={() => onMudar(v)}
+              className="px-3 py-1.5 rounded-md text-[13px] font-semibold transition-colors focus-visible:outline-2"
+              style={ativo ? { background: "var(--rel)", color: "#fff" } : { color: "var(--ink2)" }}>
+              {NOME_VISAO[v]}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

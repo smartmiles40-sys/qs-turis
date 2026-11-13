@@ -7,5 +7,5 @@ import { lazy } from "react";
 import type { RotaMkt } from "../rotas";
 
 export const ROTAS_DISPAROS: RotaMkt[] = [
-  { id: "whatsapp", rotulo: "WhatsApp", grupo: "disparos", icone: "disparo", componente: lazy(() => import("./WhatsAppPage")) },
+  { id: "whatsapp", rotulo: "WhatsApp", grupo: "disparos", icone: "disparo", componente: lazy(() => import("./WhatsAppPage")), papeis: ["organico"] },
 ];

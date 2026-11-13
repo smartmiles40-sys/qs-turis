@@ -17,6 +17,7 @@ import { colunaAceitaCardNovo, comentarioDeDevolucaoOk, dataCurta, estaAtrasado,
 import { seletorDrive, type ArquivoEscolhido } from "./seletorDrive";
 import { NOME_ORIGEM, NOME_TIPO, TIPOS, type Anexo, type Aprovacao, type CardMkt, type Coluna, type Comentario, type DestinoExp, type Historico, type ItemChecklist, type Origem, type TipoConteudo } from "./tipos";
 import { ChipOrigem, ChipStatus, ChipTipo, SelectPessoa } from "./ui";
+import { listarPerfis, type Perfil } from "../planejamento/dados";
 
 const ACAO: Record<string, string> = {
   criou: "criou o card", pediu: "abriu o pedido", reaproveitou: "reaproveitou da Biblioteca", moveu: "moveu",
@@ -48,6 +49,8 @@ export default function CardDetalhe({ id, colunas, onFechar, onMudou, onAbrir }:
   const [historico, setHistorico] = useState<Historico[]>([]);
   const [rodadas, setRodadas] = useState<Aprovacao[]>([]);
   const [destinos, setDestinos] = useState<DestinoExp[]>([]);
+  const [perfis, setPerfis] = useState<Perfil[]>([]);
+  useEffect(() => { void listarPerfis(true).then(setPerfis).catch(() => setPerfis([])); }, []);
   const [original, setOriginal] = useState<CardMkt | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -237,6 +240,33 @@ export default function CardDetalhe({ id, colunas, onFechar, onMudou, onAbrir }:
           <Campo rotulo="Data de publicação" dica="Aparece no calendário editorial.">
             <Entrada type="date" defaultValue={c.data_publicacao ?? ""} key={`d${c.data_publicacao}`} onBlur={(e) => { const v = e.target.value || null; if (v !== c.data_publicacao) void salvar({ data_publicacao: v }); }} />
           </Campo>
+          <Campo rotulo="Horário de postar">
+            <Entrada type="time" defaultValue={(c.horario ?? "").slice(0, 5)} key={`h${c.horario}`} onBlur={(e) => { const v = e.target.value || null; if (v !== (c.horario ?? "").slice(0, 5) && v !== c.horario) void salvar({ horario: v }); }} />
+          </Campo>
+          <div className="sm:col-span-2">
+            <span className="block text-xs font-semibold mb-1.5" style={{ color: "var(--ink2)" }}>Onde vai ser postado</span>
+            <div className="flex flex-wrap gap-2">
+              {perfis.filter((p) => p.ativo || (c.perfil_ids ?? []).includes(p.id)).map((p) => {
+                const marcado = (c.perfil_ids ?? []).includes(p.id);
+                return (
+                  <label key={p.id} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[13px] cursor-pointer"
+                    style={{ border: `1px solid ${marcado ? "var(--rel)" : "var(--line)"}`, background: marcado ? "var(--rel-soft)" : "transparent" }}>
+                    <input type="checkbox" checked={marcado}
+                      onChange={() => void salvar({ perfil_ids: marcado ? (c.perfil_ids ?? []).filter((x) => x !== p.id) : [...(c.perfil_ids ?? []), p.id] })} />
+                    {p.nome}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+          {(c.da_agencia || c.link_producao) && (
+            <div className="sm:col-span-2 rounded-lg px-3 py-2 text-[13px]" style={{ background: "var(--card2)", border: "1px solid var(--line)" }}>
+              <b>Produção da agência</b>{" · "}
+              {c.link_producao
+                ? <a href={c.link_producao} target="_blank" rel="noopener noreferrer" className="underline break-all" style={{ color: "var(--rel-ink)" }}>abrir no Canva</a>
+                : <span style={{ color: "var(--ink3)" }}>a agência ainda não mandou o link (ela manda pelo portal).</span>}
+            </div>
+          )}
           <Campo rotulo="Expedição / pacote">
             <select className="rel-input" value={c.expedicao_id ?? ""} onChange={(e) => {
               const exp = destinos.find((d) => d.id === e.target.value);

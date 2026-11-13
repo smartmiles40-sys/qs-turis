@@ -18,5 +18,5 @@ export const IDS_ANTIGOS_EMAIL: MapaIdsAntigos = {
 instalarIdsAntigos("mkt", IDS_ANTIGOS_EMAIL);
 
 export const ROTAS_EMAIL: RotaMkt[] = [
-  { id: "email", rotulo: "E-mail", grupo: "disparos", icone: "email", componente: lazy(() => import("./telas/EmailPage")) },
+  { id: "email", rotulo: "E-mail", grupo: "disparos", icone: "email", componente: lazy(() => import("./telas/EmailPage")), papeis: ["organico"] },
 ];

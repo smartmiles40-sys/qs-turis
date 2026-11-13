@@ -61,8 +61,18 @@ const PesquisaPublica = lazy(() => import("@/rel/publico/PesquisaPublica"));
 // Proposta de viagem pro cliente (0156, 21/10): link + PDF, escolhe a opção.
 const PropostaPublica = lazy(() => import("@/propostas/PropostaPublica"));
 
+// Portal da agência (0395): login próprio, fora do Supabase Auth do QS.
+const AgenciaApp = lazy(() => import("@/agencia/AgenciaApp"));
+
 function paginaPublica(): ReactNode | null {
-  const m = window.location.pathname.match(/^\/(documentos|pesquisa|proposta)\/([0-9a-f]{64})\/?$/i);
+  if (/^#agencia(\/|$)/i.test(window.location.hash) || /^\/agencia\/?$/i.test(window.location.pathname)) {
+    return (
+      <Suspense fallback={<div className="min-h-screen" style={{ background: "var(--bg)" }} />}>
+        <AgenciaApp />
+      </Suspense>
+    );
+  }
+  const m =window.location.pathname.match(/^\/(documentos|pesquisa|proposta)\/([0-9a-f]{64})\/?$/i);
   if (!m) return null;
   const token = m[2].toLowerCase();
   const qual = m[1].toLowerCase();

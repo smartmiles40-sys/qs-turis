@@ -108,7 +108,7 @@ export async function criarCard(c: NovoCard): Promise<string> {
 /** Campos que a tela edita (os da aprovação o banco recalcula — não adianta mandar). */
 export type EdicaoCard = Partial<Pick<CardMkt,
   "titulo" | "descricao" | "tipo" | "origem" | "eh_pedido" | "responsavel_id" | "prazo" | "data_publicacao" | "expedicao_id" |
-  "destino" | "tags" | "checklist" | "link_publicacao" | "arquivado" | "coluna_id" | "ordem">>;
+  "destino" | "tags" | "checklist" | "link_publicacao" | "arquivado" | "coluna_id" | "ordem" | "horario" | "perfil_ids">>;
 
 export async function editarCard(id: string, mudanca: EdicaoCard): Promise<void> {
   const { error } = await supabase.from("mkt_cards").update(mudanca).eq("id", id);

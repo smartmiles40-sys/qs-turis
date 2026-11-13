@@ -7,7 +7,7 @@ import type { RotaMkt } from "../rotas";
 import { hashNovoDaRotaAntiga } from "./rotasAntigas";
 
 export const ROTAS_GRUPOS: RotaMkt[] = [
-  { id: "grupos", rotulo: "Grupos", grupo: "disparos", icone: "grupo", componente: lazy(() => import("./GruposArea")) },
+  { id: "grupos", rotulo: "Grupos", grupo: "disparos", icone: "grupo", componente: lazy(() => import("./GruposArea")), papeis: ["organico"] },
 ];
 
 // Links antigos (#mkt/grupos-campanhas…) → #mkt/grupos?aba=…  Roda ao carregar o módulo
