@@ -9,6 +9,7 @@
 // O saldo (saldo_brl) é coluna gerada no banco: contratado − pago.
 import { supabase, lerTudo, erroOuDados, traduzirErro } from "../lib/banco";
 import type { CondicaoPagamento, PassageiroRow } from "../lib/database";
+import { pagoEfetivo } from "./fontePago";
 
 export const CONDICOES: { id: CondicaoPagamento; rotulo: string; dica: string }[] = [
   { id: "padrao", rotulo: "Padrão", dica: "preço cheio, com aéreo" },
@@ -38,6 +39,8 @@ export type PaxValor = Pick<PassageiroRow,
 export type PlanoFin = {
   passageiro_id: string; plano_id: string; plano_total: number | null; recebido: number; a_receber: number;
   parcelas_abertas: number; proximo_vencimento: string | null; pax_no_plano: number;
+  // Ponte 0387 (v_pax_financeiro): vencido por passageiro e por onde o plano foi achado.
+  vencido?: number; parcelas_vencidas?: number; ultima_baixa_em?: string | null; ligado_por?: "venda" | "viagem";
 };
 
 export type Historico = {
@@ -67,6 +70,14 @@ export async function carregarValores(expId: string): Promise<{ pax: PaxValor[];
     ]);
     for (const p of (rp.data ?? []) as PlanoFin[]) planos.set(p.passageiro_id, p);
     historico = (rh.data ?? []) as Historico[];
+    // Ponte 0387: v_pax_financeiro acha o plano também pela venda do QS (venda_id) e traz o
+    // vencido. Sem a migration, ou sem acesso ao Financeiro (RLS), fica só o RPC acima.
+    try {
+      const rv = await supabase.from("v_pax_financeiro")
+        .select("passageiro_id, plano_id, plano_total, recebido, a_receber, vencido, parcelas_abertas, parcelas_vencidas, proximo_vencimento, ultima_baixa_em, pax_no_plano, ligado_por")
+        .eq("expedicao_id", expId);
+      if (!rv.error) for (const v of (rv.data ?? []) as PlanoFin[]) planos.set(v.passageiro_id, { ...planos.get(v.passageiro_id), ...v });
+    } catch { /* sem a view: segue com o RPC */ }
   }
   pax.sort((a, b) => a.nome_completo.localeCompare(b.nome_completo, "pt-BR"));
   return { pax, planos, historico, migracao };
@@ -98,16 +109,19 @@ export function precoSugerido(c: CondicaoPagamento | null | undefined, comAereo:
   return null;
 }
 
-/** Totais da expedição (cancelados ficam de fora). */
-export function totais(pax: PaxValor[]) {
+/** Pago que vale para o passageiro: o do Financeiro quando o plano é só dele (ponte 0387). */
+export const pagoDe = (p: PaxValor, planos?: Map<string, PlanoFin>) => pagoEfetivo(p.valor_pago_brl, planos?.get(p.id)).valor;
+
+/** Totais da expedição (cancelados ficam de fora). Com `planos`, o recebido segue o Financeiro. */
+export function totais(pax: PaxValor[], planos?: Map<string, PlanoFin>) {
   const ativos = pax.filter((p) => p.status_reserva !== "Cancelado");
   const vendido = ativos.reduce((s, p) => s + Number(p.valor_contratado_brl || 0), 0);
-  const recebido = ativos.reduce((s, p) => s + Number(p.valor_pago_brl || 0), 0);
-  const aReceber = ativos.reduce((s, p) => s + Math.max(0, Number(p.valor_contratado_brl || 0) - Number(p.valor_pago_brl || 0)), 0);
+  const recebido = ativos.reduce((s, p) => s + pagoDe(p, planos), 0);
+  const aReceber = ativos.reduce((s, p) => s + Math.max(0, Number(p.valor_contratado_brl || 0) - pagoDe(p, planos)), 0);
   const porStatus: Record<StatusFin, number> = { "Sem valor": 0, "Em aberto": 0, Parcial: 0, Quitado: 0 };
   const porCondicao: Record<CondicaoPagamento, number> = { padrao: 0, sem_aereo: 0, expedamigo: 0, especial: 0 };
   for (const p of ativos) {
-    porStatus[statusFin(Number(p.valor_contratado_brl || 0), Number(p.valor_pago_brl || 0))]++;
+    porStatus[statusFin(Number(p.valor_contratado_brl || 0), pagoDe(p, planos))]++;
     porCondicao[p.condicao_pagamento ?? "padrao"]++;
   }
   return { ativos: ativos.length, vendido, recebido, aReceber, porStatus, porCondicao };

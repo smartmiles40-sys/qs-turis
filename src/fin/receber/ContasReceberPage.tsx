@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal, Vazio } from "../ui";
+import PlanosDivergentes from "./PlanosDivergentes";
 
 interface Parcela {
   id: string; plano_id: string; numero: number; valor: number; vencimento: string; forma: string; recorrente: boolean;
@@ -86,6 +87,8 @@ export default function ContasReceberPage({ onMudou }: { onMudou?: () => void })
         <div className="rel-card p-3"><p className="text-[12px]" style={{ color: "var(--ink3)" }}>Atrasado</p><p className="text-lg font-bold" style={{ color: "var(--err-ink)" }}>{brl(somar((p) => p.situacao === "atrasado"))}</p></div>
         <div className="rel-card p-3"><p className="text-[12px]" style={{ color: "var(--ink3)" }}>Recebido (na lista)</p><p className="text-lg font-bold" style={{ color: "var(--rel-ink)" }}>{brl(filtradas.filter((p) => p.status === "pago").reduce((s, p) => s + Number(p.pago_valor ?? p.valor), 0))}</p></div>
       </div>
+
+      <PlanosDivergentes />
 
       <div className="flex flex-wrap gap-2">
         <input className="rel-input" style={{ maxWidth: 260 }} placeholder="Buscar cliente" value={busca} onChange={(e) => setBusca(e.target.value)} aria-label="Buscar cliente" />

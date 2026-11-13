@@ -16,8 +16,9 @@ import { formatBRL, formatDate } from "../lib/utils";
 import type { CondicaoPagamento, ExpedicaoComAgregados, ExpedicaoRow } from "../lib/database";
 import {
   CONDICOES, TOM_STATUS, carregarValores, nomeCampo, precoSugerido, rotuloCondicao, salvarPrecoReferencia, salvarValores,
-  statusFin, totais, type Historico, type PaxValor, type PlanoFin, type StatusFin,
+  pagoDe, statusFin, totais, type Historico, type PaxValor, type PlanoFin, type StatusFin,
 } from "./dados";
+import { pagoEfetivo } from "./fontePago";
 
 const n = (v: unknown) => Number(v ?? 0) || 0;
 
@@ -37,12 +38,12 @@ export default function PainelValores({ exp, onMudou }: { exp: ExpedicaoComAgreg
   useEffect(() => { void carregar(); }, [carregar]);
   useAoVivo([{ tabela: "passageiros", filtro: `expedicao_id=eq.${exp.id}` }], () => void carregar(), 500);
 
-  const t = useMemo(() => totais(dados?.pax ?? []), [dados]);
+  const t = useMemo(() => totais(dados?.pax ?? [], dados?.planos), [dados]);
   const lista = useMemo(() => {
     const q = busca.trim().toLowerCase();
     return (dados?.pax ?? []).filter((p) =>
       (!q || `${p.nome_completo} ${p.cpf ?? ""}`.toLowerCase().includes(q))
-      && (!filtro || (p.status_reserva !== "Cancelado" && statusFin(n(p.valor_contratado_brl), n(p.valor_pago_brl)) === filtro)));
+      && (!filtro || (p.status_reserva !== "Cancelado" && statusFin(n(p.valor_contratado_brl), pagoDe(p, dados?.planos)) === filtro)));
   }, [dados, busca, filtro]);
 
   if (!dados) return <Carregando />;
@@ -55,7 +56,7 @@ export default function PainelValores({ exp, onMudou }: { exp: ExpedicaoComAgreg
 
   // Quem está sem valor (cancelados, líderes e cortesias não pagam: fora da conta).
   const semValor = dados.pax.filter((p) => p.status_reserva !== "Cancelado" && p.tipo !== "Líder" && p.tipo !== "Cortesia"
-    && statusFin(n(p.valor_contratado_brl), n(p.valor_pago_brl)) === "Sem valor");
+    && statusFin(n(p.valor_contratado_brl), pagoDe(p, dados.planos)) === "Sem valor");
 
   /** Lança o preço de referência em quem está sem valor — só com clique + confirmação. */
   async function definirPrecoPadrao() {
@@ -203,7 +204,9 @@ function EditoresValor({ p, exp, plano, editavel, onSalvo, modo }: {
   const { avisar } = useExp();
   const [pedirTexto, setPedirTexto] = useState(false);
   const [texto, setTexto] = useState(p.condicao_obs ?? "");
-  const contratado = n(p.valor_contratado_brl), pago = n(p.valor_pago_brl);
+  // Ponte 0387: com plano só deste passageiro, o "Pago" vem do Financeiro (não se digita).
+  const ef = pagoEfetivo(p.valor_pago_brl, plano);
+  const contratado = n(p.valor_contratado_brl), pago = ef.valor;
   const st = statusFin(contratado, pago);
   const sugerido = precoSugerido(p.condicao_pagamento, n(exp.preco_venda_brl), exp.preco_sem_aereo_brl);
 
@@ -257,8 +260,17 @@ function EditoresValor({ p, exp, plano, editavel, onSalvo, modo }: {
       )}
     </div>
   );
-  const pagoEl = (
-    <div className={modo === "linha" ? "text-right" : ""}>
+  const pagoEl = ef.fonte === "financeiro" ? (
+    <div className={modo === "linha" ? "text-right" : ""} title={ef.nota}>
+      <span>{pago ? formatBRL(pago) : "—"}</span>
+      <div className="text-[10.5px]" style={{ color: "var(--ink3)" }}>do Financeiro</div>
+      {ef.digitado !== pago && ef.digitado > 0 && (
+        <div className="text-[10.5px]" style={{ color: "#B45309" }}>digitado {formatBRL(ef.digitado, 0)}</div>
+      )}
+      {ef.vencido > 0 && <div className="text-[10.5px]" style={{ color: "#B91C1C" }}>vencido {formatBRL(ef.vencido, 0)}</div>}
+    </div>
+  ) : (
+    <div className={modo === "linha" ? "text-right" : ""} title={plano ? ef.nota : undefined}>
       {editavel
         ? <CelulaEditavel tipo="number" valor={pago || null} placeholder="R$ —" formatar={(v) => formatBRL(n(v))}
             onSalvar={async (v) => salvar({ valor_pago_brl: v == null ? 0 : n(v) })} />
@@ -273,8 +285,10 @@ function EditoresValor({ p, exp, plano, editavel, onSalvo, modo }: {
       <div>Plano {formatBRL(n(plano.plano_total), 0)}{plano.pax_no_plano > 1 ? ` (${plano.pax_no_plano} pax)` : ""}</div>
       <div>Recebido {formatBRL(n(plano.recebido), 0)} · {plano.parcelas_abertas} parcela{plano.parcelas_abertas === 1 ? "" : "s"} aberta{plano.parcelas_abertas === 1 ? "" : "s"}</div>
       {plano.proximo_vencimento && <div>Próx. venc. {formatDate(plano.proximo_vencimento)}</div>}
-      {editavel && plano.pax_no_plano === 1 && n(plano.recebido) !== pago && (
-        <button className="underline" style={{ color: "var(--rel-ink)" }} onClick={tentar(() => salvar({ valor_pago_brl: n(plano.recebido) }))}>usar recebido como pago</button>
+      {n(plano.vencido) > 0 && <div style={{ color: "#B91C1C" }}>Vencido {formatBRL(n(plano.vencido), 0)}{plano.parcelas_vencidas ? ` (${plano.parcelas_vencidas})` : ""}</div>}
+      {editavel && plano.pax_no_plano === 1 && n(plano.recebido) !== ef.digitado && (
+        <button className="underline" style={{ color: "var(--rel-ink)" }} title="Grava no Operacional o mesmo valor que o Financeiro recebeu (o painel já mostra o do Financeiro)."
+          onClick={tentar(() => salvar({ valor_pago_brl: n(plano.recebido) }))}>igualar digitado ao Financeiro</button>
       )}
     </div>
   ) : <span className="text-[11.5px]" style={{ color: "var(--ink3)" }}>sem plano</span>;
