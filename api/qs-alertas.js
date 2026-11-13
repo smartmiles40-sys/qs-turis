@@ -28,6 +28,16 @@
 // prazo/reunião). Dedupe: cada alerta no máximo 1x a cada 6h (aviso baixo: 24h);
 // o estado fica em qs_settings 'qs_alertas_estado' = { [id]: ultimoEnvioISO }.
 //
+// (13/11/2026, auditoria "180 alertas, 0 lidos") QUEM RECEBE E O QUE SOBRA:
+//   • antes iam pra TODO admin e TODO gestor — inclusive o gestor do Financeiro
+//     e de Operações, que nem abrem o Comercial (o alerta é area 'comercial').
+//     Agora: admin + gestor do setor do alerta (setorDoAlerta: Comercial; o de
+//     pessoas sem contato no Bitrix é do Relacionamento) — destinatariosDoAlerta.
+//   • cada repetição (a cada 6h/24h) virava um aviso NOVO e o antigo, igual,
+//     ficava lá não lido: 18 alertas viraram 180 linhas. Agora, antes de mandar
+//     de novo, o aviso anterior do MESMO alerta (não lido) dessa pessoa é dado
+//     como lido — fica só o mais recente no sino.
+//
 // `?seco=1` → devolve o que alertaria, sem mandar nada nem gravar estado (roda
 // fora do horário também, pra dar pra testar).
 //
@@ -354,8 +364,29 @@ async function checarPessoas(agoraMs) {
 // ---------------------------------------------------------------- envio
 
 async function destinatarios() {
-  const rows = await rest('qs_users?select=id,name&is_active=eq.true&role=in.(admin,gestor)');
+  const rows = await rest('qs_users?select=id,name,role,setores&is_active=eq.true&role=in.(admin,gestor)');
   return Array.isArray(rows) ? rows : [];
+}
+
+/** O setor que cuida de cada alerta (13/11). Quase tudo é do Comercial (leads, reuniões, closer, WhatsApp). */
+export function setorDoAlerta(id) {
+  const base = String(id || '').split(':')[0];
+  if (base === 'pessoas_sem_bitrix') return 'relacionamento';
+  return 'comercial';
+}
+
+/** Quem recebe: todo admin + o gestor do setor do alerta. Sem setores cadastrados = só admin. */
+export function destinatariosDoAlerta(alertaId, pessoas) {
+  const setor = setorDoAlerta(alertaId);
+  return (pessoas || []).filter((p) => p?.role === 'admin'
+    || (p?.role === 'gestor' && Array.isArray(p.setores) && p.setores.includes(setor)));
+}
+
+/** O aviso anterior do mesmo alerta, ainda não lido, sai do sino (fica só o novo). */
+async function aposentarAnteriores(userId, alertaId) {
+  await rest(`qs_avisos?user_id=eq.${userId}&origem=eq.qs_alertas&origem_id=eq.${encodeURIComponent(alertaId)}&lido_em=is.null`, {
+    method: 'PATCH', prefer: 'return=minimal', body: { lido_em: new Date().toISOString() },
+  });
 }
 
 async function lerEstado() {
@@ -377,7 +408,7 @@ async function enviarAviso(userId, alerta, agoraMs) {
     body: {
       p_user: userId,
       p_tipo: 'alerta',
-      p_area: 'comercial',
+      p_area: setorDoAlerta(alerta.id),
       p_titulo: `${alerta.nivel === 'baixo' ? 'Aviso' : 'Alerta'}: ${alerta.titulo}`,
       p_texto: alerta.texto,
       p_link: null,
@@ -440,7 +471,10 @@ export default async function handler(req, res) {
   saida.enviar = enviar.map((a) => a.id);
 
   if (seco) {
-    try { saida.destinatarios = (await destinatarios()).map((u) => u.name); } catch { /* só informativo */ }
+    try {
+      const todos = await destinatarios();
+      saida.destinatarios = Object.fromEntries(enviar.map((a) => [a.id, destinatariosDoAlerta(a.id, todos).map((u) => u.name)]));
+    } catch { /* só informativo */ }
     return res.status(200).json(saida);
   }
 
@@ -450,7 +484,8 @@ export default async function handler(req, res) {
     const enviados = [];
     for (const a of enviar) {
       let ok = 0;
-      for (const p of pessoas) {
+      for (const p of destinatariosDoAlerta(a.id, pessoas)) {
+        await aposentarAnteriores(p.id, a.id).catch(() => null); // sem isso o sino só empilha a mesma coisa
         try { await enviarAviso(p.id, a, agoraMs); ok++; } catch (e) {
           console.warn(`[qs-alertas] aviso ${a.id} → ${p.id} falhou:`, String(e?.message || '').slice(0, 200));
         }

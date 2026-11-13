@@ -30,6 +30,7 @@ import { grupoExpedicoes } from "@/expedicoes/menu";
 import { useContagensExp } from "@/expedicoes/useContagensExp";
 import { useContagemSaude } from "@/expedicoes/useContagemSaude";
 import { useVendasSemRevisao } from "./useVendasSemRevisao";
+import { bolinhaDasDivergencias, useContagemDivergencias } from "@/clientes/useContagemDivergencias";
 
 const ExpedicoesArea = lazy(() => import("@/expedicoes/ExpedicoesArea"));
 // 23/10 (cadastro único): a ficha do cliente é a MESMA do Relacionamento (0172/0173).
@@ -71,6 +72,7 @@ export default function OpsApp() {
   const contSaude = useContagemSaude(); // 30/10: selo do "Saúde · médico"
   const [versaoRevisao, setVersaoRevisao] = useState(0);
   const semRevisao = useVendasSemRevisao(versaoRevisao);
+  const [divergencias, recontarDivergencias] = useContagemDivergencias(); // ponte/pedidos: bolinha do "Arrumar cadastros"
 
   useEffect(() => {
     const onHash = () => setRota(lerRota());
@@ -96,7 +98,7 @@ export default function OpsApp() {
     grupoExpedicoes({ ...contExp, saude: contSaude }),
     { id: "clientes-ops", rotulo: "Carteira", icone: ICONES_AREA.lista, itens: [
       { id: "fichas", rotulo: "Clientes" },
-      { id: "arrumar", rotulo: "Arrumar cadastros" },
+      { id: "arrumar", rotulo: "Arrumar cadastros", ...bolinhaDasDivergencias(divergencias) },
     ] },
     { id: "time", rotulo: "Gestão", icone: ICONES_AREA.equipe, itens: [
       ...(podeGerirTime(currentUser, "operacional") ? [{ id: "equipe", rotulo: "Time" }] : []),
@@ -149,7 +151,7 @@ export default function OpsApp() {
                 Onde a ficha do cliente e o passageiro da expedição discordam (CPF, passaporte, nascimento…). Escolha o que vale: a ficha e todas as viagens da pessoa ficam iguais.
               </p>
             </div>
-            <FilaDivergencias onAbrirCliente={(id) => ir({ tela: "ficha", id })}
+            <FilaDivergencias onAbrirCliente={(id) => ir({ tela: "ficha", id })} onMudou={recontarDivergencias}
               onAbrirPassageiro={(exp, tipo, pax) => ir({ tela: tipo === "pacote" ? "pacotes" : "expedicoes", id: `${exp}/passageiros/pax/${pax}` })} />
           </div>
         </Suspense>

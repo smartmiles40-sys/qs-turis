@@ -33,6 +33,20 @@
 //     faria com cada pessoa da fila, só lendo o Bitrix;
 //   • POST { acao:'pessoa-enviar', clienteId } (usuário logado) → "Enviar agora"
 //     da ficha; com automatico:true (depois de salvar) respeita o interruptor.
+//
+// ATUALIZAR O CONTATO QUE JÁ EXISTE (0393, 13/11/2026)
+//   Antes a rotina só criava/ligava (contact.list/add) — mudar o telefone na
+//   ficha nunca chegava ao Bitrix. Agora, quando nome/telefone/e-mail de uma
+//   ficha QUE JÁ TEM contato muda, o gatilho da 0393 põe a linha da fila em
+//   status 'atualizar' com os campos que mudaram (campos text[]). A rotina lê o
+//   contato (crm.contact.get) e manda crm.contact.update SÓ com o que mudou e
+//   ainda difere do Bitrix (planejarAtualizacao). Regras:
+//     • nunca apaga: valor vazio no QS não vai pro Bitrix;
+//     • telefone/e-mail entram como item NOVO da lista (o Bitrix guarda vários);
+//       se o Bitrix já tem aquele número/e-mail, nada a fazer;
+//     • nome: se o contato usa "nome do meio" e o nome novo não tem como
+//       preencher, não mexe (avisa no erro) — melhor não mexer do que embaralhar.
+//   Mesmo interruptor (REL_PESSOA_BITRIX_LIGADO) e a mesma simulação.
 // -----------------------------------------------------------------------------
 
 import { variantesDeTelefone } from './_bitrixLead.js';
@@ -127,6 +141,113 @@ export async function buscarAchados(pessoa, { bx }) {
 
 const COLS_PESSOA = 'id,nome,telefone,email,cpf,nascimento,bitrix_contato_id,mesclado_em_id,arquivado_em';
 
+// ── 0393: atualizar o contato que já existe ─────────────────────────────────
+
+export const CAMPOS_ATUALIZAVEIS = ['nome', 'telefone', 'email'];
+
+/** Dois telefones são o mesmo número (com/sem 55, com/sem o 9)? */
+export function mesmoTelefone(a, b) {
+  const da = soDigitos(a), db = soDigitos(b);
+  if (!da || !db) return false;
+  if (da === db) return true;
+  return variantesDeTelefone(da).includes(db) || variantesDeTelefone(db).includes(da);
+}
+
+const valoresMulti = (lista) => (Array.isArray(lista) ? lista : []).map((x) => limpa(x?.VALUE)).filter(Boolean);
+
+/**
+ * A DECISÃO da atualização, sem rede.
+ *   pessoa  = a ficha do QS agora
+ *   contato = o contato como está no Bitrix (crm.contact.get)
+ *   campos  = o que mudou no QS (da fila); vazio/nulo = confere os três
+ * Devolve { fields, mudou: [...], ignorados: [{ campo, motivo }] }.
+ * fields vazio = nada a mandar (o Bitrix já está igual ou o QS está vazio).
+ */
+export function planejarAtualizacao(pessoa, contato, campos) {
+  const quer = (Array.isArray(campos) && campos.length ? campos : CAMPOS_ATUALIZAVEIS).filter((c) => CAMPOS_ATUALIZAVEIS.includes(c));
+  const fields = {};
+  const mudou = [];
+  const ignorados = [];
+  const c = contato || {};
+
+  if (quer.includes('nome')) {
+    const novo = limpa(pessoa?.nome).replace(/\s+/g, ' ');
+    const atual = [c.NAME, c.SECOND_NAME, c.LAST_NAME].map(limpa).filter(Boolean).join(' ');
+    if (!novo) ignorados.push({ campo: 'nome', motivo: 'nome vazio no QS (não apaga o do Bitrix)' });
+    else if (semAcento(novo) === semAcento(atual)) { /* já igual */ }
+    else {
+      const partes = novo.split(' ');
+      const usaMeio = !!limpa(c.SECOND_NAME);
+      const usaSobrenome = !!limpa(c.LAST_NAME);
+      if (!usaMeio && !usaSobrenome) { fields.NAME = novo; mudou.push('nome'); }
+      else if (partes.length < 2) ignorados.push({ campo: 'nome', motivo: 'o nome novo tem uma palavra só e o contato tem sobrenome no Bitrix — não mexi' });
+      else if (usaMeio && partes.length < 3) ignorados.push({ campo: 'nome', motivo: 'o contato tem nome do meio no Bitrix e o nome novo não — não mexi' });
+      else if (usaMeio) {
+        fields.NAME = partes[0]; fields.SECOND_NAME = partes.slice(1, -1).join(' '); fields.LAST_NAME = partes[partes.length - 1]; mudou.push('nome');
+      } else {
+        fields.NAME = partes.slice(0, -1).join(' '); fields.LAST_NAME = partes[partes.length - 1]; mudou.push('nome');
+      }
+    }
+  }
+
+  if (quer.includes('telefone')) {
+    const { telefone } = chavesDaPessoa(pessoa);
+    if (!telefone) ignorados.push({ campo: 'telefone', motivo: 'telefone vazio/curto no QS (não apaga o do Bitrix)' });
+    else if (!valoresMulti(c.PHONE).some((v) => mesmoTelefone(v, telefone))) {
+      fields.PHONE = [{ VALUE: telefone, VALUE_TYPE: 'MOBILE' }]; mudou.push('telefone');
+    }
+  }
+
+  if (quer.includes('email')) {
+    const { email } = chavesDaPessoa(pessoa);
+    if (!email) ignorados.push({ campo: 'email', motivo: 'e-mail vazio/inválido no QS (não apaga o do Bitrix)' });
+    else if (!valoresMulti(c.EMAIL).some((v) => v.toLowerCase() === email)) {
+      fields.EMAIL = [{ VALUE: email, VALUE_TYPE: 'HOME' }]; mudou.push('email');
+    }
+  }
+  return { fields, mudou, ignorados };
+}
+
+/**
+ * Atualiza o contato de UMA pessoa (status 'atualizar' na fila). seco=true → só diz o que faria.
+ * Devolve { clienteId, nome, acao: 'atualizar'|'nada'|'erro', contatoId, mudou?, ignorados?, status, motivo? }.
+ * Falha (Bitrix fora/recusou) → continua 'atualizar' com o erro; a rodada tenta de novo depois de 1 h.
+ */
+export async function atualizarContato(pessoa, { bx, rest, seco = false, linha = null }) {
+  const contatoId = limpa(pessoa.bitrix_contato_id);
+  const base = { clienteId: pessoa.id, nome: pessoa.nome, contatoId: contatoId || null };
+  if (pessoa.mesclado_em_id || pessoa.arquivado_em) return { ...base, acao: 'nada', status: 'fora', motivo: 'Ficha mesclada ou arquivada.' };
+  if (!/^\d+$/.test(contatoId)) return { ...base, acao: 'nada', status: 'sem_contato', motivo: 'A ficha não tem contato no Bitrix (vai pela criação).' };
+  const tentativa = { tentativa_em: new Date().toISOString(), tentativas: Number(linha?.tentativas || 0) + 1 };
+  let contato;
+  try {
+    contato = await bx('crm.contact.get', { id: contatoId }, 8_000);
+    if (!contato || typeof contato !== 'object') throw new Error(`contato ${contatoId} não encontrado no Bitrix`);
+  } catch (e) {
+    const motivo = `Não consegui ler o contato ${contatoId} no Bitrix (${String(e?.message || 'erro').slice(0, 200)}). Nada foi alterado.`;
+    if (!seco) await marcar(rest, pessoa.id, { status: 'atualizar', erro: motivo, ...tentativa }).catch(() => null);
+    return { ...base, acao: 'erro', status: 'atualizar', motivo };
+  }
+  const plano = planejarAtualizacao(pessoa, contato, linha?.campos);
+  const temAlgo = Object.keys(plano.fields).length > 0;
+  const aviso = plano.ignorados.length ? plano.ignorados.map((i) => `${i.campo}: ${i.motivo}`).join('; ') : null;
+  if (seco) return { ...base, acao: temAlgo ? 'atualizar' : 'nada', mudou: plano.mudou, ignorados: plano.ignorados, status: 'simulado' };
+  try {
+    if (temAlgo) {
+      await bx('crm.contact.update', { id: contatoId, fields: plano.fields, params: { REGISTER_SONET_EVENT: 'N' } }, 8_000);
+    }
+    await marcar(rest, pessoa.id, {
+      status: 'ok', erro: aviso, campos: null, contato_id: contatoId, ...tentativa,
+      resultado: temAlgo ? `atualizado_${plano.mudou.join('_')}` : 'atualizado_sem_mudanca',
+    });
+    return { ...base, acao: temAlgo ? 'atualizar' : 'nada', mudou: plano.mudou, ignorados: plano.ignorados, status: 'ok' };
+  } catch (e) {
+    const motivo = `O Bitrix recusou atualizar o contato ${contatoId}: ${String(e?.message || 'erro').slice(0, 200)}`;
+    await marcar(rest, pessoa.id, { status: 'atualizar', erro: motivo, ...tentativa }).catch(() => null);
+    return { ...base, acao: 'erro', status: 'atualizar', motivo };
+  }
+}
+
 /** Marca o resultado na fila (rel_clientes_bitrix). */
 async function marcar(rest, clienteId, campos) {
   await rest(`rel_clientes_bitrix?cliente_id=eq.${clienteId}`, { method: 'PATCH', prefer: 'return=minimal', body: { ...campos, atualizado_em: new Date().toISOString() } });
@@ -182,7 +303,13 @@ export async function garantirContato(pessoa, { bx, rest, seco = false, linha = 
 export async function enviarPessoa(clienteId, { bx, rest }) {
   const pessoa = (await rest(`rel_clientes?select=${COLS_PESSOA}&id=eq.${clienteId}&limit=1`))?.[0];
   if (!pessoa) return { status: 404, body: { error: 'Pessoa não encontrada.' } };
-  const linha = (await rest(`rel_clientes_bitrix?select=tentativas&cliente_id=eq.${clienteId}&limit=1`).catch(() => null))?.[0] || null;
+  const linha = (await rest(`rel_clientes_bitrix?select=tentativas,status&cliente_id=eq.${clienteId}&limit=1`).catch(() => null))?.[0] || null;
+  // 0393: já tem contato e a ficha mudou → atualiza (lê os campos só aqui: sem a 0393 a coluna não existe).
+  if (linha?.status === 'atualizar' && limpa(pessoa.bitrix_contato_id)) {
+    const comCampos = (await rest(`rel_clientes_bitrix?select=tentativas,status,campos&cliente_id=eq.${clienteId}&limit=1`).catch(() => null))?.[0] || linha;
+    const r = await atualizarContato(pessoa, { bx, rest, linha: comCampos });
+    return { status: 200, body: { ok: r.status === 'ok', ...r } };
+  }
   // Sem linha na fila (banco sem a 0366 aplicada ou pessoa antiga): cria a linha antes, pra marcar o resultado.
   if (!linha) {
     await rest('rel_clientes_bitrix?on_conflict=cliente_id', { method: 'POST', prefer: 'resolution=ignore-duplicates,return=minimal', body: { cliente_id: clienteId, status: 'pendente' } });
@@ -208,8 +335,20 @@ export async function rodadaPessoas({ bx, rest, seco = false, limite = 10, pular
     const falhas = resta > 0 ? ((await rest(`rel_clientes_bitrix?${sel}&status=eq.falhou&tentativas=lt.${MAX_TENTATIVAS_AUTO}&tentativa_em=lt.${hora}&order=tentativa_em.asc&limit=${resta}`).catch(() => null)) || []) : [];
     fila = [...pend, ...falhas];
   }
+  // 0393: as fichas com contato que mudaram (status 'atualizar'). Sem a 0393 não há
+  // linha nesse status (e a coluna campos não existe) — a consulta falha calada.
+  const restaAtualizar = limite - fila.length;
+  const selAtu = `select=cliente_id,status,tentativas,tentativa_em,pendente_em,campos,cliente:rel_clientes!inner(${COLS_PESSOA})`;
+  const horaAtu = new Date(Date.now() - UMA_HORA).toISOString();
+  const atualizar = restaAtualizar > 0
+    ? ((await rest(seco
+      ? `rel_clientes_bitrix?${selAtu}&status=eq.atualizar&order=pendente_em.asc.nullslast,cliente_id.asc&limit=${restaAtualizar}`
+      : `rel_clientes_bitrix?${selAtu}&status=eq.atualizar&tentativas=lt.${MAX_TENTATIVAS_AUTO}&or=(tentativa_em.is.null,tentativa_em.lt.${horaAtu})&order=pendente_em.asc.nullslast&limit=${restaAtualizar}`,
+    ).catch(() => null)) || [])
+    : [];
   const total = seco
-    ? ((await rest('rel_clientes_bitrix?select=cliente_id&status=in.(pendente,falhou,sem_dados)&limit=5000').catch(() => null)) || null)?.length ?? null
+    ? ((await rest('rel_clientes_bitrix?select=cliente_id&status=in.(pendente,falhou,sem_dados,atualizar)&limit=5000').catch(() => null))
+      || (await rest('rel_clientes_bitrix?select=cliente_id&status=in.(pendente,falhou,sem_dados)&limit=5000').catch(() => null)) || null)?.length ?? null
     : null;
   const inicio = Date.now();
   const itens = [];
@@ -217,6 +356,11 @@ export async function rodadaPessoas({ bx, rest, seco = false, limite = 10, pular
   for (const l of fila) {
     if (Date.now() - inicio > orcamentoMs) { naoFeitos++; continue; }
     const r = await garantirContato(l.cliente, { bx, rest, seco, linha: l }).catch((e) => ({ clienteId: l.cliente_id, acao: 'erro', status: 'falhou', motivo: String(e?.message || 'falhou').slice(0, 200) }));
+    itens.push({ ...r, statusFila: l.status });
+  }
+  for (const l of atualizar) {
+    if (Date.now() - inicio > orcamentoMs) { naoFeitos++; continue; }
+    const r = await atualizarContato(l.cliente, { bx, rest, seco, linha: l }).catch((e) => ({ clienteId: l.cliente_id, acao: 'erro', status: 'atualizar', motivo: String(e?.message || 'falhou').slice(0, 200) }));
     itens.push({ ...r, statusFila: l.status });
   }
   const proximo = seco && (naoFeitos || fila.length === limite) ? de + itens.length : null;
@@ -228,6 +372,7 @@ export async function rodadaPessoas({ bx, rest, seco = false, limite = 10, pular
       vincularia: conta((i) => i.acao === 'vincular'), criaria: conta((i) => i.acao === 'criar'),
       semDados: conta((i) => i.acao === 'sem_dados'), ambiguos: conta((i) => i.acao === 'ambiguo'),
       erros: conta((i) => i.acao === 'erro'), ok: conta((i) => i.status === 'ok'),
+      atualizaria: conta((i) => i.statusFila === 'atualizar' && i.acao === 'atualizar'),
     },
     itens,
   };

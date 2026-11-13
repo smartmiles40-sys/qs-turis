@@ -4,6 +4,9 @@
 // documentos (passaporte + Drive com os arquivos dele) e ExpedAmigo (admin).
 // Endereço: #…/passageiros/pax/<paxId>/perfil.
 import { Botao } from "@/rel/ui";
+import { useQsAuth } from "@/contexts/QsAuthContext";
+import { BotaoPedirOutroSetor } from "@/solicitacoes/PedirOutroSetor";
+import { SETORES as SETORES_CENTRAL } from "@/solicitacoes/lib";
 import { useExp } from "../contexto";
 import Drive from "../drive/Drive";
 import { PASTAS_PAX } from "./pecas";
@@ -17,6 +20,9 @@ export default function PerfilPax({ exp, pax, dados, posicao, admin, onVoltar, o
   exp: ExpedicaoRow; pax: PassageiroRow; dados: DadosAba; posicao?: number; admin: boolean; onVoltar: () => void; onEditar: () => void; onMudou: () => void;
 }) {
   const { somenteLeitura } = useExp();
+  // ponte/pedidos (13/11): pedir a outro setor já amarrado à pessoa (ficha) do passageiro, saindo da área em que se está.
+  const { area } = useQsAuth();
+  const podePedir = SETORES_CENTRAL.includes(area);
   const aniv = aniversarioNaViagem(pax.data_nascimento, exp.data_embarque, exp.data_retorno);
   const foto = pax.foto_arquivo_id ? dados.fotos[pax.foto_arquivo_id] : null;
   return (
@@ -28,6 +34,7 @@ export default function PerfilPax({ exp, pax, dados, posicao, admin, onVoltar, o
           <h2 className="text-[19px] font-bold" style={{ color: "var(--ink)" }}>{pax.nome_completo}</h2>
           <div className="flex flex-wrap items-center gap-1.5 mt-0.5"><SeloStatus s={pax.status_reserva} /><SeloTipo t={pax.tipo} /><SeloFidelidade posicao={posicao} /></div>
         </div>
+        {podePedir && <BotaoPedirOutroSetor deSetor={area} alvo={{ clienteId: pax.cliente_id ?? null, sobre: pax.nome_completo }} />}
         <Botao onClick={onEditar}>{somenteLeitura ? "Ver ficha" : "Editar"}</Botao>
       </header>
       {admin && <LiberarExpedAmigo pax={pax} onMudou={onMudou} />}
