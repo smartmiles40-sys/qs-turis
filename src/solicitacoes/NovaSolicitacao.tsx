@@ -126,7 +126,8 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
         formulario: ehCotacao ? cot : ehServico ? serv : null,
         prazo: outroPrazo ? deInputLocal(prazo) : null, ...(alvo ?? {}),
         clienteId: escolha?.clienteId ?? null,
-        viagemId: escolha?.viagemId ?? null,
+        // sem escolha, vale a venda que veio da tela (ex.: cartão do closer já consolidado)
+        viagemId: escolha ? escolha.viagemId ?? null : alvo?.viagemId ?? null,
         // com cliente, o banco monta "Fulana · Venda"; sem, vale o nome do lead/conversa
         sobre: escolha ? null : alvo?.sobre ?? null,
       });

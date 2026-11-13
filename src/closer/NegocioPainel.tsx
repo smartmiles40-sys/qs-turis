@@ -44,6 +44,7 @@ import { SeloEmBreve } from "@/propostas/EmBreve";
 import CadastroDoLead from "@/clientes/cadastro/CadastroDoLead";
 import ReunioesDoCliente from "@/controle-comercial/ReunioesDoCliente";
 import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
+import { BotaoPedirOutroSetor } from "@/solicitacoes/PedirOutroSetor"; // ponte/pedidos: pedir a outro setor já amarrado ao lead
 import { desfazerPreVenda, listarItensDaVenda, nomeSugerido, somaDosItens, type ItemVenda } from "./vendaItens";
 import {
   ETAPAS, ETAPAS_COM_MOTIVO, NOME_ETAPA, brl, carregarNegocio, dataBr, dataHoraBr, emPreVenda, espelharNoBitrix, eventosDoNegocio, listarClosersAtivos, moverNegocio,
@@ -319,7 +320,8 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
           </Bloco>
 
           {/* ── Solicitações ── */}
-          <Bloco titulo="Solicitações a outros setores">
+          <Bloco titulo="Solicitações a outros setores"
+            acao={<BotaoPedirOutroSetor deSetor="comercial" alvo={{ leadId: n.lead_id, viagemId: n.viagem_id ?? null, sobre: nome }} onCriada={() => void carregar()} />}>
             {!sols.length ? <Nada t="Nenhuma solicitação ligada a este cliente." /> : (
               <ul className="space-y-1">
                 {sols.map((s) => (

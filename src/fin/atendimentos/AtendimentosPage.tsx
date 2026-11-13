@@ -14,6 +14,7 @@ import { supabase } from "@/lib/supabase";
 import { Aviso, Botao, Entrada, Etiqueta, Modal } from "../../rel/ui";
 import ModeloModal from "../../rel/atendimento/ModeloModal";
 import NovoAtendimento from "./NovoAtendimento";
+import { BotaoPedirOutroSetor, PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
 import { usePode } from "../../rel/equipe/usePode";
 import { carregarCliente, formatarCpf, formatarTelefone, moeda, type Cliente } from "../../rel/lib/clientes";
 import { periodo, viagensDoCliente, type Viagem } from "../../rel/lib/viagens";
@@ -85,6 +86,7 @@ export function AtendimentoDetalhe({ id, onFechar, onMudou, onAbrirConversa, cha
   const verValores = usePode("financeiro.ver_valores") !== false;
   // A conversa ligada ainda está com o Financeiro? (Se voltou pro Rel, a RLS esconde.)
   const [convComFin, setConvComFin] = useState(false);
+  const [sinalPedidos, setSinalPedidos] = useState(0);
 
   const carregar = useCallback(async () => {
     if (!id) return;
@@ -144,6 +146,9 @@ export function AtendimentoDetalhe({ id, onFechar, onMudou, onAbrirConversa, cha
             {podeStatus && aberto && <Botao disabled={ocupado} onClick={() => { setResolvendo(true); setResolucao(""); }}>✓ Resolver</Botao>}
             {podeStatus && !aberto && <Botao disabled={ocupado} onClick={() => void rodar(() => mudarAtendimento(at.id, { status: "em_atendimento" }))}>Reabrir</Botao>}
             {podeStatus && aberto && <Botao variante="fantasma" disabled={ocupado} onClick={() => void rodar(() => mudarAtendimento(at.id, { status: "cancelado", resolucao: "Cancelado pelo Financeiro" }))}>Cancelar</Botao>}
+            {/* ponte/pedidos (13/11): o Financeiro também pede a outro setor, já amarrado à pessoa deste atendimento */}
+            <BotaoPedirOutroSetor deSetor="financeiro" onCriada={() => setSinalPedidos((x) => x + 1)}
+              alvo={{ clienteId: at.cliente_id, leadId: at.lead_id, conversaId: at.conversa_id, sobre: cliente?.nome || at.nome || null }} />
           </div>
           {resolvendo && (
             <div className="rel-card p-3 space-y-2">
@@ -157,6 +162,7 @@ export function AtendimentoDetalhe({ id, onFechar, onMudou, onAbrirConversa, cha
             </div>
           )}
           {at.resolucao && !aberto && <Aviso>Solução: {at.resolucao}</Aviso>}
+          <div className="empty:hidden"><PedidosSobre alvo={{ clienteId: at.cliente_id, leadId: at.lead_id, conversaId: at.conversa_id }} recarregar={sinalPedidos} /></div>
           {erro && <Aviso tom="erro">{erro}</Aviso>}
 
           <div className="grid md:grid-cols-2 gap-4">
