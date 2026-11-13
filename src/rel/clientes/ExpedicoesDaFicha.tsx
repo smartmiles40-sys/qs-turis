@@ -11,6 +11,8 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { IdaEmExpedicao } from "@/clientes/cadastroUnico";
 import { detalharIdas, retratoExpedicoes, type IdaDetalhada } from "@/clientes/idasDetalhe";
 import { resumoSaude } from "@/expedicoes/lib/saude";
+import { pagoEfetivo, type PlanoParaPago } from "@/expedicoes/valores/fontePago";
+import { supabase } from "@/lib/supabase";
 import type { PassageiroRow } from "@/expedicoes/lib/database";
 import { formatarData, formatarTelefone, moeda } from "../lib/clientes";
 import { Aviso, Botao, Etiqueta } from "../ui";
@@ -53,13 +55,18 @@ function tomReserva(s: string): "rel" | "aviso" | "erro" | "neutro" {
   return "neutro";
 }
 
-function CartaoIda({ d, onAbrir }: { d: IdaDetalhada; onAbrir?: AbrirExpedicao }) {
+/** Ponte 0387: pago/vencido do Financeiro por passageiro (v_pax_financeiro). */
+type FinPax = NonNullable<PlanoParaPago> & { passageiro_id: string };
+
+function CartaoIda({ d, fin, onAbrir }: { d: IdaDetalhada; fin?: FinPax; onAbrir?: AbrirExpedicao }) {
   const { ida, exp, prontidao, quartos } = d;
   const e = exp ?? ida.expedicao;
   const tipo = e?.tipo ?? ida.expedicao?.tipo;
   const concluida = e?.status === "Concluída";
   const faltas = (prontidao?.checagens ?? []).filter((c) => c.semaforo === "bloqueio" || c.semaforo === "atencao");
-  const saldo = Number(ida.saldo_brl ?? 0);
+  // Com plano só desta pessoa no Financeiro, o pago vem de lá; senão, o digitado no Operações.
+  const ef = pagoEfetivo(ida.valor_pago_brl, fin);
+  const saldo = ef.fonte === "financeiro" ? Math.max(0, Number(ida.valor_contratado_brl ?? 0) - ef.valor) : Number(ida.saldo_brl ?? 0);
   return (
     <li className="rounded-xl p-3 sm:p-3.5" style={{ border: "1px solid var(--line)", background: "var(--card)" }}>
       <div className="flex flex-wrap items-start gap-2">
@@ -81,8 +88,9 @@ function CartaoIda({ d, onAbrir }: { d: IdaDetalhada; onAbrir?: AbrirExpedicao }
         <Linha rotulo="Financeiro">
           {ida.valor_contratado_brl ? (
             <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span>{moeda(ida.valor_contratado_brl)} contratado · {moeda(ida.valor_pago_brl)} pago</span>
+              <span title={ef.nota}>{moeda(ida.valor_contratado_brl)} contratado · {moeda(ef.valor)} pago{ef.fonte === "financeiro" ? " (Financeiro)" : ""}</span>
               {saldo > 0 ? <Etiqueta tom="aviso">falta {moeda(saldo)}</Etiqueta> : <Etiqueta tom="rel">quitado</Etiqueta>}
+              {ef.vencido > 0 && <Etiqueta tom="erro">vencido {moeda(ef.vencido)}</Etiqueta>}
             </span>
           ) : <span style={{ color: "var(--ink3)" }}>{ida.status_financeiro || "sem valor"}</span>}
         </Linha>
@@ -215,6 +223,24 @@ export default function ExpedicoesDaFicha({ clienteId, estado, onAbrirExpedicao 
 }) {
   const [detalhes, setDetalhes] = useState<IdaDetalhada[] | null>(null);
   const [retrato, setRetrato] = useState<Record<string, unknown> | null>(null);
+  const [fin, setFin] = useState<Map<string, FinPax>>(new Map());
+
+  // Ponte 0387: o que o Financeiro recebeu de cada ida. Sem a view ou sem acesso ao
+  // Financeiro (RLS), o mapa fica vazio e o cartão mostra o valor digitado, como antes.
+  useEffect(() => {
+    let atual = true;
+    const ids = (estado?.idas ?? []).map((i) => i.id).filter(Boolean);
+    setFin(new Map());
+    if (!ids.length) return;
+    void (async () => {
+      try {
+        const r = await supabase.from("v_pax_financeiro")
+          .select("passageiro_id, recebido, vencido, parcelas_vencidas, pax_no_plano").in("passageiro_id", ids);
+        if (atual && !r.error) setFin(new Map(((r.data ?? []) as FinPax[]).map((x) => [x.passageiro_id, x])));
+      } catch { /* sem a view: segue com o digitado */ }
+    })();
+    return () => { atual = false; };
+  }, [estado]);
 
   useEffect(() => {
     let atual = true;
@@ -259,12 +285,12 @@ export default function ExpedicoesDaFicha({ clienteId, estado, onAbrirExpedicao 
           <p className="text-[13px] py-2" style={{ color: "var(--ink3)" }}>Nenhuma expedição ou pacote ligado a esta ficha no Operações.</p>
         ) : (
           <ul className="space-y-2 pt-1">
-            {ativas.map((d) => <CartaoIda key={d.ida.id} d={d} onAbrir={onAbrirExpedicao} />)}
+            {ativas.map((d) => <CartaoIda key={d.ida.id} d={d} fin={fin.get(d.ida.id)} onAbrir={onAbrirExpedicao} />)}
             {canceladas.length > 0 && (
               <li>
                 <details>
                   <summary className="text-[12.5px] cursor-pointer py-1" style={{ color: "var(--ink3)" }}>{canceladas.length} reserva{canceladas.length > 1 ? "s" : ""} cancelada{canceladas.length > 1 ? "s" : ""}</summary>
-                  <ul className="space-y-2 pt-1">{canceladas.map((d) => <CartaoIda key={d.ida.id} d={d} onAbrir={onAbrirExpedicao} />)}</ul>
+                  <ul className="space-y-2 pt-1">{canceladas.map((d) => <CartaoIda key={d.ida.id} d={d} fin={fin.get(d.ida.id)} onAbrir={onAbrirExpedicao} />)}</ul>
                 </details>
               </li>
             )}
