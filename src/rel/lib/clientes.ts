@@ -593,7 +593,7 @@ export async function vincularCadastro(tipo: TipoVinculo, id: string, clienteId:
 }
 
 export interface LigacoesCliente {
-  leads: { id: string; nome: string; status: string | null; fonte: string | null; criado_em: string; fechado_em: string | null; dono: string | null; por: "venda" | "telefone" | "e-mail" }[];
+  leads: { id: string; nome: string; status: string | null; fonte: string | null; criado_em: string; fechado_em: string | null; dono: string | null; por: "venda" | "cadastro" | "telefone" | "e-mail" }[]; // "cadastro" = qs_leads.cliente_id (0377)
   grupos: { jid: string; nome: string | null; ultima_msg_em: string | null }[];
   financeiro: { id: string; numero: number; motivo: string | null; status: string; criado_em: string }[];
   passageiro_em: number;

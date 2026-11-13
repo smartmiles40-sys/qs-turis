@@ -6,7 +6,7 @@
 //
 // A pessoa é UMA: rel_clientes (a ficha). Cada linha de `passageiros` é a ida dela
 // numa expedição e aponta pra ficha em `passageiros.cliente_id`. CPF, passaporte,
-// validade, nascimento, e-mail e telefone são sincronizados pelo banco (quem edita
+// validade, nascimento, e-mail, telefone e nome (0379) são sincronizados pelo banco (quem edita
 // por último ganha); o que já estava diferente fica em `cad_divergencias` até
 // alguém escolher. Relacionamento e Operações leem daqui — mesma informação.
 // -----------------------------------------------------------------------------
@@ -34,11 +34,9 @@ export interface IdaEmExpedicao {
   expedicao: { id: string; codigo: string; nome: string; destino: string; data_embarque: string | null; data_retorno: string | null; status: string; tipo: string } | null;
 }
 
-export type CampoDivergente = "pessoa" | "cpf" | "passaporte" | "passaporte_validade" | "nascimento" | "email" | "telefone";
-export const NOME_CAMPO: Record<CampoDivergente, string> = {
-  pessoa: "Pessoa", cpf: "CPF", passaporte: "Passaporte", passaporte_validade: "Validade do passaporte",
-  nascimento: "Nascimento", email: "E-mail", telefone: "Telefone",
-};
+// Rótulos/formatação dos campos ficam em camposCadastro.ts (puro, testável).
+import type { CampoDivergente } from "./camposCadastro";
+export { NOME_CAMPO, rotuloCampo, valorLegivel, type CampoDivergente } from "./camposCadastro";
 
 export interface Divergencia {
   id: string;
@@ -88,16 +86,6 @@ export async function resolverDivergencia(id: string, escolha: "ficha" | "expedi
 export async function trocarFicha(passageiroId: string, clienteId: string) {
   const { error } = await supabase.rpc("cad_trocar_ficha", { p_pax: passageiroId, p_cliente: clienteId });
   if (error) throw error;
-}
-
-/** Mostra um valor de divergência de forma legível (datas em dd/mm/aaaa). */
-export function valorLegivel(campo: CampoDivergente, v: string | null): string {
-  if (!v) return "—";
-  if ((campo === "nascimento" || campo === "passaporte_validade") && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
-    const [a, m, d] = v.split("-"); return `${d}/${m}/${a}`;
-  }
-  if (campo === "cpf" && /^\d{11}$/.test(v)) return v.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
-  return v;
 }
 
 // ── Leituras da ficha pro lado do Operações (BlocoFichaCliente) ──────────────
