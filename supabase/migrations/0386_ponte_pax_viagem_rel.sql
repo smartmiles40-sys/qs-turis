@@ -52,31 +52,8 @@
 --   -- backfill (simulação): scripts/ponte/backfill-passageiros.sql
 --
 -- COMO VOLTAR:
---   /** Passageiro APAGADO no Operacional: a viagem perde o passageiro (sem apagar nada) e closer/Financeiro são avisados. */
-create or replace function _ponte_trg_pax_rel_apagado()
-returns trigger language plpgsql security definer set search_path = public as $$
-declare v_id uuid; v_exp text;
-begin
-  select coalesce(v.mesclada_em_id, v.id) into v_id
-    from rel_expedicoes_vinculo x join rel_viagens v on v.id = x.viagem_id where x.passageiro_id = old.id;
-  select nome into v_exp from expedicoes where id = old.expedicao_id;
-  if v_id is not null then
-    perform _ponte_viagem_perdeu_pax(v_id, old.id, coalesce(nullif(trim(old.nome_completo), ''), 'Passageiro'), coalesce(v_exp, ''), 'foi removido(a)');
-  end if;
-  if old.status_reserva::text in ('Confirmado', 'Pré-reserva') then
-    perform _ponte_avisar_pax_saiu(old, v_id, v_exp, 'removeu');
-  end if;
-  return null;
-exception when others then
-  raise warning 'ponte: passageiro % apagado → Rel: %', old.id, sqlerrm;
-  return null;
-end $$;
-
-drop trigger if exists zz_ponte_pax_rel_del on passageiros;
-create trigger zz_ponte_pax_rel_del after delete on passageiros
-  for each row execute function _ponte_trg_pax_rel_apagado();
-
-drop trigger if exists zz_ponte_pax_rel_ins on passageiros;
+--
+--   drop trigger if exists zz_ponte_pax_rel_ins on passageiros;
 --   drop trigger if exists zz_ponte_pax_rel_upd on passageiros;
 --   drop trigger if exists zz_ponte_pax_rel_del on passageiros;
 -- -----------------------------------------------------------------------------
@@ -355,6 +332,30 @@ create trigger zz_ponte_pax_rel_upd after update of cliente_id, status_reserva, 
   for each row when ((old.cliente_id, old.status_reserva, old.expedicao_id, old.grupo_id, old.tipo)
                      is distinct from (new.cliente_id, new.status_reserva, new.expedicao_id, new.grupo_id, new.tipo))
   execute function _ponte_trg_pax_rel();
+
+/** Passageiro APAGADO no Operacional: a viagem perde o passageiro (sem apagar nada) e closer/Financeiro são avisados. */
+create or replace function _ponte_trg_pax_rel_apagado()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_id uuid; v_exp text;
+begin
+  select coalesce(v.mesclada_em_id, v.id) into v_id
+    from rel_expedicoes_vinculo x join rel_viagens v on v.id = x.viagem_id where x.passageiro_id = old.id;
+  select nome into v_exp from expedicoes where id = old.expedicao_id;
+  if v_id is not null then
+    perform _ponte_viagem_perdeu_pax(v_id, old.id, coalesce(nullif(trim(old.nome_completo), ''), 'Passageiro'), coalesce(v_exp, ''), 'foi removido(a)');
+  end if;
+  if old.status_reserva::text in ('Confirmado', 'Pré-reserva') then
+    perform _ponte_avisar_pax_saiu(old, v_id, v_exp, 'removeu');
+  end if;
+  return null;
+exception when others then
+  raise warning 'ponte: passageiro % apagado → Rel: %', old.id, sqlerrm;
+  return null;
+end $$;
+
+drop trigger if exists zz_ponte_pax_rel_del on passageiros;
+create trigger zz_ponte_pax_rel_del after delete on passageiros
+  for each row execute function _ponte_trg_pax_rel_apagado();
 
 revoke all on function _ponte_viagem_perdeu_pax(uuid, uuid, text, text, text) from public, anon, authenticated;
 revoke all on function ponte_pax_para_rel(uuid, boolean) from public, anon, authenticated;
