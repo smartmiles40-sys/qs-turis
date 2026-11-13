@@ -44,6 +44,7 @@ import { SeloEmBreve } from "@/propostas/EmBreve";
 import CadastroDoLead from "@/clientes/cadastro/CadastroDoLead";
 import ReunioesDoCliente from "@/controle-comercial/ReunioesDoCliente";
 import RespostasDoFormulario from "@/components/sdr/leads/RespostasDoFormulario";
+import FaixaClienteDaCasa from "@/clientes/FaixaClienteDaCasa";
 import { desfazerPreVenda, listarItensDaVenda, nomeSugerido, somaDosItens, type ItemVenda } from "./vendaItens";
 import {
   ETAPAS, ETAPAS_COM_MOTIVO, NOME_ETAPA, brl, carregarNegocio, dataBr, dataHoraBr, emPreVenda, espelharNoBitrix, eventosDoNegocio, listarClosersAtivos, moverNegocio,
@@ -187,6 +188,8 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
         {podeTrocar && <Botao variante="fantasma" disabled={ocupado} onClick={() => setTrocando(true)}>Trocar responsável</Botao>}
       </div>
       {aviso && <Aviso tom={aviso.tom}>{aviso.t}</Aviso>}
+      {/* Visão cruzada (0381): viagens, chamado/oportunidade do Rel, parcela vencida. Some quando não há nada. */}
+      <FaixaClienteDaCasa leadId={n.lead_id} />
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 items-start">
         <div className="space-y-4">

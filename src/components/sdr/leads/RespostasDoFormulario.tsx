@@ -38,6 +38,13 @@ export interface RespostasDoFormularioProps {
    * "coluna" = card da coluna esquerda da ficha do lead (redesenho de 03/11).
    */
   variante?: "hero" | "ficha" | "coluna";
+  /**
+   * Respostas já em mãos (visão cruzada, 13/11): a ficha do Rel / gaveta do Ops
+   * recebe o cache qs_lead_form_answers pela RPC pessoa_contexto_comercial (0382)
+   * — o /api/lead-formulario dá 403 pra quem não é do Comercial. Com isto, o
+   * componente só desenha, sem ir ao servidor.
+   */
+  respostasProntas?: RespostaFormulario[];
 }
 
 function IconeFormulario({ size = 13 }: { size?: number }) {
@@ -49,12 +56,13 @@ function IconeFormulario({ size = 13 }: { size?: number }) {
   );
 }
 
-export default function RespostasDoFormulario({ leadId, variante = "hero" }: RespostasDoFormularioProps) {
+export default function RespostasDoFormulario({ leadId, variante = "hero", respostasProntas }: RespostasDoFormularioProps) {
   const [respostas, setRespostas] = useState<RespostaFormulario[]>(
-    () => (leadId && respostasEmCache(leadId)?.respostas) || []
+    () => respostasProntas ?? ((leadId && respostasEmCache(leadId)?.respostas) || [])
   );
 
   useEffect(() => {
+    if (respostasProntas) { setRespostas(respostasProntas); return; }
     if (!leadId) { setRespostas([]); return; }
     const guardado = respostasEmCache(leadId);
     setRespostas(guardado?.respostas ?? []);
@@ -66,7 +74,7 @@ export default function RespostasDoFormulario({ leadId, variante = "hero" }: Res
       if (vivo) setRespostas(r.respostas);
     });
     return () => { vivo = false; };
-  }, [leadId]);
+  }, [leadId, respostasProntas]);
 
   if (!respostas.length) return null;
 

@@ -19,6 +19,7 @@ import {
   type ContatoFicha, type DocumentoFicha, type IdaEmExpedicao, type MetricaFicha, type NotaFicha, type ViagemFicha,
 } from "./cadastroUnico";
 import FilaDivergencias from "./FilaDivergencias";
+import ContextoDoComercial from "./ContextoDoComercial";
 
 const CATEGORIA: Record<string, string> = { bronze: "Bronze", silver: "Silver", black: "Black", green: "Green" };
 const CANAL: Record<string, string> = { ligacao: "Ligação", whatsapp: "WhatsApp", email: "E-mail", presencial: "Presencial", instagram: "Instagram", outro: "Outro" };
@@ -309,6 +310,9 @@ function ConteudoFicha({ clienteId, varias, passageiroAtual, somenteLeitura, abr
           </ul>
         </Secao>
       )}
+
+      {/* Visão cruzada (0382): o que o Comercial viveu com a pessoa — só leitura; some sem a migration. */}
+      <ContextoDoComercial clienteId={clienteId} />
     </div>
   );
 }

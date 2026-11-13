@@ -100,6 +100,9 @@ import {
   type UploadFicha, type VendaItemFicha,
 } from "./ficha/fontes";
 import type { PassaporteAntigo } from "./ficha/regras";
+import ContextoDoComercial from "@/clientes/ContextoDoComercial";
+import { linhaDoTempoDaPessoa } from "@/clientes/visaoCruzada";
+import { eventosDaPessoa, type LinhaPessoa } from "@/clientes/visaoCruzadaRegras";
 import "./ficha/ficha.css";
 
 // 23/10 (cadastro único): a ficha é O lugar da pessoa — tudo que estava espalhado
@@ -121,6 +124,7 @@ const ABAS: { id: Aba; rotulo: string }[] = [
   // 0213: Operações também edita a ficha — e vê o histórico de quem mudou o quê.
   { id: "historico", rotulo: "Histórico" },
 ];
+const quandoCurto = (iso: string) => new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" });
 const ehAba = (x: string | null): x is Aba => !!x && ABAS.some((a) => a.id === x);
 /** Link antigo (?aba=resumo) cai na Visão geral. */
 const abaDaUrl = (): Aba => { const a = lerParamDoHash("aba"); return a === "resumo" ? "geral" : ehAba(a) ? a : "geral"; };
@@ -236,6 +240,8 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const [laudos, setLaudos] = useState<EstadoLaudos | null>(null);
   const [vendaItens, setVendaItens] = useState<VendaItemFicha[]>([]);
   const [telefone, setTelefone] = useState(false);
+  // Visão cruzada (0383): o que o Comercial fez com a pessoa entra na linha do tempo. [] = RPC ausente → linha antiga.
+  const [linhaPessoa, setLinhaPessoa] = useState<LinhaPessoa[]>([]);
 
   const setAba = useCallback((a: Aba) => {
     setAbaEstado(a);
@@ -255,6 +261,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         .catch((e) => { setMetrica(null); setErroMetrica(e instanceof Error ? e.message : "erro desconhecido"); });
       listarContatos(cli.id).then(setContatos).catch(() => setContatos([]));
       carregarLigacoes(cli.id).then(setLigacoes).catch(() => setLigacoes(null));
+      linhaDoTempoDaPessoa(cli.id, 300).then((l) => setLinhaPessoa(l ?? [])).catch(() => setLinhaPessoa([]));
       lerPessoa(cli.id).then((p) => setPessoa(p)).catch(() => setPessoa(null)); // CadastroInativo ou erro: o card avisa
       todasDoCliente(cli.id).then(setViagensRel).catch(() => setViagensRel([]));
       // 30/10 (ficha completa): idas com tudo → contratos; perfil de viagem (0228); laudos; itens de venda
@@ -337,7 +344,9 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const extras = useMemo(() => [
     ...eventosDaFichaCompleta({ idas: idasC, contratos: contratos?.lista ?? [], laudos: laudos?.lista ?? [], vendaItens, usuarios }),
     ...eventosDoHistoricoExtra({ idas: idasC, auditoria: auditIdas.lista, uploads, decisoes, usuarios }),
-  ], [idasC, contratos, laudos, vendaItens, usuarios, auditIdas, uploads, decisoes]);
+    // 0383: só os tipos que a ficha ainda não monta sozinha (WhatsApp/ligações/notas/tarefas do Comercial, eventos…)
+    ...eventosDaPessoa(linhaPessoa, quandoCurto),
+  ], [idasC, contratos, laudos, vendaItens, usuarios, auditIdas, uploads, decisoes, linhaPessoa]);
   const timeline = useMemo(() => linhaDoTempo({ historico, mudancas, usuarios, contatos, solicitacoes, ligacoes, viagens: viagensRel, extras }),
     [historico, usuarios, contatos, solicitacoes, ligacoes, viagensRel, extras]);
   const pe = useMemo(() => perfilEfetivo(perfil, idasC), [perfil, idasC]);
@@ -662,6 +671,8 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
               )}
               <HistoricoDeSolicitacoes clienteId={c.id} recarregar={sinalPedidos} links={{ onAbrirViagem, onAbrirConversa, onAbrirCliente: onAbrir }} />
               <StatusNoFinanceiro alvo={{ clienteId: c.id }} recarregar={sinalFin} />
+              {/* Visão cruzada (0382): origem/UTM, motivo de perda, formulário, notas e reuniões do Comercial — só leitura. */}
+              <ContextoDoComercial clienteId={c.id} />
 
               {ehRel && <>
                 {/* WhatsApp do Relacionamento (Fase 2) */}

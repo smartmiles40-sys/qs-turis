@@ -56,7 +56,11 @@ const STATUS: Record<string, string> = {
 const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const tx = { forte: "var(--text)", medio: "var(--muted)", fraco: "var(--subtle)" };
 
-export default function ReunioesDoCliente({ leadId }: { leadId: string }) {
+/**
+ * `somenteLeitura` (visão cruzada, 13/11): na ficha do Rel / gaveta do Ops a lista é só
+ * pra consulta — sem "Entrar no Meet" e sem colar/trocar o link da gravação.
+ */
+export default function ReunioesDoCliente({ leadId, somenteLeitura = false }: { leadId: string; somenteLeitura?: boolean }) {
   const [lista, setLista] = useState<ReuniaoDoCliente[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const carregar = useCallback(async () => {
@@ -81,7 +85,7 @@ export default function ReunioesDoCliente({ leadId }: { leadId: string }) {
             <b className="qs-num" style={{ fontSize: 13.5, color: tx.forte }}>{dataHoraCurta(m.scheduled_at)}{m.duration_min ? ` · ${m.duration_min} min` : ""}</b>
             <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: tx.medio, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.title || "Reunião"}</span>
             <span style={{ fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "var(--surface-2)", color: tx.forte }}>{STATUS[m.status] ?? m.status}</span>
-            {m.meeting_link && futura(m) && (
+            {m.meeting_link && futura(m) && !somenteLeitura && (
               <a href={m.meeting_link} target="_blank" rel="noopener noreferrer" className="qs-btn qs-btn--sm qs-btn--primary">Entrar no Meet</a>
             )}
           </div>
@@ -94,7 +98,7 @@ export default function ReunioesDoCliente({ leadId }: { leadId: string }) {
               <span style={{ whiteSpace: "pre-wrap" }}>{m.notes}</span>
             </div>
           )}
-          <DetalheDaReuniao m={m} onMudou={() => void carregar()} />
+          <DetalheDaReuniao m={m} onMudou={() => void carregar()} somenteLeitura={somenteLeitura} />
         </li>
       ))}
     </ul>
@@ -102,7 +106,7 @@ export default function ReunioesDoCliente({ leadId }: { leadId: string }) {
 }
 
 /** Participantes, desfecho e gravação de UMA reunião. */
-export function DetalheDaReuniao({ m, onMudou }: { m: ReuniaoDoCliente; onMudou?: () => void }) {
+export function DetalheDaReuniao({ m, onMudou, somenteLeitura = false }: { m: ReuniaoDoCliente; onMudou?: () => void; somenteLeitura?: boolean }) {
   const participantes = [
     m.scheduled_by ? `marcada por ${m.scheduled_by.trim()}` : null,
     m.meeting_owner ? `closer ${m.meeting_owner.trim()}` : null,
@@ -121,12 +125,12 @@ export function DetalheDaReuniao({ m, onMudou }: { m: ReuniaoDoCliente; onMudou?
       {m.calendar_html_link && (
         <a href={m.calendar_html_link} target="_blank" rel="noopener noreferrer" style={{ color: "var(--info)", width: "fit-content" }}>Abrir no Google Agenda</a>
       )}
-      <Gravacao m={m} onMudou={onMudou} />
+      <Gravacao m={m} onMudou={onMudou} somenteLeitura={somenteLeitura} />
     </div>
   );
 }
 
-function Gravacao({ m, onMudou }: { m: ReuniaoDoCliente; onMudou?: () => void }) {
+function Gravacao({ m, onMudou, somenteLeitura = false }: { m: ReuniaoDoCliente; onMudou?: () => void; somenteLeitura?: boolean }) {
   const [editando, setEditando] = useState(false);
   const [url, setUrl] = useState(m.gravacao_url ?? "");
   const [atual, setAtual] = useState(m.gravacao_url ?? "");
@@ -162,9 +166,11 @@ function Gravacao({ m, onMudou }: { m: ReuniaoDoCliente; onMudou?: () => void })
           {atual
             ? <a href={atual} target="_blank" rel="noopener noreferrer" style={{ color: "var(--info)", wordBreak: "break-all" }}>abrir gravação</a>
             : <span style={{ color: tx.fraco }}>{situacao ?? "sem link"}</span>}
-          <button type="button" onClick={() => { setUrl(atual); setEditando(true); }} style={{ fontSize: 12, textDecoration: "underline", color: tx.medio }}>
-            {atual ? "trocar" : "colar link"}
-          </button>
+          {!somenteLeitura && (
+            <button type="button" onClick={() => { setUrl(atual); setEditando(true); }} style={{ fontSize: 12, textDecoration: "underline", color: tx.medio }}>
+              {atual ? "trocar" : "colar link"}
+            </button>
+          )}
         </span>
         {st === "erro" && m.gravacao_erro && (
           <span style={{ fontSize: 12, color: "var(--danger)" }}>Busca no Drive: {m.gravacao_erro}</span>
