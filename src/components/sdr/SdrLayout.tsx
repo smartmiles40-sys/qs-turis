@@ -444,8 +444,11 @@ export default function SdrLayout() {
   const desempenhoAbas = (["dashboard", "analises", "monitor-leads"] as SdrNav[]).filter((id) => permitido.has(id));
   const grupos: ShellGroup[] = [
     { label: "Execução", items: execucao.map((id) => item(id, id)).filter(Boolean) as ShellItem[] },
-    { label: "Gestão", items: [item("leads", "Leads"), item("cobertura", "Minha carteira"), item("cotacoes", "Cotações"), ...(ehSdr ? [] : [item("cadencias", "Cadências"), item("disparos", "Disparo em massa"), ...(reunioesNaExecucao ? [] : [item("reunioes", "Reuniões")])])].filter(Boolean) as ShellItem[] },
-    { label: "Com outros setores", items: [item("solicitacoes", "Solicitações"), item("propostas", "Propostas")].filter(Boolean) as ShellItem[] },
+    // 16/11 (Bruno, limpeza): "Disparo em massa" (0 campanhas na história) e
+    // "Solicitações" (0 do Comercial na história) saíram do menu do Comercial.
+    // As rotas #comercial/disparos e #comercial/solicitacoes seguem abrindo.
+    { label: "Gestão", items: [item("leads", "Leads"), item("cobertura", "Minha carteira"), item("cotacoes", "Cotações"), ...(ehSdr ? [] : [item("cadencias", "Cadências"), ...(reunioesNaExecucao ? [] : [item("reunioes", "Reuniões")])])].filter(Boolean) as ShellItem[] },
+    { label: "Com outros setores", items: [item("propostas", "Propostas")].filter(Boolean) as ShellItem[] },
     { label: "Análise", items: [
       ...(desempenhoAbas.length ? [{ id: desempenhoAbas[0], label: "Desempenho", icon: Icon.grafico }] : []),
       item("comissoes", "Minhas comissões"),

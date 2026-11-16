@@ -497,7 +497,10 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
         </p>
       </div>
 
-      {pend && (pend.semData > 0 || pend.classificar > 0 || pend.semDono > 0) && (
+      {/* 16/11 (Bruno, limpeza): as pendências "sem dono / para classificar / sem data"
+          só aparecem se a tela pedir a fila (onVerFila) — o Painel do Rel não pede mais:
+          0 ações nessas filas desde que existem. */}
+      {onVerFila && pend && (pend.semData > 0 || pend.classificar > 0 || pend.semDono > 0) && (
         <div className="flex flex-wrap gap-2" role="group" aria-label="O que falta arrumar (não conta como viagem)">
           {/* 0184: pacote/aéreo/hotel que vai acontecer e ninguém cuida */}
           {pend.semDono > 0 && <Pendencia n={pend.semDono} titulo="sem dono" texto="ninguém do time cuida" onClick={onVerFila ? () => onVerFila("sem_dono") : undefined} />}

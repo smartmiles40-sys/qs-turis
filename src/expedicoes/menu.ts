@@ -17,7 +17,8 @@ export function grupoExpedicoes(contagens: { avisos?: number; inscricoes?: numbe
       // 05/11: quem a sync do Bitrix trouxe novo pra uma expedição e ninguém conferiu ainda
       { id: "novas-vendas", rotulo: "Novas vendas", badge: contagens.novasVendas || undefined },
       { id: "inscricoes", rotulo: "Inscrições", badge: contagens.inscricoes || undefined },
-      { id: "avisos", rotulo: "Avisos", badge: contagens.avisos || undefined },
+      // 16/11 (Bruno, limpeza): "Avisos" saiu do menu — os avisos moram na Visão geral
+      // da expedição. #ops/avisos continua abrindo a tela antiga.
       // 30/10 (Bruno): "Receitas" saiu do menu — a receita mora na ficha do cliente (aba Saúde).
       // O alerta "Receitas a enviar" fica dentro das Inscrições; a rota antiga redireciona.
       // 30/10: fila do médico — conta os laudos a fazer de quem embarca em até 45 dias

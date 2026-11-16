@@ -4494,7 +4494,8 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               aria-label="Filtrar por canal"
             >
               <option value="">Canal</option>
-              {(["pesquisa", "email", "ligacao", "ligacao_whatsapp", "whatsapp", "linkedin", "instagram", "tiktok", "youtube"] as ChannelType[]).map((ch) => {
+              {/* 16/11 (Bruno, limpeza): só os 4 canais que já tiveram atividade — e-mail, LinkedIn, Instagram, TikTok e YouTube: 0 na história */}
+              {(["pesquisa", "ligacao", "ligacao_whatsapp", "whatsapp"] as ChannelType[]).map((ch) => {
                 const n = channelCounts.get(ch) ?? 0;
                 return <option key={ch} value={ch}>{CHANNEL_LABELS[ch]}{n > 0 ? ` (${n})` : ""}</option>;
               })}

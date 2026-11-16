@@ -32,7 +32,7 @@ import { useWaAvisos } from "@/lib/qs/waAvisos";
 import WaThreadList from "./WaThreadList";
 import WaConversation from "./WaConversation";
 import WaDesconhecidos from "./WaDesconhecidos";
-import { countDesconhecidos } from "@/lib/qs/waDesconhecidos";
+// import { countDesconhecidos } from "@/lib/qs/waDesconhecidos"; // 16/11: triagem "sem lead" desligada
 import { WaAvatar } from "./WaBits";
 import BriefingDoLead from "../agenda/BriefingDoLead";
 import {
@@ -93,7 +93,9 @@ export default function WaPage({ onOpenLead }: Props) {
 
   useEffect(() => {
     void listUsersLite().then(setUsers);
-    void countDesconhecidos().then(setDesconhecidos);
+    // 16/11 (Bruno, limpeza): a triagem "sem lead" saiu — 488 pendentes e ninguém
+    // tratava desde 14/09. Sem a contagem o botão não aparece; pra voltar, descomente:
+    // void countDesconhecidos().then(setDesconhecidos);
   }, []);
 
   // Clicou no WhatsApp de um lead em outra tela com a aba já aberta: abre a

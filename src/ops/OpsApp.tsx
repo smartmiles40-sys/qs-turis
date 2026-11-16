@@ -30,7 +30,7 @@ import { grupoExpedicoes } from "@/expedicoes/menu";
 import { useContagensExp } from "@/expedicoes/useContagensExp";
 import { useContagemSaude } from "@/expedicoes/useContagemSaude";
 import { useVendasSemRevisao } from "./useVendasSemRevisao";
-import { bolinhaDasDivergencias, useContagemDivergencias } from "@/clientes/useContagemDivergencias";
+import { useContagemDivergencias } from "@/clientes/useContagemDivergencias";
 
 const ExpedicoesArea = lazy(() => import("@/expedicoes/ExpedicoesArea"));
 // 23/10 (cadastro único): a ficha do cliente é a MESMA do Relacionamento (0172/0173).
@@ -72,7 +72,7 @@ export default function OpsApp() {
   const contSaude = useContagemSaude(); // 30/10: selo do "Saúde · médico"
   const [versaoRevisao, setVersaoRevisao] = useState(0);
   const semRevisao = useVendasSemRevisao(versaoRevisao);
-  const [divergencias, recontarDivergencias] = useContagemDivergencias(); // ponte/pedidos: bolinha do "Arrumar cadastros"
+  const [, recontarDivergencias] = useContagemDivergencias(); // ponte/pedidos: recontagem da tela "Arrumar cadastros" (16/11: saiu do menu, rota segue)
 
   useEffect(() => {
     const onHash = () => setRota(lerRota());
@@ -93,12 +93,12 @@ export default function OpsApp() {
       { id: "subir-venda", rotulo: "Subir venda" },
       { id: "revisar-vendas", rotulo: "Vendas para revisar", badge: semRevisao || undefined },
       { id: "propostas", rotulo: "Propostas", badge: aprovacoes || undefined, selo: SELO_PROPOSTAS },
-      { id: "prioridades", rotulo: "Prioridades" },
+      // 16/11 (Bruno, limpeza): "Prioridades" saiu do menu (0 desde sempre); #ops/prioridades segue abrindo.
     ] },
     grupoExpedicoes({ ...contExp, saude: contSaude }),
     { id: "clientes-ops", rotulo: "Carteira", icone: ICONES_AREA.lista, itens: [
       { id: "fichas", rotulo: "Clientes" },
-      { id: "arrumar", rotulo: "Arrumar cadastros", ...bolinhaDasDivergencias(divergencias) },
+      // 16/11 (Bruno, limpeza): "Arrumar cadastros" saiu do menu (112 abertas, 1 resolvida); #ops/arrumar segue abrindo.
     ] },
     { id: "time", rotulo: "Gestão", icone: ICONES_AREA.equipe, itens: [
       ...(podeGerirTime(currentUser, "operacional") ? [{ id: "equipe", rotulo: "Time" }] : []),

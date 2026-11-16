@@ -70,15 +70,14 @@ interface SidebarItem {
 
 const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "mesa", label: "Mesa (quem está online)", group: "SUPERVISÃO" },
+  // 16/11 (Bruno, limpeza): saíram Classificação Automática (nunca configurada), Agenda (Google) — legado
+  // (sem uso desde 16/07) e Discador (nunca ligado, 0 tentativas). As seções continuam no código.
   { key: "produtos", label: "Produtos", group: "PLATAFORMA" },
   { key: "canais", label: "Canais de Contato", group: "PLATAFORMA" },
   { key: "motivos", label: "Motivos de Perda", group: "PLATAFORMA" },
-  { key: "classificacao", label: "Classificação Automática", group: "PLATAFORMA" },
   { key: "horario", label: "Horário de Trabalho", group: "EMPRESA" },
   { key: "carteira", label: "Carteira (Saúde)", group: "EMPRESA" },
-  { key: "agenda", label: "Agenda (Google) — legado", group: "EMPRESA" },
   { key: "webfone-webrtc", label: "Webfone WebRTC (VoxFree)", group: "EMPRESA" },
-  { key: "discador", label: "Discador", group: "EMPRESA" },
   { key: "telefone-sip", label: "Telefone (SIP)", group: "EMPRESA" },
   { key: "usuarios", label: "Usuários e Permissões", group: "EMPRESA" },
   { key: "numeros", label: "Números do WhatsApp", group: "EMPRESA" },

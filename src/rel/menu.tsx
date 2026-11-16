@@ -58,7 +58,8 @@ export const ITENS_REL: ItemRel[] = [
   { id: "solicitacoes", label: "Solicitações", icon: Icon.inbox, grupo: "entre", dica: "Pedidos que chegam dos outros setores" },
   { id: "propostas", label: "Propostas", icon: Icon.doc, grupo: "entre", dica: "Propostas pra aprovar e acompanhar" },
   { id: "viagens", label: "Viagens", icon: Icon.aviao, grupo: "posvenda", dica: "Todas as viagens vendidas" },
-  { id: "prioridades", label: "Prioridades", icon: Icon.alerta, grupo: "posvenda", dica: "Pacotes prioritários e o check do dia" },
+  // 16/11 (Bruno, limpeza do que ninguém usa): "Prioridades" saiu do menu — 0
+  // prioridades no sistema inteiro desde que existe. #rel/prioridades segue abrindo.
   // 03/11 (Bruno): "Alertas" saiu ("ninguém vai olhar"); #rel/alertas cai em Viagens.
   { id: "vendas", label: "Pipeline de vendas", icon: Icon.funil, grupo: "posvenda", dica: "Oportunidades de vender de novo pra base" },
   { id: "campanhas", label: "Campanhas", icon: Icon.disparo, grupo: "posvenda", dica: "Disparos, automações, pesquisas e recompra" },
@@ -80,7 +81,8 @@ export const ITENS_REL: ItemRel[] = [
   { id: "clientes", label: "Clientes", icon: Icon.cliente, grupo: "carteira", dica: "Fichas dos clientes e arrumar cadastros" },
   { id: "agenda", label: "Agenda do time", icon: Icon.agenda, grupo: "acompanhamento", dica: "Compromissos de todo o time" },
   { id: "kpis", label: "Desempenho", icon: Icon.kpi, grupo: "acompanhamento", dica: "KPIs e prazo de resposta", so: "kpis" },
-  { id: "faxina", label: "Faxina das viagens", icon: Icon.ferramenta, grupo: "supervisao", dica: "Viagens sem dono e filas de arrumação", so: "supervisao" },
+  // 16/11 (Bruno): "Faxina das viagens" saiu — 0 ações de faxina desde sempre
+  // (ninguém assumiu, classificou nem conferiu viagem). #rel/faxina segue abrindo.
   { id: "modelos", label: "Modelos de mensagem", icon: Icon.modelo, grupo: "supervisao", dica: "Respostas prontas do time", so: "supervisao" },
   { id: "equipe", label: "Time e cargos", icon: Icon.time, grupo: "supervisao", dica: "Quem é quem, o que recebe e o que vê", so: "time" },
 ];

@@ -20,7 +20,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "./lib/banco";
 import { useAoVivo } from "./ui";
-import { calcularAlertas, carregarProntidaoAtivas } from "./paginas/_globais/prontidaoGlobal";
 import { listarReceitas, naJanela } from "./lib/receitas";
 import { dataSP } from "./lib/fase.ts";
 import { contarNovasVendas } from "./lib/novasVendas";
@@ -28,33 +27,18 @@ import { contarNovasVendas } from "./lib/novasVendas";
 const ESPERA_INICIAL_MS = 3000;
 const SOSSEGO_AVISOS_MS = 30_000;
 
-export function useContagensExp(): { avisos: number; inscricoes: number; receitas: number; novasVendas: number } {
-  const [avisos, setAvisos] = useState(0);
-  const [receitas, setReceitas] = useState(0);
+// 16/11 (Bruno, limpeza): "Avisos" saiu do menu de Operações (já mora dentro da
+// expedição) e "Receitas" já tinha saído em 30/10 — as duas contas (a dos avisos era
+// a mais pesada do menu) não rodam mais. Ficam Inscrições e Novas vendas.
+export function useContagensExp(): { inscricoes: number; novasVendas: number } {
   const [inscricoes, setInscricoes] = useState(0);
   const [novasVendas, setNovasVendas] = useState(0);
   const vivo = useRef(true);
   useEffect(() => { vivo.current = true; return () => { vivo.current = false; }; }, []);
 
-  const contarAvisos = useCallback(async () => {
-    try {
-      const n = calcularAlertas(await carregarProntidaoAtivas({ soFuturas: true })).length;
-      if (vivo.current) setAvisos(n);
-    } catch { /* sem acesso às Expedições ou rede fora: mantém o último número */ }
-  }, []);
-
   const contarInscricoes = useCallback(async () => {
     const { count, error } = await supabase.from("inscricoes_pendentes").select("id", { count: "exact", head: true }).eq("status", "pendente");
     if (!error && vivo.current) setInscricoes(count ?? 0);
-  }, []);
-
-  // Receitas (0223): na janela de 20 dias e ainda não enviadas. Sem a 0223 a coluna
-  // não existe e a conta falha calada (fica 0).
-  const contarReceitas = useCallback(async () => {
-    try {
-      const n = (await listarReceitas(dataSP(new Date()))).filter((r) => naJanela(r) && !r.enviadaEm).length;
-      if (vivo.current) setReceitas(n);
-    } catch { /* sem 0223 ou sem acesso */ }
   }, []);
 
   // Novas vendas (0317): passageiros com nova_venda=true. Sem a coluna, a conta dá 0.
@@ -66,18 +50,14 @@ export function useContagensExp(): { avisos: number; inscricoes: number; receita
   useEffect(() => {
     void contarInscricoes();
     void contarNovas();
-    const primeiraReceita = setTimeout(() => { void contarReceitas(); }, ESPERA_INICIAL_MS);
-    const primeira = setTimeout(() => { void contarAvisos(); }, ESPERA_INICIAL_MS);
-    const t = setInterval(() => { void contarAvisos(); void contarInscricoes(); void contarReceitas(); void contarNovas(); }, 30 * 60 * 1000);
-    return () => { clearTimeout(primeira); clearTimeout(primeiraReceita); clearInterval(t); };
-  }, [contarAvisos, contarInscricoes, contarReceitas, contarNovas]);
+    const t = setInterval(() => { void contarInscricoes(); void contarNovas(); }, 30 * 60 * 1000);
+    return () => clearInterval(t);
+  }, [contarInscricoes, contarNovas]);
 
-  useAoVivo([{ tabela: "passageiros" }, { tabela: "passageiro_requisitos" }, { tabela: "expedicoes" }], contarAvisos, SOSSEGO_AVISOS_MS);
   useAoVivo([{ tabela: "inscricoes_pendentes" }], contarInscricoes, 800);
-  useAoVivo([{ tabela: "passageiros" }], contarReceitas, SOSSEGO_AVISOS_MS);
   useAoVivo([{ tabela: "passageiros" }], contarNovas, 5000);
 
-  return { avisos, inscricoes, receitas, novasVendas };
+  return { inscricoes, novasVendas };
 }
 
 /** Só o número de Receitas (menu do Relacionamento, onde a Carol trabalha) — sem a conta pesada dos avisos. */

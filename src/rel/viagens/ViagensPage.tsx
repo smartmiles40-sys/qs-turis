@@ -65,29 +65,30 @@ const VISOES: { id: Visao; rotulo: string }[] = [
   { id: "lista", rotulo: "Lista" },
   // 11/11: só aéreo, na ordem dos check-ins · serviços separados por tipo, por data/hora da ação
   { id: "checkins", rotulo: "Check-ins" },
-  { id: "servicos", rotulo: "Serviços" },
-  { id: "repetidas", rotulo: "Conferir repetidas" },
-  // 0154: voo que não bate com as datas da venda
-  { id: "voos", rotulo: "Conferir voos" },
+  // 16/11 (Bruno, limpeza): Serviços, Conferir repetidas (0 junções) e Conferir voos
+  // (0 conferências) saíram das abas. Os componentes continuam no código.
 ];
 const CHAVE_VISAO = "rel_viagens_visao";
 function visaoSalva(): Visao {
-  try { const v = localStorage.getItem(CHAVE_VISAO); return v === "calendario" || v === "lista" || v === "checkins" || v === "servicos" || v === "repetidas" || v === "voos" ? v : "painel"; } catch { return "painel"; }
+  // aba salva que saiu (servicos/repetidas/voos) volta pro Painel
+  try { const v = localStorage.getItem(CHAVE_VISAO); return v === "calendario" || v === "lista" || v === "checkins" ? v : "painel"; } catch { return "painel"; }
 }
 
-const FILTROS: { id: FiltroViagens; rotulo: string }[] = [
-  { id: "proximas", rotulo: "Próximas" },
-  { id: "em_viagem", rotulo: "Em viagem" },
-  // 0184: o dono da viagem
+// 16/11 (Bruno, limpeza): saíram Minhas, Sem dono, Precisa de data, Classificar,
+// Sem cliente, Repetidas? e Arquivadas — 0 ações humanas nessas filas desde sempre.
+// Só a rota antiga #rel/faxina ainda mostra todas (FILTROS_FAXINA).
+const FILTROS_FAXINA: { id: FiltroViagens; rotulo: string }[] = [
   { id: "minhas", rotulo: "Minhas" },
   { id: "sem_dono", rotulo: "Sem dono" },
-  // 0148: o que falta pro time arrumar — fica fora de "Próximas" pra não poluir
   { id: "sem_data", rotulo: "Precisa de data" },
   { id: "classificar", rotulo: "Classificar" },
-  // 0208: faxina
   { id: "sem_cliente", rotulo: "Sem cliente" },
   { id: "repetidas", rotulo: "Repetidas?" },
   { id: "arquivadas", rotulo: "Arquivadas" },
+];
+const FILTROS: { id: FiltroViagens; rotulo: string }[] = [
+  { id: "proximas", rotulo: "Próximas" },
+  { id: "em_viagem", rotulo: "Em viagem" },
   { id: "concluidas", rotulo: "Concluídas" },
   { id: "canceladas", rotulo: "Canceladas" },
   { id: "todas", rotulo: "Todas" },
@@ -521,7 +522,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, onAbrirPaco
         </div>
         <div className="flex flex-wrap gap-2">
           <Botao onClick={sincronizar} disabled={sync.ocupado}>{sync.ocupado ? "Sincronizando…" : "Sincronizar com o Bitrix"}</Botao>
-          <Botao variante="primario" onClick={() => setNova(true)}>+ Nova viagem</Botao>
+          {/* 16/11 (Bruno, limpeza): "+ Nova viagem" saiu — 0 viagens criadas à mão; toda venda vem do Bitrix */}
         </div>
       </div>
 
@@ -537,7 +538,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, onAbrirPaco
         ))}
       </div>
 
-      {visao === "painel" && <PainelViagens key={versao} onAbrirViagem={onAbrirViagem} onVerFila={verFila} />}
+      {visao === "painel" && <PainelViagens key={versao} onAbrirViagem={onAbrirViagem} onVerFila={faxina ? verFila : undefined} />}
       {visao === "calendario" && <CalendarioViagens key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "repetidas" && <ConferirRepetidas key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "voos" && <ConferirVoos key={versao} onAbrirViagem={onAbrirViagem} />}
@@ -545,12 +546,13 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, onAbrirPaco
       {visao === "servicos" && <ServicosViagens key={versao} onAbrirViagem={onAbrirViagem} onAbrirCliente={onAbrirCliente} />}
       {visao === "lista" && <>
 
-      <FaxinaAtalhos filtro={filtro} onFiltro={setFiltro} onTarefa={fazerTarefa} gestor={gestor} versao={versao} onMudou={() => setVersao((x) => x + 1)}
-        onAbrirViagem={onAbrirViagem} onConferirRepetidas={() => setVisao("repetidas")} verTudoAberto={faxina} />
+      {/* 16/11: a faixa da faxina só aparece na rota antiga #rel/faxina */}
+      {faxina && <FaxinaAtalhos filtro={filtro} onFiltro={setFiltro} onTarefa={fazerTarefa} gestor={gestor} versao={versao} onMudou={() => setVersao((x) => x + 1)}
+        onAbrirViagem={onAbrirViagem} onConferirRepetidas={() => setVisao("repetidas")} verTudoAberto={faxina} />}
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="flex gap-1 rel-card p-1 overflow-x-auto" role="group" aria-label="Filtrar viagens">
-          {FILTROS.map((f) => (
+          {(faxina ? [...FILTROS.slice(0, 2), ...FILTROS_FAXINA, ...FILTROS.slice(2)] : FILTROS).map((f) => (
             <button key={f.id} onClick={() => setFiltro(f.id)} aria-pressed={filtro === f.id} className="rel-linha px-3 py-2 rounded-lg text-[12.5px] font-semibold whitespace-nowrap"
               style={filtro === f.id ? { background: "var(--rel-soft)", color: "var(--rel-ink)" } : { color: "var(--ink2)" }}>
               {f.rotulo}

@@ -192,22 +192,18 @@ function Inicio({ resumo, cont, nome, ir }: { resumo: ResumoDoMenu | null; cont:
         <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Relacionamento · cuidar de quem já comprou com a gente.</p>
       </div>
       {/* 0184: o trabalho do dia primeiro — as etapas das viagens que eu cuido */}
-      <div className="grid sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3">
+      {/* 16/11 (Bruno, limpeza): o cartão "Viagens sem dono" saiu — ninguém assumiu
+          viagem desde que existe (0 de 1.926). */}
+      <div className="grid gap-3">
         <button onClick={() => ir({ tela: "esteira" })} className="rel-card p-4 text-left transition-shadow hover:shadow-md flex items-center gap-4"
           style={{ borderColor: "var(--rel)", background: "var(--rel-soft)" }}>
           <span className="flex-1 min-w-0">
             <span className="block text-[15px] font-bold" style={{ color: "var(--rel-ink)" }}>Minhas atividades de hoje →</span>
             <span className="block text-[12.5px] mt-0.5" style={{ color: "var(--ink2)" }}>
-              {cont?.minhasViagens ? `Etapas da Esteira das ${cont.minhasViagens} viage${cont.minhasViagens === 1 ? "m" : "ns"} que você cuida: concluir em 1 clique.` : "Você ainda não cuida de nenhuma viagem — assuma as suas em “Sem dono”."}
+              {cont?.minhasViagens ? `Etapas da Esteira das ${cont.minhasViagens} viage${cont.minhasViagens === 1 ? "m" : "ns"} que você cuida: concluir em 1 clique.` : "Você ainda não cuida de nenhuma viagem."}
             </span>
           </span>
           <span className="text-3xl font-bold tabular-nums" style={{ color: "var(--rel-ink)" }}>{cont?.minhasViagens ?? "–"}</span>
-        </button>
-        <button onClick={() => ir({ tela: "faxina" })} className="rel-card p-4 text-left transition-shadow hover:shadow-md"
-          style={cont?.semDono ? { borderColor: "var(--err-line)", background: "var(--err-bg)" } : undefined}>
-          <span className="block text-[12px] font-semibold" style={{ color: cont?.semDono ? "var(--err-ink)" : "var(--ink2)" }}>Viagens sem dono</span>
-          <span className="block text-3xl font-bold mt-1 tabular-nums" style={{ color: cont?.semDono ? "var(--err-ink)" : "var(--ink)" }}>{cont?.semDono ?? "–"}</span>
-          <span className="block text-[11px] mt-0.5" style={{ color: "var(--ink3)" }}>pacote, aéreo e hotel que vão acontecer</span>
         </button>
       </div>
 
@@ -369,7 +365,6 @@ export default function RelApp() {
     propostas: { count: aprovacoes || undefined },
     // Clientes: possíveis duplicados + divergências ficha × expedição (vermelho se alguma passou de 7 dias)
     clientes: { count: ((cont?.duplicados ?? 0) + (cont?.divergencias ?? 0)) || undefined, late: !!cont?.divergenciasAntigas },
-    faxina: { count: cont?.semDono },
   };
   const grupos = montarMenuRel(acesso, filtro, contagens);
   const noMenu = new Set(itensDoMenu(acesso, filtro).map((i) => i.id));
