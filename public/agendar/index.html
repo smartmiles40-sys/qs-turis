@@ -267,6 +267,9 @@
     --raio: 16px;
   }
   body.tema-stfv #titulo, body.tema-stfv #subtitulo { display: none; }
+  /* link avulso ?com=sdr-destinos: cores das LPs, mas com o título visível */
+  body.tema-stfv.com-titulo #titulo, body.tema-stfv.com-titulo #subtitulo { display: block; }
+  html.tema-stfv.com-titulo, html.tema-stfv.com-titulo body { background: #F8F6F7; }
   body.tema-stfv .rotulo { text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 600; color: var(--tinta); }
   body.tema-stfv .dias { flex-wrap: wrap; overflow: visible; }
   body.tema-stfv .dia { flex: 1 1 0; border-radius: 14px; }
@@ -278,7 +281,7 @@
   body.tema-stfv .hora { border-radius: 12px; }
   body.tema-stfv .campo label { color: var(--tinta); }
   body.tema-stfv .campo input, body.tema-stfv .campo textarea, body.tema-stfv .campo select { border-radius: 12px; padding: 14px 16px; }
-  body.tema-stfv .campo input:focus, body.tema-stfv .campo textarea:focus {
+  body.tema-stfv .campo input:focus, body.tema-stfv .campo textarea:focus, body.tema-stfv .campo select:focus {
     border-color: #C0E046; box-shadow: 0 0 0 3px rgba(215, 242, 100, .4);
   }
   body.tema-stfv .primario, body.tema-stfv .fim a.botao {
@@ -477,7 +480,8 @@
   var API = COM_SDR ? '/api/agendar?com=' + (COM_MOTIVO ? 'sdr-semana' : COM_SDR_DESTINOS ? 'sdr-destinos' : 'sdr') : '/api/agendar';
   var expedicao = (params.get('expedicao') || '').slice(0, 80);
   // ?destinos=1 (16/11/2026): lista fixa de destinos no lugar do recado opcional.
-  var COM_DESTINOS = params.get('destinos') === '1' || COM_SDR_DESTINOS;
+  // &destinos=0 desliga a lista (ex.: página de obrigado do formulário geral, que já perguntou o destino).
+  var COM_DESTINOS = (params.get('destinos') === '1' || COM_SDR_DESTINOS) && params.get('destinos') !== '0';
   var origem = (params.get('origem') || '').slice(0, 80);
   // 0354 (10/11): links do Marketing › Links de agendamento. As UTMs vão pro lead
   // do QS e pro negócio do Bitrix; `l` é o código do link (conta o agendamento).
@@ -487,9 +491,14 @@
   var codigoLink = (params.get('l') || '').trim().toLowerCase().slice(0, 60);
   if (params.get('embed') === '1') document.body.classList.add('embed');
   // ?tema=stfv: as cores do formulário das LPs (ver o CSS do tema).
-  if (params.get('tema') === 'stfv') {
+  // ?com=sdr-destinos já abre com as cores das LPs (botão verde-limão), 16/11/2026.
+  if (params.get('tema') === 'stfv' || COM_SDR_DESTINOS) {
     document.documentElement.classList.add('tema-stfv');
     document.body.classList.add('tema-stfv');
+    if (COM_SDR_DESTINOS && params.get('embed') !== '1') {
+      document.documentElement.classList.add('com-titulo');
+      document.body.classList.add('com-titulo');
+    }
   }
   // ?dias=3: só os N próximos dias COM horário livre (o formulário orgânico do
   // site usa 3; as lives seguem com a janela inteira). O servidor reconfere.
