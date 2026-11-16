@@ -6,7 +6,7 @@
 // Fala com o Supabase via PostgREST puro (ver _supabaseAdmin.js).
 // -----------------------------------------------------------------------------
 import { rest, insert } from './_supabaseAdmin.js';
-import { findLeadByPhone } from './_wa.js';
+import { findLeadByPhone, waKey } from './_wa.js';
 import { vincularLeadAoBitrix } from './_bitrixLead.js';
 import { marcarFalha } from './_leadCardBitrix.js';
 
@@ -522,14 +522,31 @@ export async function createInboundLead(payload, opts = {}) {
   if (!bitrixId && !cardProprio && (email || phone)) {
     try {
       const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+      // Telefone pela CHAVE canônica (waKey: ignora +55 e o 9º dígito), não por
+      // igualdade de texto. Achado em 16/11: o Bitrix manda "5511945329139" e o
+      // formulário "11945329139" — o `phone.eq` não casava e a mesma pessoa
+      // virava dois cards (um com o negócio do Bitrix, outro sem), um minuto um
+      // do outro. Busca ampla pelos 8 finais e confirma pela chave.
       const ors = [];
       if (email) ors.push(`email.eq.${pgValor(email)}`);
-      if (phone) ors.push(`phone.eq.${pgValor(phone)}`);
-      const dup = await rest(
-        `qs_leads?select=*&or=(${ors.join(',')})&created_at=gte.${encodeURIComponent(since)}&limit=1`
+      const chave = phone ? waKey(phone) : null;
+      if (chave) ors.push(`phone.ilike.${encodeURIComponent(`*${chave.slice(-8)}*`)}`);
+      else if (phone) ors.push(`phone.eq.${pgValor(phone)}`);
+      const candidatos = await rest(
+        `qs_leads?select=*&or=(${ors.join(',')})&created_at=gte.${encodeURIComponent(since)}` +
+        '&order=created_at.desc&limit=20'
       );
-      if (dup && dup[0]) {
-        return { lead: dup[0], ownerId: dup[0].owner_id, cadenceId: dup[0].cadence_id, tasks: 0, deduped: true };
+      const lista = Array.isArray(candidatos) ? candidatos : [];
+      const dup = lista.find((l) =>
+        (email && l.email && String(l.email).toLowerCase() === email) ||
+        (chave ? waKey(l.phone) === chave : (phone && l.phone === phone)));
+      if (dup) {
+        // Quem chegou depois pode trazer o e-mail que faltava no card.
+        if (email && !dup.email) {
+          await rest(`qs_leads?id=eq.${dup.id}`, { method: 'PATCH', body: { email }, prefer: 'return=minimal' })
+            .catch((e) => console.warn('[leads] e-mail do duplicado não gravado:', e?.message));
+        }
+        return { lead: dup, ownerId: dup.owner_id, cadenceId: dup.cadence_id, tasks: 0, deduped: true };
       }
     } catch (e) {
       console.warn('[leads] dedupe por email/telefone falhou (segue criando):', e?.message);
