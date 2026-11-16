@@ -135,7 +135,7 @@
   /* ── Formulário ────────────────────────────────────────────────────────── */
   .campo { margin-bottom: 14px; }
   .campo label { display: block; font-size: 13px; font-weight: 600; color: var(--tinta2); margin-bottom: 6px; }
-  .campo input, .campo textarea {
+  .campo input, .campo textarea, .campo select {
     width: 100%;
     padding: 12px 13px;
     border: 1px solid var(--linha);
@@ -147,12 +147,12 @@
     transition: border-color .12s, box-shadow .12s;
   }
   .campo textarea { resize: vertical; min-height: 68px; }
-  .campo input:focus, .campo textarea:focus {
+  .campo input:focus, .campo textarea:focus, .campo select:focus {
     outline: none;
     border-color: var(--azul);
     box-shadow: 0 0 0 3px rgba(1,71,255,.12);
   }
-  .campo input[aria-invalid="true"], .campo textarea[aria-invalid="true"] { border-color: var(--erro); }
+  .campo input[aria-invalid="true"], .campo textarea[aria-invalid="true"], .campo select[aria-invalid="true"] { border-color: var(--erro); }
   .campo .contador { display: block; text-align: right; font-size: 12px; color: var(--tinta3); margin-top: 4px; font-variant-numeric: tabular-nums; }
   .campo .contador.pronto { color: var(--ok); }
   .campo .erro { display: none; font-size: 12.5px; color: var(--erro); margin-top: 5px; }
@@ -277,7 +277,7 @@
   body.tema-stfv .dia[aria-pressed="true"] .data { color: var(--tinta); }
   body.tema-stfv .hora { border-radius: 12px; }
   body.tema-stfv .campo label { color: var(--tinta); }
-  body.tema-stfv .campo input, body.tema-stfv .campo textarea { border-radius: 12px; padding: 14px 16px; }
+  body.tema-stfv .campo input, body.tema-stfv .campo textarea, body.tema-stfv .campo select { border-radius: 12px; padding: 14px 16px; }
   body.tema-stfv .campo input:focus, body.tema-stfv .campo textarea:focus {
     border-color: #C0E046; box-shadow: 0 0 0 3px rgba(215, 242, 100, .4);
   }
@@ -385,6 +385,38 @@
           <span class="erro" id="e-email">É pra onde vai o convite da reunião.</span>
         </div>
 
+        <!-- ?destinos=1 (16/11/2026): o "Quer adiantar alguma coisa?" vira uma
+             lista FIXA de destinos. A escolha vai como `expedicao` (o mesmo
+             campo que as LPs mandam): vira o interesse do lead no QS e no card
+             do Bitrix. O recado livre continua embaixo, opcional. -->
+        <div class="campo" id="c-destino" hidden>
+          <label for="destino">Quer adiantar alguma coisa? Qual destino te interessa?</label>
+          <select id="destino" name="destino">
+            <option value="">Escolha um destino</option>
+            <optgroup label="Expedições em grupo">
+              <option value="Islândia 2027">Expedição Islândia 2027</option>
+              <option value="Amazônia 2027">Expedição Amazônia 2027</option>
+              <option value="Cancún 2027">Expedição Cancún 2027</option>
+              <option value="Japão Outono 2027">Expedição Japão Outono 2027 (com extensão China)</option>
+              <option value="China 2027">Expedição China 2027</option>
+              <option value="Tailândia 2027">Expedição Tailândia 2027</option>
+            </optgroup>
+            <optgroup label="Pacotes">
+              <option value="Pacote Japão">Pacote Japão</option>
+              <option value="Cancún + Xcaret Experience">Cancún + Xcaret Experience</option>
+              <option value="Peru Clássico">Peru Clássico</option>
+              <option value="Deserto do Atacama">Deserto do Atacama</option>
+              <option value="Patagônia Chilena">Patagônia Chilena</option>
+              <option value="Confins da Patagônia">Confins da Patagônia</option>
+            </optgroup>
+            <optgroup label="Outros">
+              <option value="Outro destino">Outro destino</option>
+              <option value="Ainda não sei">Ainda não sei, quero ajuda pra escolher</option>
+            </optgroup>
+          </select>
+          <span class="erro" id="e-destino"></span>
+        </div>
+
         <div class="campo" id="c-observacao">
           <label for="observacao">Quer adiantar alguma coisa? <span style="font-weight:400;color:var(--tinta3)">(opcional)</span></label>
           <textarea id="observacao" name="observacao" maxlength="400" placeholder="Destino, quantas pessoas, datas que você tem em mente…"></textarea>
@@ -442,6 +474,8 @@
   var COM_SDR = COM_PARAM === 'sdr' || COM_MOTIVO;
   var API = COM_SDR ? '/api/agendar?com=' + (COM_MOTIVO ? 'sdr-semana' : 'sdr') : '/api/agendar';
   var expedicao = (params.get('expedicao') || '').slice(0, 80);
+  // ?destinos=1 (16/11/2026): lista fixa de destinos no lugar do recado opcional.
+  var COM_DESTINOS = params.get('destinos') === '1';
   var origem = (params.get('origem') || '').slice(0, 80);
   // 0354 (10/11): links do Marketing › Links de agendamento. As UTMs vão pro lead
   // do QS e pro negócio do Bitrix; `l` é o código do link (conta o agendamento).
@@ -467,6 +501,17 @@
   var estado = { dias: [], diaAtivo: null, inicio: null, rotulo: '', duracao: 60, enviando: false, jaNoBitrix: false, veioDeFormulario: false };
 
   var el = function (id) { return document.getElementById(id); };
+
+  if (COM_DESTINOS) {
+    el('c-destino').hidden = false;
+    el('c-observacao').querySelector('label').innerHTML = 'Algo mais? <span style="font-weight:400;color:var(--tinta3)">(opcional)</span>';
+    el('observacao').placeholder = 'Quantas pessoas, datas que você tem em mente…';
+    el('destino').addEventListener('change', function () {
+      el('c-destino').classList.remove('ruim');
+      el('destino').removeAttribute('aria-invalid');
+    });
+  }
+
 
   // ── PREENCHIMENTO VINDO DA PÁGINA DE FORA ──────────────────────────────
   // Quem chega aqui pelo formulário da live JÁ digitou nome, e-mail e WhatsApp
@@ -805,6 +850,7 @@
     if (el('telefone').value.replace(/\D/g, '').length < 10) { marcarErro('telefone', 'Confira o número com o DDD.'); ok = false; }
     var emailDigitado = el('email').value.trim();
     if ((!COM_SDR || emailDigitado) && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(emailDigitado)) { marcarErro('email', 'Confira o e-mail.'); ok = false; }
+    if (COM_DESTINOS && !el('destino').value) { marcarErro('destino', 'Escolha um destino (ou "Ainda não sei").'); ok = false; }
     if (COM_MOTIVO && problemaDoMotivo()) {
       // Só acontece se alguém pular o passo 0 — volta pra pergunta.
       marcarErro('motivo', problemaDoMotivo());
@@ -834,7 +880,7 @@
         observacao: el('observacao').value.trim(),
         motivo: COM_MOTIVO ? el('motivo').value.trim() : undefined,
         inicio: estado.inicio,
-        expedicao: expedicao,
+        expedicao: (COM_DESTINOS && el('destino').value) ? el('destino').value : expedicao,
         origem: origem,
         dias: diasPedidos,
         uteis: uteisPedidos || undefined,
