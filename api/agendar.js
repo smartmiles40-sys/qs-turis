@@ -324,6 +324,12 @@ export default async function handler(req, res) {
   if (String(com || '') === 'sdr-semana') {
     return await ligacaoComSdr(req, res, { teto, maxDias: diasDaJanelaCurta(req), perfil: 'semana', diasUteis: diasUteisPedidos(req) });
   }
+  // ?com=sdr-destinos (16/11/2026): a mesma ligação de seg–sex (perfil 'semana'),
+  // mas SEM o motivo obrigatório — a pessoa escolhe o destino numa lista, que
+  // chega como `expedicao` (interesse no QS e no card do Bitrix).
+  if (String(com || '') === 'sdr-destinos') {
+    return await ligacaoComSdr(req, res, { teto, maxDias: diasDaJanelaCurta(req), perfil: 'semana', diasUteis: diasUteisPedidos(req), exigeMotivo: false });
+  }
 
   if (cfg.ativo === false) {
     return res.status(200).json({ ok: false, motivo: 'desligado', recado: cfg.encerrado, dias: [] });
@@ -624,10 +630,10 @@ async function marcar(req, res, { cfg, regras, teto, maxDias }) {
 // A grade pelo dono vai por POST, não por GET: o telefone da pessoa não pode
 // morar em URL (fica em log e em histórico). Ver api/_ligacaoSdr.js.
 
-async function ligacaoComSdr(req, res, { teto, maxDias = null, perfil = null, diasUteis = null }) {
+async function ligacaoComSdr(req, res, { teto, maxDias = null, perfil = null, diasUteis = null, exigeMotivo: exigeMotivoPedido = null }) {
   const cfg = await lerConfigSdr(perfil);
   if (diasUteis) cfg.diasUteis = diasUteis;   // 0354: link do Marketing com N dias úteis
-  const exigeMotivo = perfil === 'semana';
+  const exigeMotivo = exigeMotivoPedido ?? (perfil === 'semana');
   if (!cfg.ativo) {
     return res.status(200).json({ ok: false, motivo: 'desligado', recado: cfg.encerrado, dias: [] });
   }

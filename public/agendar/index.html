@@ -471,11 +471,13 @@
   // e com "Por que você quer fazer essa viagem?" obrigatório (10 a 500).
   var COM_PARAM = params.get('com');
   var COM_MOTIVO = COM_PARAM === 'sdr-semana';
-  var COM_SDR = COM_PARAM === 'sdr' || COM_MOTIVO;
-  var API = COM_SDR ? '/api/agendar?com=' + (COM_MOTIVO ? 'sdr-semana' : 'sdr') : '/api/agendar';
+  // ?com=sdr-destinos (16/11/2026): ligação de seg–sex, sem o motivo, com a lista de destinos.
+  var COM_SDR_DESTINOS = COM_PARAM === 'sdr-destinos';
+  var COM_SDR = COM_PARAM === 'sdr' || COM_MOTIVO || COM_SDR_DESTINOS;
+  var API = COM_SDR ? '/api/agendar?com=' + (COM_MOTIVO ? 'sdr-semana' : COM_SDR_DESTINOS ? 'sdr-destinos' : 'sdr') : '/api/agendar';
   var expedicao = (params.get('expedicao') || '').slice(0, 80);
   // ?destinos=1 (16/11/2026): lista fixa de destinos no lugar do recado opcional.
-  var COM_DESTINOS = params.get('destinos') === '1';
+  var COM_DESTINOS = params.get('destinos') === '1' || COM_SDR_DESTINOS;
   var origem = (params.get('origem') || '').slice(0, 80);
   // 0354 (10/11): links do Marketing › Links de agendamento. As UTMs vão pro lead
   // do QS e pro negócio do Bitrix; `l` é o código do link (conta o agendamento).
