@@ -131,11 +131,11 @@ a.qs-kpi:hover, button.qs-kpi:hover { background: var(--surface-2); }
 .qs-alert__tx { flex: 1 1 300px; font-size: 14px; }
 
 /* ── Shell (sidebar) ─────────────────────────────────────────────────────── */
-.qs-shell { min-height: 100dvh; display: flex; background: var(--bg); color: var(--text); }
+.qs-shell { min-height: calc(100dvh/var(--qs-zoom,1)); display: flex; background: var(--bg); color: var(--text); }
 .qs-side {
   width: var(--sidebar-w); flex: none; box-sizing: border-box; padding: 12px;
   border-right: 1px solid var(--border); background: var(--surface);
-  display: flex; flex-direction: column; gap: 4px; height: 100dvh; position: sticky; top: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 4px; height: calc(100dvh/var(--qs-zoom,1)); position: sticky; top: 0; overflow-y: auto;
 }
 .qs-side__group { font-size: var(--text-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--subtle); padding: 16px 10px 6px; }
 .qs-nav {
@@ -181,7 +181,7 @@ a.qs-kpi:hover, button.qs-kpi:hover { background: var(--surface-2); }
 
 /* Comercial: a tela inteira é do app (a fila rola por dentro e o dock de
    WhatsApp ocupa a altura toda à direita), como era antes da sidebar. */
-.qs-shell:has(.qs-main--comercial) { height: 100dvh; overflow: hidden; }
+.qs-shell:has(.qs-main--comercial) { height: calc(100dvh/var(--qs-zoom,1)); overflow: hidden; }
 .qs-main--comercial { min-height: 0; overflow: hidden; }
 
 /* O sino do Comercial (NotificationsPanel) abria pra baixo e à direita do
@@ -281,7 +281,7 @@ button.qs-stat:hover { background: var(--surface-2); }
 
 .qs-menu { position: relative; display: inline-flex; }
 .qs-menu__pop {
-  position: absolute; right: 0; top: calc(100% + 6px); z-index: 70; min-width: 240px; max-width: calc(100vw - 32px);
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 70; min-width: 240px; max-width: calc(calc(100vw/var(--qs-zoom,1)) - 32px);
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 6px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, .18); display: flex; flex-direction: column;
 }

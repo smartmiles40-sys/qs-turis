@@ -24,6 +24,7 @@
 // -----------------------------------------------------------------------------
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { px, larguraTela, alturaTela } from "@/lib/escala";
 
 export interface ItemMenu {
   id: string;
@@ -122,8 +123,10 @@ export default function WaMenuContexto({
   if (!visiveis.length) return null;
 
   const altura = visiveis.length * ALTURA_ITEM + (titulo ? 28 : 0) + 12;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
+  const vw = larguraTela();
+  const vh = alturaTela();
+  // pos vem do clique (pixels da tela): converte pra pixels do QS (zoom do <html>)
+  pos = { ...pos, x: px(pos.x), y: px(pos.y) };
   // Vira pro outro lado quando não cabe — nunca deixa o menu meio fora da tela.
   const x = Math.max(MARGEM, Math.min(pos.x, vw - LARGURA - MARGEM));
   const y = pos.y + altura > vh - MARGEM

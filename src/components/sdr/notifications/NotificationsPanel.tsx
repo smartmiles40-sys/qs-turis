@@ -521,7 +521,7 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
       {/* Painel */}
       {open && (
         <div
-          className="absolute right-0 top-full mt-1 w-[calc(100vw-1.5rem)] max-w-[380px] bg-white rounded-xl shadow-lg border border-gray-100 z-50 flex flex-col overflow-hidden"
+          className="absolute right-0 top-full mt-1 w-[calc(calc(100vw/var(--qs-zoom,1))-1.5rem)] max-w-[380px] bg-white rounded-xl shadow-lg border border-gray-100 z-50 flex flex-col overflow-hidden"
           style={{ maxHeight: "min(560px, 80vh)" }}
         >
           {/* Cabeçalho */}

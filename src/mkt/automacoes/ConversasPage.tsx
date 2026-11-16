@@ -70,7 +70,7 @@ export default function ConversasPage() {
     <div className="mkt-raiz">
       <style>{MKT_CSS}</style>
       {erro && <div className="mb-3"><Aviso tom="erro">{erro}</Aviso></div>}
-      <div className="flex gap-3" style={{ height: "calc(100vh - 230px)", minHeight: 420 }}>
+      <div className="flex gap-3" style={{ height: "calc(calc(100vh/var(--qs-zoom,1)) - 230px)", minHeight: 420 }}>
         <aside className={`mkt-card flex flex-col w-full md:w-[340px] shrink-0 ${atual ? "hidden md:flex" : "flex"}`}>
           <div className="p-2 space-y-2 border-b" style={{ borderColor: "var(--line)" }}>
             <Entrada value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar nome ou número…" />

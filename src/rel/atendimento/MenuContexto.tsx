@@ -9,6 +9,7 @@
 // bolhas de mensagem.
 // -----------------------------------------------------------------------------
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { px, larguraTela, alturaTela } from "@/lib/escala";
 import { createPortal } from "react-dom";
 
 export type ItemMenu =
@@ -36,7 +37,7 @@ export default function MenuContexto({ pos, itens, onFechar, rotulo = "Opções"
     const el = ref.current;
     const w = el?.offsetWidth ?? 240;
     const h = el?.offsetHeight ?? 300;
-    setOnde(encaixar(pos, { w, h }, { w: window.innerWidth, h: window.innerHeight }));
+    setOnde(encaixar(pos, { w, h }, { w: larguraTela(), h: alturaTela() }));
     setFoco(0);
   }, [pos, itens.length]);
 
@@ -87,7 +88,7 @@ export default function MenuContexto({ pos, itens, onFechar, rotulo = "Opções"
       // TRANSPARENTE, com os itens por cima da lista — o "menu bugado" (11/11).
       style={{
         left: onde?.x ?? pos.x, top: onde?.y ?? pos.y, visibility: onde ? "visible" : "hidden",
-        maxHeight: "calc(100vh - 16px)", zIndex: 2147483000,
+        maxHeight: "calc(calc(100vh/var(--qs-zoom,1)) - 16px)", zIndex: 2147483000,
         background: "var(--wa-list, #fff)", color: "var(--wa-txt, #111B21)",
         boxShadow: "0 2px 5px rgba(11,20,26,.26), 0 2px 10px rgba(11,20,26,.16)",
       }}
@@ -143,9 +144,9 @@ export function encaixar(p: PosicaoMenu, menu: { w: number; h: number }, tela: {
 export function posicaoDoEvento(e: { clientX: number; clientY: number; currentTarget: EventTarget | null; type?: string }): PosicaoMenu {
   if (e.type === "click" && e.currentTarget instanceof HTMLElement) {
     const r = e.currentTarget.getBoundingClientRect();
-    return { x: r.left, y: r.bottom + 4 };
+    return { x: px(r.left), y: px(r.bottom) + 4 };
   }
-  return { x: e.clientX, y: e.clientY };
+  return { x: px(e.clientX), y: px(e.clientY) };
 }
 
 // ── Ícones pequenos dos itens (traço, 18px) ─────────────────────────────────

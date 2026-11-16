@@ -9,6 +9,7 @@
 //   • AjustesDeAvisos    → mostrar a bolinha, Windows e bip.
 // -----------------------------------------------------------------------------
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { px, larguraTela, alturaTela } from "@/lib/escala";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { useAvisos } from "./AvisosProvider";
 import { carregarLidos, COR_TIPO, haQuanto, ROTULO_TIPO, type Aviso } from "./lib";
@@ -135,12 +136,12 @@ export default function SinoDeAvisos() {
   useLayoutEffect(() => {
     if (!aberto || !botao.current) return;
     const r = botao.current.getBoundingClientRect();
-    const largura = Math.min(380, window.innerWidth - 16);
+    const largura = Math.min(380, larguraTela() - 16);
     // No redesign o sino mora no RODAPÉ da sidebar: abrir pra baixo cortaria o
     // painel. Se não cabe embaixo, ele sobe até caber.
-    const altura = Math.min(560, window.innerHeight * 0.8);
-    const top = Math.max(8, Math.min(r.bottom + 6, window.innerHeight - altura - 8));
-    setPos({ top, left: Math.max(8, Math.min(r.left, window.innerWidth - largura - 8)) });
+    const altura = Math.min(560, alturaTela() * 0.8);
+    const top = Math.max(8, Math.min(px(r.bottom) + 6, alturaTela() - altura - 8));
+    setPos({ top, left: Math.max(8, Math.min(px(r.left), larguraTela() - largura - 8)) });
   }, [aberto]);
   useEffect(() => {
     if (!aberto) return;
@@ -173,7 +174,7 @@ export default function SinoDeAvisos() {
       {aberto && pos && (
         <div ref={painel} role="dialog" aria-label="Avisos"
           className="fixed z-[70] rounded-xl shadow-xl border flex flex-col overflow-hidden"
-          style={{ top: pos.top, left: pos.left, width: "min(380px, calc(100vw - 16px))", maxHeight: "min(560px, 80vh)", background: "var(--card)", borderColor: "var(--line)" }}>
+          style={{ top: pos.top, left: pos.left, width: "min(380px, calc(calc(100vw/var(--qs-zoom,1)) - 16px))", maxHeight: "min(560px, 80vh)", background: "var(--card)", borderColor: "var(--line)" }}>
           <div className="flex items-center gap-2 px-4 py-3 border-b flex-shrink-0" style={{ borderColor: "var(--line)" }}>
             <span className="text-[14px] font-bold flex-1" style={{ color: "var(--ink)" }}>Avisos</span>
             {n > 0 && (

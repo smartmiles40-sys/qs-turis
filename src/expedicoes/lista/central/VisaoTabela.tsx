@@ -3,6 +3,7 @@
 // Aptos — ordenável por coluna (ordem vai pra URL). Guarda também as ações da
 // tabela antiga: status direto na célula, editar, excluir e ARRASTAR pra
 // reordenar (só quando a ordenação é "Ordem manual", a coluna #).
+import { corrigirZoomDnd } from "@/lib/escala"; // 16/11: arrastar acompanha o mouse com o zoom do <html>
 import type { KeyboardEvent as KE } from "react";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -72,7 +73,7 @@ export default function VisaoTabela({ linhas, ordemDe, ordenacao, onOrdenar, abr
         <p className="cx-nota">Pra arrastar e mudar a ordem manual, limpe a busca e os filtros.</p>
       )}
       <div className="cx-tab">
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={fimArraste}>
+        <DndContext sensors={sensors} modifiers={[corrigirZoomDnd]} collisionDetection={closestCenter} onDragEnd={fimArraste}>
           <table>
             <thead>
               <tr>

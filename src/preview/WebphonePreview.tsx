@@ -28,7 +28,7 @@ function Preview() {
   // Re-monta o widget ao trocar de preset (zera cronômetro/painéis) via key.
   const preset = PRESETS[i];
   return (
-    <div style={{ minHeight: "100vh", background: "#f3f4f6", padding: "32px 24px", fontFamily: "system-ui, sans-serif", color: "#111827" }}>
+    <div style={{ minHeight: "calc(100vh/var(--qs-zoom,1))", background: "#f3f4f6", padding: "32px 24px", fontFamily: "system-ui, sans-serif", color: "#111827" }}>
       <div style={{ maxWidth: 640, margin: "0 auto" }}>
         <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Preview do webfone</h1>
         <p style={{ color: "#6b7280", marginTop: 6, fontSize: 14 }}>

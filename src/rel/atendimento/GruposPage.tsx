@@ -128,7 +128,7 @@ export default function GruposPage({ grupoJid, abrir, abrirConversa }: {
           A ligação dos grupos está fora do ar ({estado.estado}) — mensagens novas dos grupos não estão chegando.
         </div>
       )}
-      <div className="flex relative h-[calc(100dvh-56px)] lg:h-[100dvh]">
+      <div className="flex relative h-[calc(calc(100dvh/var(--qs-zoom,1))-56px)] lg:h-[calc(100dvh/var(--qs-zoom,1))]">
         <aside className={`${grupoJid ? "hidden lg:flex" : "flex"} flex-col w-full lg:w-[380px] xl:w-[420px] lg:flex-shrink-0 border-r min-h-0 wa-lista`}
           style={{ borderColor: "var(--wa-line)" }}>
           <div className="px-4 pt-4 pb-2 flex items-center gap-2">

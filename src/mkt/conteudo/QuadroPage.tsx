@@ -8,6 +8,7 @@
 // do banco): soltar em "Aprovado" vindo da aprovação aprova; em "Ajustes" pede
 // o comentário da devolução.
 // -----------------------------------------------------------------------------
+import { corrigirZoomDnd } from "@/lib/escala"; // 16/11: arrastar acompanha o mouse com o zoom do <html>
 import { useMemo, useState, type ReactNode } from "react";
 import { DndContext, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
@@ -234,7 +235,7 @@ function Quadro({ colunas, cards, todos, hoje, onAbrir, onNovo, onMover, onRecus
   }
 
   return (
-    <DndContext sensors={sensors} onDragEnd={soltar}>
+    <DndContext sensors={sensors} modifiers={[corrigirZoomDnd]} onDragEnd={soltar}>
       {/* No celular: rolagem lateral com uma coluna por tela (snap). */}
       <div className="flex gap-3 overflow-x-auto pb-4 snap-x snap-mandatory -mx-4 px-4 sm:mx-0 sm:px-0">
         {colunas.map((k) => (
@@ -262,7 +263,7 @@ function ColunaQuadro({ coluna, n, onNovo, children }: { coluna: Coluna; n: numb
   const { setNodeRef, isOver } = useDroppable({ id: `col:${coluna.id}` });
   return (
     <section ref={setNodeRef} aria-label={coluna.nome}
-      className="snap-start flex-shrink-0 w-[82vw] sm:w-[280px] rounded-xl p-2 flex flex-col max-h-[calc(100vh-240px)] min-h-[200px]"
+      className="snap-start flex-shrink-0 w-[82vw] sm:w-[280px] rounded-xl p-2 flex flex-col max-h-[calc(calc(100vh/var(--qs-zoom,1))-240px)] min-h-[200px]"
       style={{ background: isOver ? "var(--rel-soft)" : "var(--card2)", border: "1px solid var(--line)" }}>
       <header className="flex items-center gap-2 px-1.5 py-1 mb-1">
         {coluna.cor && <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: coluna.cor }} aria-hidden />}

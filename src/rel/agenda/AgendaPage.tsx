@@ -18,6 +18,7 @@
 // Atalhos: T = hoje · ← → = navegar · N = novo (fora de campos de texto).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ME } from "react";
+import { px } from "@/lib/escala";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { podeGerirRelacionamento } from "../equipe/permissao";
 import { usePode } from "../equipe/usePode";
@@ -332,7 +333,7 @@ function Grade({ dias, eventos, embarques, agora, carregando, onAbrir, onCriar, 
 
   // Minutos desde HORA_INI no ponto do mouse, com ímã de 15 min.
   const minutoDo = (ev: { clientY: number }, el: HTMLElement) => {
-    const y = ev.clientY - el.getBoundingClientRect().top;
+    const y = px(ev.clientY - el.getBoundingClientRect().top);
     const m = Math.round(((y / PX_HORA) * 60) / SNAP_MIN) * SNAP_MIN;
     return Math.max(0, Math.min((HORA_FIM - HORA_INI) * 60, m));
   };
@@ -397,7 +398,7 @@ function Grade({ dias, eventos, embarques, agora, carregando, onAbrir, onCriar, 
         </div>
       )}
       {/* Horas */}
-      <div ref={rolar} className="overflow-y-auto" style={{ maxHeight: "calc(100dvh - 330px)", minHeight: 360 }}>
+      <div ref={rolar} className="overflow-y-auto" style={{ maxHeight: "calc(calc(100dvh/var(--qs-zoom,1)) - 330px)", minHeight: 360 }}>
         <div className="grid relative" style={{ gridTemplateColumns: cols, height: altura }}>
           <div className="relative">
             {horas.map((h, i) => (

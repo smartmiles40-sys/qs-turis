@@ -9,6 +9,7 @@
 // saída com um seletor "vai para…". Mesma estrutura, outro desenho.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { escalaTela } from "@/lib/escala";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import {
   ROTULO_TIPO, canalDo, novoId, noPadrao, saidasDoNo, validarGrafo,
@@ -172,8 +173,8 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
     const mover = (e: PointerEvent) => {
       const papel = papelRef.current?.getBoundingClientRect();
       if (!papel) return;
-      const px = (e.clientX - papel.left) / zoom;
-      const py = (e.clientY - papel.top) / zoom;
+      const px = (e.clientX - papel.left) / (zoom * escalaTela());
+      const py = (e.clientY - papel.top) / (zoom * escalaTela());
       if (arrasto.current) {
         const { id, dx, dy } = arrasto.current;
         setGrafo((g) => ({ ...g, nos: g.nos.map((n) => (n.id === id ? { ...n, x: Math.max(0, Math.round(px - dx)), y: Math.max(0, Math.round(py - dy)) } : n)) }));
@@ -343,7 +344,7 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
   return (
     <div>
       {barra}{paleta}{ajudaIg}{listaProblemas}
-      <div className="flex gap-3" style={{ height: "calc(100vh - 230px)", minHeight: 460 }}>
+      <div className="flex gap-3" style={{ height: "calc(calc(100vh/var(--qs-zoom,1)) - 230px)", minHeight: 460 }}>
         <div className="mkt-card flex-1 overflow-auto relative" style={{ background: "var(--bg)", backgroundImage: "radial-gradient(var(--line) 1px, transparent 1px)", backgroundSize: `${20 * zoom}px ${20 * zoom}px` }}
           onPointerDown={(e) => { if (e.target === e.currentTarget || e.target === papelRef.current) { setSel(null); setSetaSel(null); } }}>
           <div ref={papelRef} style={{ width: PAPEL.w, height: PAPEL.h, transform: `scale(${zoom})`, transformOrigin: "0 0", position: "relative" }}>
@@ -382,7 +383,7 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
                     onPointerDown={(e) => {
                       const papel = papelRef.current?.getBoundingClientRect();
                       if (!papel) return;
-                      arrasto.current = { id: no.id, dx: (e.clientX - papel.left) / zoom - no.x, dy: (e.clientY - papel.top) / zoom - no.y };
+                      arrasto.current = { id: no.id, dx: (e.clientX - papel.left) / (zoom * escalaTela()) - no.x, dy: (e.clientY - papel.top) / (zoom * escalaTela()) - no.y };
                       setSel(no.id); setSetaSel(null);
                     }}>
                     <div className="flex items-center gap-1.5">

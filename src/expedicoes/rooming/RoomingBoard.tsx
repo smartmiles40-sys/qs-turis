@@ -10,6 +10,7 @@
 // hotel de extensão que ele não contratou; os números dos quartos não mudam
 // sozinhos (botão "Renumerar" fecha os buracos); o realtime de passageiro_quarto
 // agora funciona (tabela entrou na publicação na 0162).
+import { corrigirZoomDnd } from "@/lib/escala"; // 16/11: arrastar acompanha o mouse com o zoom do <html>
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { DndContext, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
@@ -191,7 +192,7 @@ export default function RoomingBoard({ expId, dados, recarregar }: { expId: stri
   const alternar = (k: string) => setRecolhidos((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
 
   return (
-    <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+    <DndContext sensors={sensors} modifiers={[corrigirZoomDnd]} onDragEnd={onDragEnd}>
       <div className="space-y-4">
         {/* Cabeçalho */}
         <div className="flex items-start justify-between flex-wrap gap-2">

@@ -192,7 +192,7 @@ function AbrePagina() {
 /** Imita o shell do Comercial: app à esquerda, dock dividindo a tela à direita. */
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="qs-shell" style={{ height: "100dvh", overflow: "hidden" }}>
+    <div className="qs-shell" style={{ height: "calc(100dvh/var(--qs-zoom,1))", overflow: "hidden" }}>
       <main className="qs-main" style={{ minHeight: 0, overflow: "auto", padding: 24 }}>
         <p style={{ fontWeight: 600 }}>Fila de atividades (de mentira)</p>
         <p style={{ color: "var(--ink3)", marginTop: 8 }}>O QS continua aqui do lado enquanto o WhatsApp está aberto.</p>
@@ -211,7 +211,7 @@ createRoot(document.getElementById("root")!).render(
           <QsWaDock onOpenLead={(id) => alert(`Abriria o card do lead ${id}`)} />
         </Shell>
       ) : (
-        <div className="qs-shell" style={{ height: "100dvh", overflow: "hidden", flexDirection: "column" }}>
+        <div className="qs-shell" style={{ height: "calc(100dvh/var(--qs-zoom,1))", overflow: "hidden", flexDirection: "column" }}>
           <AbrePagina />
           <main className="qs-main" style={{ minHeight: 0, overflow: "hidden", flex: 1 }}>
             <WaPage onOpenLead={(id) => alert(`Abriria o card do lead ${id}`)} />

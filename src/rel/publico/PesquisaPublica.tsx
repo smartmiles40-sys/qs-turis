@@ -70,7 +70,7 @@ export default function PesquisaPublica({ token }: { token: string }) {
   }
 
   return (
-    <div className="min-h-[100dvh] px-4 py-8 sm:py-14" style={{ background: "var(--bg)" }}>
+    <div className="min-h-[calc(100dvh/var(--qs-zoom,1))] px-4 py-8 sm:py-14" style={{ background: "var(--bg)" }}>
       <style>{REL_CSS}</style>
       <div className="max-w-lg mx-auto">
         <p className="text-center text-[13px] font-bold tracking-wide mb-6" style={{ color: "var(--rel-ink)" }}>

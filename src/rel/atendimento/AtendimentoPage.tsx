@@ -33,6 +33,7 @@
 // enviadas a ele; o Relacionamento ganha "Enviar ao Financeiro" e vê o status.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { px, larguraTela, alturaTela } from "@/lib/escala";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import {
   assumirConversa, carregarConversa, carregarMensagens, duracao, enviarArquivo, enviarFigurinha, enviarTexto,
@@ -263,7 +264,7 @@ function Lista({ setor, todas, busca, setBusca, buscaRef, conversas, selecionada
             <li key={c.id} className="wa-item relative" onContextMenu={menu} aria-current={sel ? "true" : undefined}>
               <button onClick={() => abrir(c.id)} aria-current={sel ? "true" : undefined}
                 className="w-full text-left pl-3 flex gap-3 items-center"
-                onKeyDown={(e) => { if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); onMenu(c, { x: r.right - 220, y: r.top + 30 }); } }}>
+                onKeyDown={(e) => { if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); onMenu(c, { x: px(r.right) - 220, y: px(r.top) + 30 }); } }}>
                 <AvatarWa nome={nomeDa(c)} tamanho={49} />
                 <span className="flex-1 min-w-0 py-3 pr-3" style={{ borderBottom: "1px solid var(--wa-line)" }}>
                   <span className="flex items-baseline gap-2">
@@ -1157,7 +1158,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
       {reagirMais && (
         <div className="fixed inset-0 z-[1001]" onMouseDown={() => setReagirMais(null)} onKeyDown={(e) => { if (e.key === "Escape") setReagirMais(null); }}>
           <div className="wa wa-menu absolute rounded-xl overflow-hidden" onMouseDown={(e) => e.stopPropagation()}
-            style={{ left: Math.min(reagirMais.pos.x, window.innerWidth - 340), top: Math.min(reagirMais.pos.y, window.innerHeight - 380) }}>
+            style={{ left: Math.min(reagirMais.pos.x, larguraTela() - 340), top: Math.min(reagirMais.pos.y, alturaTela() - 380) }}>
             <EmojiPicker compacto autoFocus onEscolher={(e) => { const m = reagirMais.m; setReagirMais(null); void reagirEm(m, e); }} />
           </div>
         </div>
@@ -1445,7 +1446,7 @@ export default function AtendimentoPage({ setor = "relacionamento", extraCabecal
         </div>
       )}
       {/* Altura da tela inteira (no celular, menos a barra do topo de 56px), menos as abas (44px). */}
-      <div className={`flex relative ${abas ? "h-[calc(100dvh-100px)] lg:h-[calc(100dvh-44px)]" : "h-[calc(100dvh-56px)] lg:h-[100dvh]"}`}>
+      <div className={`flex relative ${abas ? "h-[calc(calc(100dvh/var(--qs-zoom,1))-100px)] lg:h-[calc(calc(100dvh/var(--qs-zoom,1))-44px)]" : "h-[calc(calc(100dvh/var(--qs-zoom,1))-56px)] lg:h-[calc(100dvh/var(--qs-zoom,1))]"}`}>
         <aside
           className={`${conversaId ? "hidden lg:flex" : "flex"} flex-col w-full lg:w-[380px] xl:w-[420px] lg:flex-shrink-0 border-r min-h-0 wa-lista`}
           style={{ borderColor: "var(--wa-line)" }}

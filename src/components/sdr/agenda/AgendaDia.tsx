@@ -18,6 +18,7 @@
 // -----------------------------------------------------------------------------
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { px } from "@/lib/escala";
 import { supabase } from "@/lib/supabase";
 import { useQsAuth, podeExecutar } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
@@ -498,7 +499,7 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo, semBotaoAgend
     if (!col.agendavel) return;
     // getBoundingClientRect já é relativo à viewport (a rolagem entra na conta).
     const caixa = e.currentTarget.getBoundingClientRect();
-    const y = e.clientY - caixa.top;
+    const y = px(e.clientY - caixa.top);
     const brutos = (y / alturaHora) * 60 + horaInicio * 60;
     const minutos = Math.max(0, Math.floor(brutos / 30) * 30); // encaixa de 30 em 30
     const quando = startOfDay(dia);
@@ -509,7 +510,7 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo, semBotaoAgend
   /** Minuto do dia (encaixado de 15 em 15) a partir da posição do mouse na coluna. */
   const minutoDoEvento = (e: React.DragEvent<HTMLDivElement>) => {
     const caixa = e.currentTarget.getBoundingClientRect();
-    const y = e.clientY - caixa.top;
+    const y = px(e.clientY - caixa.top);
     const brutos = (y / alturaHora) * 60 + horaInicio * 60;
     return Math.max(0, Math.round(brutos / 15) * 15);
   };
@@ -704,7 +705,7 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo, semBotaoAgend
       <div className="flex flex-wrap items-start gap-4">
         {/* ── Grade (computador) ───────────────────────────────────────────── */}
         <section aria-label="Grade do dia" className="ag-card hidden min-w-0 overflow-hidden md:block" style={{ flex: "999 1 640px" }}>
-          <div ref={gradeRef} className="relative overflow-auto" style={{ maxHeight: "max(520px, calc(100vh - 300px))" }}>
+          <div ref={gradeRef} className="relative overflow-auto" style={{ maxHeight: "max(520px, calc(calc(100vh/var(--qs-zoom,1)) - 300px))" }}>
             {loading ? (
               <div className="flex flex-col gap-2 p-4">
                 {Array.from({ length: 8 }, (_, i) => (

@@ -99,7 +99,7 @@
 
 /* ── O pedido aberto: MODAL CENTRAL (05/11) ── */
 .solq-ov { position: fixed; inset: 0; z-index: 55; background: rgba(9, 9, 11, .55); display: flex; align-items: center; justify-content: center; padding: 24px; }
-.solq-conv { --q-tipo: var(--q-azul); width: min(1180px, 100%); height: min(860px, calc(100vh - 48px)); min-width: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 24px 64px rgba(0, 0, 0, .3); display: flex; flex-direction: column; overflow: hidden; font-family: var(--font-sans); font-size: 14px; line-height: 1.45; }
+.solq-conv { --q-tipo: var(--q-azul); width: min(1180px, 100%); height: min(860px, calc(calc(100vh/var(--qs-zoom,1)) - 48px)); min-width: 0; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 24px 64px rgba(0, 0, 0, .3); display: flex; flex-direction: column; overflow: hidden; font-family: var(--font-sans); font-size: 14px; line-height: 1.45; }
 .solq-conv__h { padding: 16px 22px 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; border-top: 4px solid var(--q-tipo); }
 .solq-conv__l1 { display: flex; align-items: center; gap: 10px; }
 .solq-conv__tags { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

@@ -22,6 +22,7 @@
 // -----------------------------------------------------------------------------
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { px, larguraTela } from "@/lib/escala";
 import { useChatAppDock } from "@/contexts/ChatAppDockContext";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
@@ -46,7 +47,7 @@ type Modo = "split" | "fullscreen";
 
 /** Teto: metade da tela é alvo legítimo, mas o QS sempre sobra utilizável. */
 function maxWidth(win?: number): number {
-  const w = win ?? (typeof window === "undefined" ? 1440 : window.innerWidth);
+  const w = win != null ? px(win) : larguraTela(); // win vem de innerWidth (pixels da tela)
   return Math.max(MIN_W, w - APP_MIN);
 }
 
@@ -212,7 +213,7 @@ export default function QsWaDock({ onOpenLead }: { onOpenLead?: (leadId: string)
   const aoArrastar = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
     if (!d) return;
-    ultimaLargura.current = aplicar(d.w0 + (d.x0 - e.clientX), false);
+    ultimaLargura.current = aplicar(d.w0 + px(d.x0 - e.clientX), false);
   }, [aplicar]);
 
   const aoSoltar = useCallback(() => {

@@ -242,7 +242,7 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
             const total = itens.reduce((s, n) => s + valorDe(n), 0);
             return (
               <section key={col.id} aria-label={col.rotulo}
-                className="flex-shrink-0 w-[264px] rounded-xl flex flex-col max-h-[calc(100dvh-230px)]"
+                className="flex-shrink-0 w-[264px] rounded-xl flex flex-col max-h-[calc(calc(100dvh/var(--qs-zoom,1))-230px)]"
                 style={{ background: "var(--card2)", border: "1px solid var(--line)", scrollSnapAlign: "start" }}
                 onDragOver={(e) => { if (arrastando) e.preventDefault(); }}
                 onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData("text/plain"); setArrastando(null); if (id) void soltar(id, col.id); }}>

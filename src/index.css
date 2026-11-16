@@ -125,8 +125,8 @@ body {
 /* Altura real da viewport no celular (dvh acompanha a barra do Safari;
    em modo "tela de início"/standalone a barra some e ocupa tudo). */
 #root {
-  min-height: 100vh;
-  min-height: 100dvh;
+  min-height: calc(100vh/var(--qs-zoom,1));
+  min-height: calc(100dvh/var(--qs-zoom,1));
 }
 
 /* No iOS, um input com fonte < 16px faz a tela dar zoom sozinha ao focar.
@@ -144,8 +144,8 @@ body {
 .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
 .pl-safe { padding-left: env(safe-area-inset-left); }
 .pr-safe { padding-right: env(safe-area-inset-right); }
-.min-h-dvh { min-height: 100vh; min-height: 100dvh; }
-.h-dvh { height: 100vh; height: 100dvh; }
+.min-h-dvh { min-height: calc(100vh/var(--qs-zoom,1)); min-height: calc(100dvh/var(--qs-zoom,1)); }
+.h-dvh { height: calc(100vh/var(--qs-zoom,1)); height: calc(100dvh/var(--qs-zoom,1)); }
 
 /* ── Camada de override do Modo Noturno (utilitários Tailwind) ────────────────
    Seletores compostos (html.dark .classe) têm mais especificidade que o utilitário
@@ -292,7 +292,30 @@ html.dark { --scroll-thumb: rgba(255, 255, 255, .16); --scroll-thumb-hover: rgba
    que ele ocupa, de uma vez só, sem mexer em cada tela (16→14, 20→17,5).
    Mapas, gráficos e logos têm outro viewBox e ficam de fora. Pra um ícone
    específico manter o tamanho: class="icone-cheio". */
-svg[viewBox="0 0 24 24"]:not(.icone-cheio) { zoom: 0.875; }
+svg[viewBox="0 0 24 24"]:not(.icone-cheio) { zoom: var(--qs-zoom-icone, 0.875); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   QS INTEIRO 10% MENOR NO COMPUTADOR (Bruno, 16/11: "tudo está muito grande")
+   ---------------------------------------------------------------------------
+   Equivale a deixar o navegador em 90%, só que pra todo mundo. O fator mora
+   em --qs-zoom (celular fica em 1 — o toque precisa do tamanho cheio).
+   Efeitos colaterais do zoom no <html>, já tratados:
+   - 100vh/100dvh/100vw também encolhem → no código viraram
+     calc(100dvh/var(--qs-zoom,1)); as classes do Tailwind abaixo idem;
+   - mouse/getBoundingClientRect/innerWidth vêm em pixels da TELA → quem
+     posiciona menu/arrasto usa src/lib/escala.ts.
+   Os ícones já tinham ficado 12% menores: com o zoom geral o extra deles cai
+   pra 0.97, pra não ficarem minúsculos (0.9 × 0.97 ≈ o tamanho de antes). */
+:root { --qs-zoom: 1; }
+@media (min-width: 900px) {
+  :root { --qs-zoom: 0.9; --qs-zoom-icone: 0.97; }
+  html { zoom: var(--qs-zoom); }
+}
+.min-h-screen { min-height: calc(100vh / var(--qs-zoom, 1)); }
+.h-screen { height: calc(100vh / var(--qs-zoom, 1)); }
+.w-screen { width: calc(100vw / var(--qs-zoom, 1)); }
+@media (min-width: 768px) { .md:min-h-screen { min-height: calc(100vh / var(--qs-zoom, 1)); } }
+@media (min-width: 1024px) { .lg:h-dvh { height: calc(100dvh / var(--qs-zoom, 1)); } }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ATENDIMENTO DE WHATSAPP — camada de estilo do painel
@@ -473,7 +496,7 @@ svg[viewBox="0 0 24 24"]:not(.icone-cheio) { zoom: 0.875; }
 .qs-chatdock[data-modo="overlay"]:not(.qs-chatdock-open) { pointer-events: none; }
 
 .qs-chatdock[data-modo="fullscreen"] {
-  position: fixed; inset: 0; z-index: 80; width: 100vw; border-left: none;
+  position: fixed; inset: 0; z-index: 80; width: calc(100vw/var(--qs-zoom,1)); border-left: none;
   transform: translateX(100%);
   transition: transform .3s cubic-bezier(.16,1,.3,1);
 }
@@ -523,7 +546,7 @@ html.qs-app-narrow .qs-navbtn { display: flex !important; }
   html.qs-teclado .qs-shell:has(.qs-main--comercial) {
     position: fixed; left: 0; right: 0;
     top: var(--qs-vvtop, 0px);
-    height: var(--qs-vvh, 100dvh);
+    height: var(--qs-vvh, calc(100dvh/var(--qs-zoom,1)));
   }
 
   .wa-composer-linha { flex-wrap: wrap; row-gap: 6px; }

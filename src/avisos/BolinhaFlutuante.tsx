@@ -9,6 +9,7 @@
 // do Windows — o navegador não deixa um site desenhar por cima de outros programas.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { px, larguraTela, alturaTela } from "@/lib/escala";
 import { useAvisos } from "./AvisosProvider";
 import { ListaDeAvisos } from "./SinoDeAvisos";
 
@@ -19,8 +20,8 @@ const CHAVE_POS = "qs_avisos_bolinha_pos";
 type Pos = { x: number; y: number };
 
 function limitar(p: Pos): Pos {
-  const maxX = Math.max(MARGEM, window.innerWidth - TAM - MARGEM);
-  const maxY = Math.max(MARGEM, window.innerHeight - TAM - MARGEM);
+  const maxX = Math.max(MARGEM, larguraTela() - TAM - MARGEM);
+  const maxY = Math.max(MARGEM, alturaTela() - TAM - MARGEM);
   return { x: Math.min(Math.max(MARGEM, p.x), maxX), y: Math.min(Math.max(MARGEM, p.y), maxY) };
 }
 
@@ -29,7 +30,7 @@ function posInicial(): Pos {
     const p = JSON.parse(localStorage.getItem(CHAVE_POS) || "null") as Pos | null;
     if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) return limitar(p);
   } catch { /* sem memória: canto padrão */ }
-  return limitar({ x: window.innerWidth - TAM - 20, y: window.innerHeight - TAM - 96 });
+  return limitar({ x: larguraTela() - TAM - 20, y: alturaTela() - TAM - 96 });
 }
 
 export default function BolinhaFlutuante({ pulso }: { pulso: number }) {
@@ -55,7 +56,7 @@ export default function BolinhaFlutuante({ pulso }: { pulso: number }) {
   function onPointerDown(e: React.PointerEvent<HTMLButtonElement>) {
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    arraste.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y, x0: e.clientX, y0: e.clientY, moveu: false };
+    arraste.current = { dx: px(e.clientX) - pos.x, dy: px(e.clientY) - pos.y, x0: e.clientX, y0: e.clientY, moveu: false };
   }
   function onPointerMove(e: React.PointerEvent<HTMLButtonElement>) {
     const a = arraste.current;
@@ -63,7 +64,7 @@ export default function BolinhaFlutuante({ pulso }: { pulso: number }) {
     if (!a.moveu && Math.hypot(e.clientX - a.x0, e.clientY - a.y0) < 5) return;
     a.moveu = true;
     setAberta(false);
-    setPos(limitar({ x: e.clientX - a.dx, y: e.clientY - a.dy }));
+    setPos(limitar({ x: px(e.clientX) - a.dx, y: px(e.clientY) - a.dy }));
   }
   function onPointerUp() {
     const a = arraste.current;
@@ -76,11 +77,11 @@ export default function BolinhaFlutuante({ pulso }: { pulso: number }) {
   // Lista abre do lado que tem espaço.
   useLayoutEffect(() => {
     if (!aberta) return;
-    const larg = Math.min(360, window.innerWidth - 2 * MARGEM);
-    const alt = Math.min(480, window.innerHeight * 0.7);
-    const left = pos.x + TAM / 2 > window.innerWidth / 2 ? pos.x - larg - 10 : pos.x + TAM + 10;
-    const top = pos.y + TAM / 2 > window.innerHeight / 2 ? pos.y + TAM - alt : pos.y;
-    setPainelPos({ left: Math.min(Math.max(MARGEM, left), window.innerWidth - larg - MARGEM), top: Math.max(MARGEM, top) });
+    const larg = Math.min(360, larguraTela() - 2 * MARGEM);
+    const alt = Math.min(480, alturaTela() * 0.7);
+    const left = pos.x + TAM / 2 > larguraTela() / 2 ? pos.x - larg - 10 : pos.x + TAM + 10;
+    const top = pos.y + TAM / 2 > alturaTela() / 2 ? pos.y + TAM - alt : pos.y;
+    setPainelPos({ left: Math.min(Math.max(MARGEM, left), larguraTela() - larg - MARGEM), top: Math.max(MARGEM, top) });
   }, [aberta, pos]);
 
   useEffect(() => {
@@ -140,7 +141,7 @@ export default function BolinhaFlutuante({ pulso }: { pulso: number }) {
       {aberta && painelPos && (
         <div ref={painel} role="dialog" aria-label="Avisos"
           className="fixed z-[80] rounded-xl shadow-xl border flex flex-col overflow-hidden"
-          style={{ top: painelPos.top, left: painelPos.left, width: "min(360px, calc(100vw - 16px))", maxHeight: "min(480px, 70vh)", background: "var(--card, #fff)", borderColor: "var(--line, #e5e7eb)" }}>
+          style={{ top: painelPos.top, left: painelPos.left, width: "min(360px, calc(calc(100vw/var(--qs-zoom,1)) - 16px))", maxHeight: "min(480px, 70vh)", background: "var(--card, #fff)", borderColor: "var(--line, #e5e7eb)" }}>
           <div className="flex items-center gap-2 px-4 py-2.5 border-b flex-shrink-0" style={{ borderColor: "var(--line, #e5e7eb)" }}>
             <span className="text-[14px] font-bold flex-1" style={{ color: "var(--ink, #111)" }}>Avisos</span>
             {n > 0 && (

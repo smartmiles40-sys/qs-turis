@@ -4,6 +4,7 @@
 // (uma coluna por fase) e Kanban (por status, só leitura como no antigo).
 // Novo no QS: arrastar pra reordenar processos dentro da fase e subtarefas dentro
 // do processo; editar responsável, prazo, prioridade e tarefa direto na linha.
+import { corrigirZoomDnd } from "@/lib/escala"; // 16/11: arrastar acompanha o mouse com o zoom do <html>
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -158,7 +159,7 @@ export function Tabela({ itens, usuarios, faseAtual, onMudou, onReordenar, onEdi
         </button>
       </div>
       <div className="overflow-x-auto">
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={fimArraste}>
+        <DndContext sensors={sensors} modifiers={[corrigirZoomDnd]} collisionDetection={closestCenter} onDragEnd={fimArraste}>
           <table className="w-full text-[12.5px]" style={{ minWidth: 980 }}>
             <thead style={{ background: "var(--card2)" }}>
               <tr>

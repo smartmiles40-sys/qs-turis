@@ -3,6 +3,7 @@
 // Subgrupos (G1, G2, grupos de voo…) com datas próprias, quem está em cada um e a
 // chave da divisão G1/G2 (só admin). "Remover divisão" aqui apaga só G1 e G2 — no
 // antigo apagava TODOS os grupos, inclusive os usados pelos voos do ExpedAmigo.
+import { corrigirZoomDnd } from "@/lib/escala"; // 16/11: arrastar acompanha o mouse com o zoom do <html>
 import { useCallback, useEffect, useState } from "react";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, rectSortingStrategy } from "@dnd-kit/sortable";
@@ -109,7 +110,7 @@ export default function AbaGrupos({ exp, onMudou }: PropsAba) {
           <p className="text-[12.5px] mt-0.5" style={{ color: "var(--ink3)" }}>Útil quando a mesma expedição tem várias saídas com datas diferentes.</p>
         </div>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={fimArraste}>
+        <DndContext sensors={sensors} modifiers={[corrigirZoomDnd]} collisionDetection={closestCenter} onDragEnd={fimArraste}>
           <SortableContext items={grupos.map((g) => g.id)} strategy={rectSortingStrategy}>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {grupos.map((g) => (

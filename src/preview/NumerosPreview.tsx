@@ -105,7 +105,7 @@ window.fetch = (async (entrada: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof window.fetch;
 
 createRoot(document.getElementById("root")!).render(
-  <div style={{ maxWidth: 1100, margin: "0 auto", padding: 24, background: "#fff", minHeight: "100vh" }}>
+  <div style={{ maxWidth: 1100, margin: "0 auto", padding: 24, background: "#fff", minHeight: "calc(100vh/var(--qs-zoom,1))" }}>
     <div style={{ marginBottom: 20, padding: "10px 14px", background: "#FEF0C7", color: "#B54708",
                   borderRadius: 8, fontSize: 13 }}>
       <strong>Preview.</strong> Dados de mentira, botões funcionando. Números falsos — nenhum WhatsApp

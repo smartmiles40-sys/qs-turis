@@ -15,7 +15,7 @@ export default function ToastsDeAvisos({ itens, onAbrir, onFechar }: {
   if (!itens.length) return null;
   return (
     <div role="status" aria-live="polite"
-      style={{ position: "fixed", zIndex: 95, right: 16, bottom: "calc(16px + env(safe-area-inset-bottom))", display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end", pointerEvents: "none", maxWidth: "calc(100vw - 32px)" }}>
+      style={{ position: "fixed", zIndex: 95, right: 16, bottom: "calc(16px + env(safe-area-inset-bottom))", display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end", pointerEvents: "none", maxWidth: "calc(calc(100vw/var(--qs-zoom,1)) - 32px)" }}>
       {itens.map((a) => (
         <div key={a.id}
           style={{ pointerEvents: "auto", display: "flex", alignItems: "flex-start", gap: 6, width: 360, maxWidth: "100%", background: "var(--surface)", color: "var(--text)", border: "1px solid var(--border-strong)", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,.18)", animation: "qsToastIn .22s ease-out", fontFamily: "var(--font-sans)" }}>

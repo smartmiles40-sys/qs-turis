@@ -19,7 +19,7 @@ export default function DevUiPage() {
   const { isDark, toggleTheme } = useTheme();
   const [aba, setAba] = useState<"todos" | "ativos" | "arquivo">("todos");
   return (
-    <div style={{ background: "var(--bg)", minHeight: "100dvh" }}>
+    <div style={{ background: "var(--bg)", minHeight: "calc(100dvh/var(--qs-zoom,1))" }}>
       <Page>
         <PageHeader crumb="Dev · Componentes" title="Peças base do redesign" subtitle="Tudo em tokens. Troque o tema pra conferir o contraste."
           actions={<>

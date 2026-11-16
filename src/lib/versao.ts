@@ -137,7 +137,7 @@ function mostrarFaixa(): void {
   el.setAttribute("role", "status");
   el.style.cssText = [
     "position:fixed", "z-index:2147483000", "left:50%", "bottom:16px", "transform:translateX(-50%)",
-    "display:flex", "align-items:center", "gap:10px", "max-width:calc(100vw - 32px)",
+    "display:flex", "align-items:center", "gap:10px", "max-width:calc(calc(100vw/var(--qs-zoom,1)) - 32px)",
     "padding:8px 8px 8px 14px", "border-radius:12px", "background:#17202E", "color:#fff",
     "font:600 13px/1.35 system-ui,-apple-system,'Segoe UI',sans-serif",
     "box-shadow:0 8px 24px rgba(0,0,0,.25)",

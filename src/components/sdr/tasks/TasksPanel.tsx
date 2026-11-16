@@ -3889,7 +3889,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
         @keyframes pulseBanner { 0%,100% { opacity:1 } 50% { opacity:0.85 } }
         @keyframes confettiFall {
           0% { transform: translateY(-10px) rotate(0deg); opacity: 1; }
-          100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+          100% { transform: translateY(calc(100vh/var(--qs-zoom,1))) rotate(720deg); opacity: 0; }
         }
         @keyframes toastIn { 0% { opacity: 0; transform: translateY(20px); } 100% { opacity: 1; transform: translateY(0); } }
         @keyframes toastOut { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(20px); } }
@@ -4176,7 +4176,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
       {modoSelecao && (
         <div
           className="fixed bottom-4 left-1/2 z-[79] -translate-x-1/2 flex flex-wrap items-center gap-2 rounded-2xl px-3 py-2.5 shadow-xl"
-          style={{ background: "var(--card)", border: "1px solid var(--line)", maxWidth: "calc(100vw - 2rem)" }}
+          style={{ background: "var(--card)", border: "1px solid var(--line)", maxWidth: "calc(calc(100vw/var(--qs-zoom,1)) - 2rem)" }}
         >
           <span className="px-1 text-[13px] font-bold" style={{ color: "var(--ink)" }}>
             {selecionadas.size === 0

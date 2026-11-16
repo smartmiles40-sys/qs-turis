@@ -187,7 +187,7 @@ export default function CloserApp() {
         )}
         {tela === "whatsapp" && (
           // O WhatsApp cuida da própria rolagem: ocupa a altura da tela inteira.
-          <div className="qs-closer-wa -mx-4 sm:-mx-6 lg:-mx-8 -my-6 lg:-my-8 h-[calc(100dvh-56px)] lg:h-dvh">
+          <div className="qs-closer-wa -mx-4 sm:-mx-6 lg:-mx-8 -my-6 lg:-my-8 h-[calc(calc(100dvh/var(--qs-zoom,1))-56px)] lg:h-dvh">
             <Cerca nome="o WhatsApp"><WaPage onOpenLead={abrirLead} /></Cerca>
           </div>
         )}

@@ -3,6 +3,7 @@
 // antigo: busca "/", filtros (status, destino, período, resp. op), cards ou
 // tabela, agrupada por ano, "★ Próxima", status direto na tabela, arrastar pra
 // ordenar (tabela), "n" abre Nova. Atualiza sozinha (realtime em expedicoes).
+import { corrigirZoomDnd } from "@/lib/escala"; // 16/11: arrastar acompanha o mouse com o zoom do <html>
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -267,7 +268,7 @@ function TabelaGrupo({ itens, proximaId, tipo, onAbrir, onEditar, onExcluir, onR
   };
   return (
     <div className="rel-card overflow-x-auto">
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={fimArraste}>
+      <DndContext sensors={sensors} modifiers={[corrigirZoomDnd]} collisionDetection={closestCenter} onDragEnd={fimArraste}>
         <table className="w-full text-[13px]">
           <thead>
             <tr className="text-left text-[11.5px]" style={{ color: "var(--ink3)" }}>

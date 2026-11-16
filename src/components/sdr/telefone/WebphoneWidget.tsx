@@ -115,7 +115,7 @@ export default function WebphoneWidget({ demo }: { demo?: WebphoneState } = {}) 
 
   return (
     <div
-      className="qs-webphone-card fixed z-[80] bottom-4 left-4 w-[min(340px,calc(100vw-2rem))] rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden"
+      className="qs-webphone-card fixed z-[80] bottom-4 left-4 w-[min(340px,calc(calc(100vw/var(--qs-zoom,1))-2rem))] rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden"
       role="dialog"
       aria-label="Ligação em andamento"
     >

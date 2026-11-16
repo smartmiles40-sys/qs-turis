@@ -17,7 +17,7 @@ supabase.rpc = (async () => ({ data: modoSdr ? SDR : GESTOR, error: null })) as 
 
 const agora = Date.now();
 createRoot(document.getElementById("root")!).render(
-  <div style={{ padding: 32, background: "#F4F5F8", minHeight: "100vh" }}>
+  <div style={{ padding: 32, background: "#F4F5F8", minHeight: "calc(100vh/var(--qs-zoom,1))" }}>
     {modoSdr && (
       <RelogioPrimeiroContato
         esperando={[

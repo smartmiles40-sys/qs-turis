@@ -65,7 +65,7 @@ function App() {
     document.documentElement.classList.toggle("dark", v);
   };
   return (
-    <div style={{ padding: 24, background: "var(--bg)", minHeight: "100vh" }}>
+    <div style={{ padding: 24, background: "var(--bg)", minHeight: "calc(100vh/var(--qs-zoom,1))" }}>
       <button id="toggle-tema" onClick={trocar}
               style={{ marginBottom: 16, padding: "6px 12px", border: "1px solid var(--line)",
                        borderRadius: 8, color: "var(--ink)", background: "var(--card)" }}>

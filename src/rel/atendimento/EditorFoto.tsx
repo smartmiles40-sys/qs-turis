@@ -11,6 +11,7 @@
 // Saída: um File JPEG com no máximo 2560 px e até 3 MB (limite da Meta aqui).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent } from "react";
+import { escalaTela } from "@/lib/escala";
 import { createPortal } from "react-dom";
 import { EmojiPicker, EMOJI_FONT_CSS } from "./PainelExpressoes";
 import { WA_CSS } from "./waUi";
@@ -132,7 +133,7 @@ export default function EditorFoto({ arquivo, onPronto, onCancelar }: { arquivo:
 
   function ponto(ev: RPointerEvent<HTMLCanvasElement>) {
     const r = telaRef.current!.getBoundingClientRect();
-    return { x: (ev.clientX - r.left) / escala, y: (ev.clientY - r.top) / escala };
+    return { x: (ev.clientX - r.left) / (escala * escalaTela()), y: (ev.clientY - r.top) / (escala * escalaTela()) };
   }
 
   function acharAdesivo(p: { x: number; y: number }) {

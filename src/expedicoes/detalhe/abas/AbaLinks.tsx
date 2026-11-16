@@ -1,6 +1,7 @@
 // Aba "Links" da expedição (app antigo: app/(app)/expedicoes/[id]/links/ — page.tsx,
 // LinksGrid.tsx, LinkDrawer.tsx). Grade de links (apresentação, LP, planilha, drive,
 // grupo do WhatsApp…) com copiar/editar/excluir; ao vivo. O portal /amigo lê os mesmos links.
+import { corrigirZoomDnd } from "@/lib/escala"; // 16/11: arrastar acompanha o mouse com o zoom do <html>
 import { useCallback, useEffect, useState } from "react";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, rectSortingStrategy } from "@dnd-kit/sortable";
@@ -65,7 +66,7 @@ export default function AbaLinks({ exp }: PropsAba) {
           {!somenteLeitura && <Botao className="mt-4" onClick={() => setGaveta({ link: null })}>+ Adicionar primeiro link</Botao>}
         </div>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={fimArraste}>
+        <DndContext sensors={sensors} modifiers={[corrigirZoomDnd]} collisionDetection={closestCenter} onDragEnd={fimArraste}>
           <SortableContext items={links.map((l) => l.id)} strategy={rectSortingStrategy}>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {links.map((l) => <CartaoLink key={l.id} link={l} onEditar={() => setGaveta({ link: l })} onMudou={carregar} />)}
