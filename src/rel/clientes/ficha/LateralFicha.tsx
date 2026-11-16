@@ -62,7 +62,7 @@ function SemContatoBitrix({ c, onMudou }: { c: Cliente; onMudou: () => void }) {
 }
 
 // ── Contato ─────────────────────────────────────────────────────────────────
-function Contato({ c, onMudou }: { c: Cliente; onMudou: () => void }) {
+function Contato({ c, onMudou, onWhatsApp }: { c: Cliente; onMudou: () => void; onWhatsApp?: () => void }) {
   const fone = c.telefone ?? "";
   return (
     <Card title="Contato">
@@ -74,7 +74,9 @@ function Contato({ c, onMudou }: { c: Cliente; onMudou: () => void }) {
           </div>
           {fone && (
             <span className="fc-icones">
-              <a className="qs-btn2 qs-btn2--icon" href={zap(fone)} target="_blank" rel="noreferrer" aria-label="Abrir WhatsApp">{Icon.chat}</a>
+              {onWhatsApp
+                ? <button type="button" className="qs-btn2 qs-btn2--icon" onClick={onWhatsApp} aria-label="Abrir conversa no QS" title="Abrir conversa no QS">{Icon.chat}</button>
+                : <a className="qs-btn2 qs-btn2--icon" href={zap(fone)} target="_blank" rel="noreferrer" aria-label="Abrir WhatsApp">{Icon.chat}</a>}
               <a className="qs-btn2 qs-btn2--icon" href={`tel:+${fone.replace(/\D/g, "").length <= 11 ? "55" : ""}${fone.replace(/\D/g, "")}`} aria-label="Ligar">{Icon.telefone}</a>
             </span>
           )}
@@ -246,12 +248,12 @@ export default function LateralFicha(p: {
   c: Cliente; titular: Cliente | null; familia: Cliente[]; acompanhantes: Acompanhante[] | null;
   ligacoes: LigacoesCliente | null; metrica: Metrica | null; ehRel: boolean;
   onAbrir: (id: string) => void; onAdicionarFamiliar: () => void; onViajaJunto: () => void;
-  onEnviarTermo: () => void; onEditar: () => void; onVerOndeAparece: () => void; onMudou: () => void;
+  onEnviarTermo: () => void; onWhatsApp?: () => void; onEditar: () => void; onVerOndeAparece: () => void; onMudou: () => void;
 }) {
   const bloqueado = !!p.c.mesclado_em_id;
   return (
     <aside className="fc-lateral" aria-label="Contato e informações da pessoa">
-      <Contato c={p.c} onMudou={p.onMudou} />
+      <Contato c={p.c} onMudou={p.onMudou} onWhatsApp={p.onWhatsApp} />
       <Pessoas lista={pessoasLigadas(p.c, p.titular, p.familia, p.acompanhantes)} podeEditar={!bloqueado} ehTitular={!p.c.titular_id}
         onAbrir={p.onAbrir} onAdicionarFamiliar={p.onAdicionarFamiliar} onViajaJunto={p.onViajaJunto} />
       <Origem c={p.c} ligacoes={p.ligacoes} metrica={p.metrica} onVerTudo={p.onVerOndeAparece} />

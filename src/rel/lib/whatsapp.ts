@@ -160,6 +160,16 @@ export async function conversasDoCliente(clienteId: string): Promise<Conversa[]>
   return (data ?? []) as Conversa[];
 }
 
+/** Conversa mais recente com esse telefone (pelos 8 últimos dígitos — com ou
+ *  sem 9, com ou sem 55). Pra ficha achar a conversa mesmo sem cliente ligado. */
+export async function conversaPorTelefone(telefone: string): Promise<Conversa | null> {
+  const fim = telefone.replace(/D/g, "").slice(-8);
+  if (fim.length < 8) return null;
+  const { data } = await supabase.from("rel_wa_fila").select("*").eq("setor", "relacionamento").like("telefone", `%${fim}`)
+    .order("atualizado_em", { ascending: false }).limit(1);
+  return ((data ?? [])[0] as Conversa) ?? null;
+}
+
 export async function carregarMensagens(conversaId: string): Promise<Mensagem[]> {
   // As 300 mais recentes, em ordem de leitura.
   const { data, error } = await supabase

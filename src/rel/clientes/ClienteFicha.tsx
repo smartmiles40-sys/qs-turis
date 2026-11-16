@@ -70,7 +70,7 @@ import { EnviarFinanceiroModal, StatusNoFinanceiro } from "../../fin/EnviarFinan
 import { HistoricoDeSolicitacoes } from "@/solicitacoes/PedirOutroSetor";
 import NovaSolicitacao from "@/solicitacoes/NovaSolicitacao";
 import { solicitacoesDe, type Solicitacao } from "@/solicitacoes/lib";
-import { conversasDoCliente, duracao, horaCurta, type Conversa } from "../lib/whatsapp";
+import { conversaPorTelefone, conversasDoCliente, duracao, horaCurta, type Conversa } from "../lib/whatsapp";
 import ComprasDoCliente from "@/clientes/ComprasDoCliente";
 import ExpedAmigoDoCliente from "@/clientes/ExpedAmigoDoCliente";
 import CadastroPessoa from "@/clientes/cadastro/CadastroPessoa";
@@ -398,15 +398,22 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
   const endereco = resumoEndereco(pessoa ?? null);
   const status = statusDaViagem(proxima, detalheProx, nFaltando, ligacoes);
   const etapas = trilha(proxima, status, detalheProx);
-  const conversaAberta = conversas.find((x) => x.janela_aberta);
   const nCompras = (metrica?.viagens_compradas ?? 0) + (metrica?.compras_avulsas ?? 0);
   const nViagens = idas.length + viagensRel.length;
   const nuncaContato = metrica ? metrica.ultimo_contato_em == null : false;
 
-  const abrirWhatsApp = () => {
-    if (ehRel && conversaAberta) onAbrirConversa?.(conversaAberta.id);
-    else if (ehRel && fone) setMandarModelo(true);
-    else if (fone) window.open(`https://wa.me/${fone.replace(/\D/g, "").length <= 11 ? "55" : ""}${fone.replace(/\D/g, "")}`, "_blank", "noopener");
+  // 16/11 (Bruno): WhatsApp na ficha abre a CONVERSA no QS (mesmo com a janela
+  // de 24h fechada — lá dentro tem o "Mandar modelo"). A tela de modelo só abre
+  // quando o cliente nunca conversou com a gente por esse número.
+  const abrirWhatsApp = async () => {
+    if (ehRel) {
+      const doRel = conversas.filter((x) => x.setor !== "financeiro");
+      const cv = doRel.find((x) => x.janela_aberta) ?? doRel[0] ?? (fone ? await conversaPorTelefone(fone).catch(() => null) : null);
+      if (cv && onAbrirConversa) onAbrirConversa(cv.id);
+      else if (fone) setMandarModelo(true);
+      return;
+    }
+    if (fone) window.open(`https://wa.me/${fone.replace(/\D/g, "").length <= 11 ? "55" : ""}${fone.replace(/\D/g, "")}`, "_blank", "noopener");
   };
 
   async function pedir(chave: string) {
@@ -503,7 +510,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         </div>
         {!bloqueado && (
           <div className="fc-head__acts">
-            {fone && <Btn icon={Icon.chat} onClick={abrirWhatsApp}>WhatsApp</Btn>}
+            {fone && <Btn icon={Icon.chat} onClick={() => void abrirWhatsApp()}>WhatsApp</Btn>}
             <Btn onClick={abrirTelefone} disabled={!prontoTelefone} title={!prontoTelefone ? "Carregando a ficha…" : undefined}>Preencher por telefone</Btn>
             <Btn onClick={() => setPedirSetor("geral")}>Pedir a outro setor</Btn>
             {ehRel && <Btn variant="primary" onClick={() => setNovoContato(true)}>Registrar contato</Btn>}
@@ -679,9 +686,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
                 <Secao
                   titulo="WhatsApp"
                   acao={!bloqueado && c.telefone ? (
-                    conversaAberta
-                      ? <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => onAbrirConversa?.(conversaAberta.id)}>Abrir conversa</Botao>
-                      : <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => setMandarModelo(true)}>Mandar mensagem</Botao>
+                    <Botao variante="fantasma" style={{ color: "var(--rel-ink)" }} onClick={() => void abrirWhatsApp()}>{conversas.length ? "Abrir conversa" : "Mandar mensagem"}</Botao>
                   ) : undefined}
                 >
                   {!c.telefone && conversas.length === 0 ? (
@@ -740,7 +745,7 @@ export default function ClienteFicha({ id, onAbrir, onVoltar, onAbrirConversa, o
         <LateralFicha c={c} titular={titular} familia={familia} acompanhantes={pessoa ? pessoa.acompanhantes : null}
           ligacoes={ligacoes} metrica={metrica} ehRel={ehRel}
           onAbrir={onAbrir} onAdicionarFamiliar={() => setNovoFamiliar(true)} onViajaJunto={() => setViajaJunto(true)}
-          onEnviarTermo={() => setMandarModelo(true)} onEditar={() => setEditando(true)}
+          onEnviarTermo={() => setMandarModelo(true)} onWhatsApp={ehRel ? () => void abrirWhatsApp() : undefined} onEditar={() => setEditando(true)}
           onVerOndeAparece={() => { setAba("historico"); setTimeout(() => document.getElementById("fc-onde-aparece")?.scrollIntoView({ behavior: "smooth" }), 50); }}
           onMudou={() => void carregar()} />
       </div>
