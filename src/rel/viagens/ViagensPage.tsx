@@ -62,7 +62,8 @@ type Visao = "painel" | "calendario" | "lista" | "checkins" | "servicos" | "repe
 const VISOES: { id: Visao; rotulo: string }[] = [
   { id: "painel", rotulo: "Painel" },
   { id: "calendario", rotulo: "Calendário" },
-  { id: "lista", rotulo: "Lista" },
+  // 16/11 (Bruno): aba Lista saiu (ninguém usava). A visão segue viva pros
+  // atalhos que filtram (#rel/faxina, ?tipo=...).
   // 11/11: só aéreo, na ordem dos check-ins · serviços separados por tipo, por data/hora da ação
   { id: "checkins", rotulo: "Check-ins" },
   // 16/11 (Bruno, limpeza): Serviços, Conferir repetidas (0 junções) e Conferir voos
@@ -71,7 +72,7 @@ const VISOES: { id: Visao; rotulo: string }[] = [
 const CHAVE_VISAO = "rel_viagens_visao";
 function visaoSalva(): Visao {
   // aba salva que saiu (servicos/repetidas/voos) volta pro Painel
-  try { const v = localStorage.getItem(CHAVE_VISAO); return v === "calendario" || v === "lista" || v === "checkins" ? v : "painel"; } catch { return "painel"; }
+  try { const v = localStorage.getItem(CHAVE_VISAO); return v === "calendario" || v === "checkins" ? v : "painel"; } catch { return "painel"; }
 }
 
 // 16/11 (Bruno, limpeza): saíram Minhas, Sem dono, Precisa de data, Classificar,
