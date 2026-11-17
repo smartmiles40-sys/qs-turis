@@ -15,11 +15,20 @@ export interface LeadAguardando {
   lead_id: string; nome: string | null; sdr_id: string; sdr_nome: string;
   chegou_em: string; minutos: number;
 }
+export type CanalToque = "ligacao" | "whatsapp" | "tarefa";
+export interface LeadAtendido {
+  lead_id: string; nome: string | null; sdr_id: string; sdr_nome: string;
+  chegou_em: string; atendido_em: string; canal: CanalToque; minutos: number;
+}
+export const ROTULO_CANAL: Record<CanalToque, string> = { ligacao: "Ligação", whatsapp: "WhatsApp", tarefa: "Tarefa concluída" };
+
 export interface PainelSla {
   meta_min: number; gestor: boolean; gerado_em: string;
   time: { hoje: BlocoSla; semana: BlocoSla; mes: BlocoSla };
   sdrs: LinhaSla[];
   aguardando: LeadAguardando[];
+  /** Cada cliente atendido no mês (mais recente primeiro). */
+  atendidos: LeadAtendido[];
 }
 export type PeriodoSla = "hoje" | "semana" | "mes";
 
@@ -40,6 +49,7 @@ export function normalizarPainelSla(d: unknown): PainelSla {
     time: { hoje: bloco(r.time?.hoje), semana: bloco(r.time?.semana), mes: bloco(r.time?.mes) },
     sdrs: (r.sdrs ?? []).map((s) => ({ sdr_id: s.sdr_id, nome: s.nome, hoje: bloco(s.hoje), semana: bloco(s.semana), mes: bloco(s.mes) })),
     aguardando: (r.aguardando ?? []).map((a) => ({ ...a, minutos: Number(a.minutos ?? 0) })),
+    atendidos: (r.atendidos ?? []).map((a) => ({ ...a, minutos: Number(a.minutos ?? 0) })),
   };
 }
 
@@ -79,3 +89,20 @@ export function minutosTxt(min: number | null): string {
 export const pctSla = (p: number | null) => (p === null ? "—" : `${Math.round(p * 100)}%`);
 
 export { B0 as BLOCO_SLA_VAZIO };
+
+/** Início (ISO) de cada período no fuso de SP — o mesmo corte do banco (semana começa na segunda). */
+export function inicioPeriodoSla(p: PeriodoSla, agora: Date = new Date()): number {
+  const hoje = agora.toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const [y, m, d] = hoje.split("-").map(Number);
+  let dia = hoje;
+  if (p === "semana") {
+    const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay() || 7;
+    dia = new Date(Date.UTC(y, m - 1, d - (dow - 1))).toISOString().slice(0, 10);
+  } else if (p === "mes") dia = hoje.slice(0, 8) + "01";
+  return new Date(dia + "T00:00:00-03:00").getTime();
+}
+
+export function atendidosDoPeriodo(lista: LeadAtendido[], p: PeriodoSla, sdrId: string | null, agora: Date = new Date()): LeadAtendido[] {
+  const ini = inicioPeriodoSla(p, agora);
+  return lista.filter((a) => new Date(a.chegou_em).getTime() >= ini && (!sdrId || a.sdr_id === sdrId));
+}

@@ -6,7 +6,8 @@
 // toque, com o tempo útil correndo. Vermelho = já passou da meta.
 // Atualiza sozinho a cada 60 s (e ao voltar pra aba).
 // -----------------------------------------------------------------------------
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type MouseEvent } from "react";
+import SlaDetalhe from "./SlaDetalhe";
 import {
   fetchPainelSla, minutosTxt, pctNaMeta, pctSla, tomEspera, tomSla,
   type PainelSla, type TomSla,
@@ -20,7 +21,10 @@ const COR: Record<TomSla, { fg: string; bg: string }> = {
 };
 
 const CSS = `
-.sla-box{border:1px solid var(--border);background:var(--surface);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.sla-box{border:1px solid var(--border);background:var(--surface);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;cursor:pointer;transition:border-color .15s,background .15s}
+.sla-box:hover{background:var(--surface-2)}
+.sla-box:focus-visible{outline:2px solid var(--info);outline-offset:2px}
+.sla-ver{font-size:12px;font-weight:600;color:var(--info)}
 .sla-box[data-tom=danger]{border-color:color-mix(in srgb,var(--danger) 45%,var(--border));box-shadow:inset 3px 0 0 var(--danger)}
 .sla-top{display:flex;flex-wrap:wrap;align-items:center;gap:10px 22px}
 .sla-tit{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--subtle)}
@@ -45,6 +49,8 @@ export default function SlaFilaHoje({ onOpenLead, onVerDesempenho }: {
   const [p, setP] = useState<PainelSla | null>(null);
   const [erro, setErro] = useState(false);
   const [todos, setTodos] = useState(false);
+  const [detalhe, setDetalhe] = useState(false);
+  const parar = (e: MouseEvent) => e.stopPropagation();
 
   const carregar = useCallback(async () => {
     try { setP(await fetchPainelSla()); setErro(false); }
@@ -71,7 +77,10 @@ export default function SlaFilaHoje({ onOpenLead, onVerDesempenho }: {
   const tomBox: TomSla = estourados.length > 0 ? "danger" : tom;
 
   return (
-    <section className="sla-box" data-tom={tomBox} aria-label="SLA do primeiro atendimento">
+    <>
+    <section className="sla-box" data-tom={tomBox} aria-label="SLA do primeiro atendimento — clique para ver o tempo de cada cliente"
+      role="button" tabIndex={0} onClick={() => setDetalhe(true)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetalhe(true); } }}>
       <style>{CSS}</style>
       <div className="sla-top">
         <span className="sla-tit">
@@ -95,8 +104,9 @@ export default function SlaFilaHoje({ onOpenLead, onVerDesempenho }: {
             ? "Ninguém esperando o 1º atendimento"
             : `${p.aguardando.length} esperando${estourados.length ? ` · ${estourados.length} fora do prazo` : ""}`}
         </span>
+        <span className="sla-ver" style={{ marginLeft: "auto" }}>Ver o tempo de cada cliente →</span>
         {onVerDesempenho && (
-          <button type="button" className="sla-sub" style={{ marginLeft: "auto", textDecoration: "underline", background: "none", border: 0, cursor: "pointer" }} onClick={onVerDesempenho}>
+          <button type="button" className="sla-sub" style={{ textDecoration: "underline", background: "none", border: 0, cursor: "pointer" }} onClick={(e) => { parar(e); onVerDesempenho(); }}>
             Ver semana e mês
           </button>
         )}
@@ -109,7 +119,7 @@ export default function SlaFilaHoje({ onOpenLead, onVerDesempenho }: {
             {lista.map((a) => {
               const t = tomEspera(a.minutos, meta);
               return (
-                <button key={a.lead_id} type="button" className="sla-lead" onClick={() => onOpenLead(a.lead_id)}
+                <button key={a.lead_id} type="button" className="sla-lead" onClick={(e) => { parar(e); onOpenLead(a.lead_id); }}
                   title={`Chegou ${new Date(a.chegou_em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}${p.gestor ? ` · ${a.sdr_nome}` : ""}`}>
                   <span className="sla-dot" data-tom={t} style={{ background: COR[t].fg }} />
                   <span className="truncate" style={{ maxWidth: 180 }}>{a.nome || "Sem nome"}</span>
@@ -119,7 +129,7 @@ export default function SlaFilaHoje({ onOpenLead, onVerDesempenho }: {
               );
             })}
             {p.aguardando.length > 8 && (
-              <button type="button" className="sla-lead" onClick={() => setTodos((v) => !v)}>
+              <button type="button" className="sla-lead" onClick={(e) => { parar(e); setTodos((v) => !v); }}>
                 {todos ? "Mostrar menos" : `+${p.aguardando.length - 8}`}
               </button>
             )}
@@ -127,5 +137,7 @@ export default function SlaFilaHoje({ onOpenLead, onVerDesempenho }: {
         </div>
       )}
     </section>
+    {detalhe && <SlaDetalhe painel={p} onFechar={() => setDetalhe(false)} onOpenLead={onOpenLead} />}
+    </>
   );
 }

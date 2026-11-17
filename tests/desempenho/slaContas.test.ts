@@ -48,3 +48,16 @@ test("normaliza a resposta do banco (números como texto, campos faltando)", () 
   assert.equal(p.sdrs[0].mes.recebidos, 0);
   assert.equal(p.aguardando[0].minutos, 45);
 });
+
+test("lista de atendidos por período (semana começa na segunda, fuso SP) e SDR", async () => {
+  const { atendidosDoPeriodo, inicioPeriodoSla } = await import("../../src/lib/qs/slaContas.ts");
+  const agora = new Date("2026-11-17T22:00:00Z"); // ter 17/11 19h em SP
+  assert.equal(new Date(inicioPeriodoSla("hoje", agora)).toISOString(), "2026-11-17T03:00:00.000Z");
+  assert.equal(new Date(inicioPeriodoSla("semana", agora)).toISOString(), "2026-11-16T03:00:00.000Z");
+  assert.equal(new Date(inicioPeriodoSla("mes", agora)).toISOString(), "2026-11-01T03:00:00.000Z");
+  const a = (sdr_id: string, chegou_em: string) => ({ lead_id: chegou_em, nome: null, sdr_id, sdr_nome: sdr_id, chegou_em, atendido_em: chegou_em, canal: "ligacao" as const, minutos: 10 });
+  const lista = [a("x", "2026-11-17T12:00:00Z"), a("y", "2026-11-16T12:00:00Z"), a("x", "2026-11-10T12:00:00Z"), a("x", "2026-11-17T02:30:00Z")];
+  assert.equal(atendidosDoPeriodo(lista, "hoje", null, agora).length, 1); // 02:30Z = 16/11 23:30 em SP
+  assert.equal(atendidosDoPeriodo(lista, "semana", null, agora).length, 3);
+  assert.equal(atendidosDoPeriodo(lista, "mes", "x", agora).length, 3);
+});

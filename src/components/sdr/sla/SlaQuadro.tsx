@@ -6,6 +6,7 @@
 // Usa as variáveis de cor do Desempenho (.dsp) quando está dentro dele.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
+import SlaDetalhe from "./SlaDetalhe";
 import {
   fetchPainelSla, minutosTxt, pctNaMeta, pctSla, tomSla,
   type BlocoSla, type PainelSla, type PeriodoSla, type TomSla,
@@ -16,11 +17,11 @@ const PERIODOS: { id: PeriodoSla; rot: string }[] = [
 ];
 const COR: Record<TomSla, string> = { ok: "var(--ok, #15803D)", warn: "var(--warn)", danger: "var(--danger, #B91C1C)", neutro: "var(--muted)" };
 
-function Celula({ b, meta }: { b: BlocoSla; meta: number }) {
+function Celula({ b, meta, onAbrir }: { b: BlocoSla; meta: number; onAbrir: () => void }) {
   if (b.recebidos === 0) return <td className="dsp-mut">—</td>;
   const tom = tomSla(b, meta);
   return (
-    <td>
+    <td onClick={onAbrir} style={{ cursor: "pointer" }} title="Ver o tempo de cada cliente">
       <div className="flex flex-col gap-0.5">
         <span className="text-[15px] font-bold" style={{ color: COR[tom] }}>{minutosTxt(b.mediana_min)}</span>
         <span className="text-[12px] dsp-mut">
@@ -35,6 +36,7 @@ function Celula({ b, meta }: { b: BlocoSla; meta: number }) {
 export default function SlaQuadro({ onOpenLead }: { onOpenLead?: (leadId: string) => void }) {
   const [p, setP] = useState<PainelSla | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [abrir, setAbrir] = useState<{ periodo: PeriodoSla; sdr: string } | null>(null);
 
   const carregar = useCallback(async () => {
     try { setP(await fetchPainelSla()); setErro(null); }
@@ -64,6 +66,7 @@ export default function SlaQuadro({ onOpenLead }: { onOpenLead?: (leadId: string
             {" "}"No prazo" conta também quem ainda espera e já passou da meta.
           </div>
         </div>
+        <button type="button" className="dsp-chip" onClick={() => setAbrir({ periodo: "hoje", sdr: "" })}>Ver cada cliente</button>
         <span className="text-[13px] dsp-mut">Atualizado {new Date(p.gerado_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
       </div>
 
@@ -79,13 +82,13 @@ export default function SlaQuadro({ onOpenLead }: { onOpenLead?: (leadId: string
             {linhas.map((s) => (
               <tr key={s.sdr_id}>
                 <td className="font-semibold">{s.nome}</td>
-                {PERIODOS.map((x) => <Celula key={x.id} b={s[x.id]} meta={meta} />)}
+                {PERIODOS.map((x) => <Celula key={x.id} b={s[x.id]} meta={meta} onAbrir={() => setAbrir({ periodo: x.id, sdr: p.gestor ? s.sdr_id : "" })} />)}
               </tr>
             ))}
             {p.gestor && linhas.length > 1 && (
               <tr style={{ background: "var(--card2)" }}>
                 <td className="font-bold">Time</td>
-                {PERIODOS.map((x) => <Celula key={x.id} b={p.time[x.id]} meta={meta} />)}
+                {PERIODOS.map((x) => <Celula key={x.id} b={p.time[x.id]} meta={meta} onAbrir={() => setAbrir({ periodo: x.id, sdr: "" })} />)}
               </tr>
             )}
             {linhas.length === 0 && (
@@ -116,6 +119,7 @@ export default function SlaQuadro({ onOpenLead }: { onOpenLead?: (leadId: string
           </div>
         </div>
       )}
+      {abrir && <SlaDetalhe painel={p} periodoInicial={abrir.periodo} sdrInicial={abrir.sdr} onFechar={() => setAbrir(null)} onOpenLead={onOpenLead} />}
     </section>
   );
 }

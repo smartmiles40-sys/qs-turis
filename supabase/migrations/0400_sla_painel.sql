@@ -17,6 +17,8 @@
 --
 -- 1º toque = o que vier primeiro, sempre DEPOIS da chegada (mesma regra da 0353):
 --   tarefa concluída · ligação do webfone · WhatsApp enviado pela linha do SDR.
+-- Também devolve `atendidos`: cada cliente do mês com chegada, 1º contato, canal
+-- e minutos — a lista que abre ao clicar no card.
 -- Meta: qs_settings 'sla_1o_contato_min' (padrão 30).
 -- SÓ DIA DE SEMANA (Bruno, 17/11): "sábado não é pra contar o SLA". O relógio
 -- usa o work_hours com sábado e domingo desligados — lead que chega na sexta à
@@ -78,23 +80,26 @@ begin
      where e.chegou_em >= v_ini and not coalesce(e.retorno, false)
   ),
   j as (
-    select c.*, tq.toque,
-           case when tq.toque is not null
-                then greatest(0, qs_horas_uteis(c.chegou_em, tq.toque, v_hor)) * 60
+    select c.*, least(tq.tk, tq.cl, tq.wa) as toque,
+           case when least(tq.tk, tq.cl, tq.wa) is null then null
+                when least(tq.tk, tq.cl, tq.wa) = tq.cl then 'ligacao'
+                when least(tq.tk, tq.cl, tq.wa) = tq.wa then 'whatsapp'
+                else 'tarefa' end as canal,
+           case when least(tq.tk, tq.cl, tq.wa) is not null
+                then greatest(0, qs_horas_uteis(c.chegou_em, least(tq.tk, tq.cl, tq.wa), v_hor)) * 60
                 else greatest(0, qs_horas_uteis(c.chegou_em, now(), v_hor)) * 60 end as minutos
       from c
       left join lateral (
-        select least(
+        select
           (select min(k.completed_at) from qs_tasks k
-            where k.lead_id = c.lead_id and k.status = 'concluida' and k.completed_at >= c.chegou_em),
+            where k.lead_id = c.lead_id and k.status = 'concluida' and k.completed_at >= c.chegou_em) as tk,
           (select min(l.created_at) from qs_call_logs l
-            where l.lead_id = c.lead_id and l.created_at >= c.chegou_em),
+            where l.lead_id = c.lead_id and l.created_at >= c.chegou_em) as cl,
           (select min(coalesce(m.sent_at, m.created_at)) from qs_wa_messages m
             where m.lead_id = c.lead_id and m.direction = 'out'
               and m.linha_user_id is not null and m.deleted_at is null
               and coalesce(m.status, '') <> 'failed'
-              and coalesce(m.sent_at, m.created_at) >= c.chegou_em)
-        ) as toque
+              and coalesce(m.sent_at, m.created_at) >= c.chegou_em) as wa
       ) tq on true
   ),
   -- Lead fechado (ganho/perdido) sem toque não fica "aguardando".
@@ -151,7 +156,16 @@ begin
              order by x.minutos desc)
         from (select * from jj where esperando and chegou_em >= v_hoje0 - interval '7 days'
                order by minutos desc limit 200) x
-        join sdrs s on s.id = x.sdr_id), '[]'::jsonb)
+        join sdrs s on s.id = x.sdr_id), '[]'::jsonb),
+    -- Cada cliente atendido no mês: quanto tempo levou e por onde (clique no card).
+    'atendidos', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'lead_id', x.lead_id, 'nome', x.full_name, 'sdr_id', x.sdr_id, 'sdr_nome', s.name,
+               'chegou_em', x.chegou_em, 'atendido_em', x.toque, 'canal', x.canal,
+               'minutos', round(x.minutos::numeric, 0))
+             order by x.chegou_em desc)
+        from jj x join sdrs s on s.id = x.sdr_id
+       where x.atendido and x.chegou_em >= v_mes0), '[]'::jsonb)
   ) into v_out;
 
   return v_out;
