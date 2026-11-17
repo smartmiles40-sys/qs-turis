@@ -93,27 +93,29 @@ export async function sincronizar(desdeIso) {
 }
 
 /**
- * 17/11 (Bruno): "na aba de metas do dashboard, quantos leads cada SDR está
- * trabalhando". Foto da carteira por pessoa (qs_carteira_por_dono, 0398) →
- * carteira_qs do Dashboard, que troca a foto inteira. Lista vazia não vai
- * (apagaria tudo lá por causa de um soluço aqui).
+ * 17/11 (Bruno): "na aba de metas do dashboard, quantos leads cada SDR recebeu
+ * no mês". Contagem por pessoa e mês (qs_leads_recebidos_por_mes, 0399, base
+ * qs_lead_entradas) → leads_recebidos_qs do Dashboard, que troca os meses
+ * enviados inteiros. Manda o ano corrente e o anterior (poucas dezenas de
+ * linhas). Lista vazia não vai.
  */
-export async function sincronizarCarteira() {
+export async function sincronizarRecebidos() {
   const cfg = configuracao();
-  if (!cfg) return { configurado: false, pessoas: 0 };
-  const rows = await rest('rpc/qs_carteira_por_dono', { method: 'POST', body: {} });
+  if (!cfg) return { configurado: false, linhas: 0 };
+  const desde = `${new Date().getFullYear() - 1}-01-01`;
+  const rows = await rest('rpc/qs_leads_recebidos_por_mes', { method: 'POST', body: { p_desde: desde } });
   const linhas = (Array.isArray(rows) ? rows : [])
-    .filter((r) => r.owner_id && r.nome)
+    .filter((r) => r.owner_id && r.nome && r.mes)
     .map((r) => ({
       qs_user_id: r.owner_id,
       nome: r.nome,
       papel: r.papel ?? null,
-      leads_ativos: Number(r.leads_ativos) || 0,
-      leads_trabalhando: Number(r.leads_trabalhando) || 0,
-      leads_atrasados: Number(r.leads_atrasados) || 0,
+      mes: r.mes,
+      recebidos: Number(r.recebidos) || 0,
+      novos: Number(r.novos) || 0,
     }));
-  if (!linhas.length) return { configurado: true, pessoas: 0 };
-  return { configurado: true, pessoas: await enviar(cfg, linhas, 'qs_upsert_carteira') };
+  if (!linhas.length) return { configurado: true, linhas: 0 };
+  return { configurado: true, linhas: await enviar(cfg, linhas, 'qs_upsert_leads_recebidos') };
 }
 
 export default async function handler(req, res) {
@@ -137,16 +139,16 @@ export default async function handler(req, res) {
       await pulso('dashboard-sync', { status: 'pulado', motivo: 'Faltam as envs DASHBOARD_* na Vercel.' }, { minIntervaloMs: 30 * 60_000 });
       return res.status(200).json({ ok: false, error: 'Dashboard não configurado (envs DASHBOARD_*).' });
     }
-    // A carteira não derruba as reuniões: se falhar, fica no log e segue.
-    let carteira = null;
+    // Os recebidos não derrubam as reuniões: se falhar, fica no log e segue.
+    let recebidos = null;
     try {
-      carteira = (await sincronizarCarteira()).pessoas;
+      recebidos = (await sincronizarRecebidos()).linhas;
     } catch (e) {
-      console.error('[dashboard-sync] carteira', e?.message);
-      carteira = `erro: ${e?.message || 'falhou'}`;
+      console.error('[dashboard-sync] recebidos', e?.message);
+      recebidos = `erro: ${e?.message || 'falhou'}`;
     }
     await pulso('dashboard-sync', {}, { minIntervaloMs: 15 * 60_000 });
-    return res.status(200).json({ ok: true, desde, enviadas: r.enviadas, carteira });
+    return res.status(200).json({ ok: true, desde, enviadas: r.enviadas, recebidos });
   } catch (e) {
     console.error('[dashboard-sync]', e?.message);
     await pulso('dashboard-sync', { status: 'erro', motivo: e?.message || 'falhou' });
