@@ -317,6 +317,13 @@ export default async function handler(req, res) {
   // Lê da URL também: a ponte de /api do `vite dev` não monta `req.query`.
   const com = req.query?.com ?? new URL(req.url || '/', 'http://x').searchParams.get('com');
   if (String(com || '') === 'sdr') {
+    // 17/11 (Bruno): link do Marketing (`l=` na URL ou `link` no corpo) NÃO herda
+    // a agenda do pós-live (agendamento_sdr.dias = só qui/sex). Vale seg–sex,
+    // inclusive hoje, sem o motivo obrigatório — o mesmo perfil do sdr-destinos.
+    const doMkt = codigoDoCorpo({ link: req.query?.l ?? new URL(req.url || '/', 'http://x').searchParams.get('l') ?? body0(req).link });
+    if (doMkt) {
+      return await ligacaoComSdr(req, res, { teto, maxDias: diasDaJanelaCurta(req), perfil: 'semana', diasUteis: diasUteisPedidos(req), exigeMotivo: false });
+    }
     return await ligacaoComSdr(req, res, { teto, maxDias: diasDaJanelaCurta(req), diasUteis: diasUteisPedidos(req) });
   }
   // ?com=sdr-semana (06/11): a mesma ligação, só seg–sex e com o motivo da

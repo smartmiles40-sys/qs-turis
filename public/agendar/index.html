@@ -630,6 +630,8 @@
     var rota = API + (expedicao ? (API.indexOf('?') === -1 ? '?' : '&') + 'expedicao=' + encodeURIComponent(expedicao) : '');
     if (diasPedidos) rota += (rota.indexOf('?') === -1 ? '?' : '&') + 'dias=' + diasPedidos;
     if (uteisPedidos) rota += (rota.indexOf('?') === -1 ? '?' : '&') + 'uteis=' + uteisPedidos;
+    // 17/11: o código do link do Marketing vai na grade também (a API abre seg–sex pra ele).
+    if (codigoLink) rota += (rota.indexOf('?') === -1 ? '?' : '&') + 'l=' + encodeURIComponent(codigoLink);
     var pedido = { headers: { Accept: 'application/json' } };
     // Grade pelo dono: o telefone vai no CORPO de um POST, nunca na URL.
     if (COM_SDR && estado.telefoneGrade) {
