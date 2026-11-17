@@ -18,9 +18,28 @@
 -- 1º toque = o que vier primeiro, sempre DEPOIS da chegada (mesma regra da 0353):
 --   tarefa concluída · ligação do webfone · WhatsApp enviado pela linha do SDR.
 -- Meta: qs_settings 'sla_1o_contato_min' (padrão 30).
+-- SÓ DIA DE SEMANA (Bruno, 17/11): "sábado não é pra contar o SLA". O relógio
+-- usa o work_hours com sábado e domingo desligados — lead que chega na sexta à
+-- noite ou no fim de semana começa a contar na segunda de manhã. O work_hours
+-- em si NÃO muda (ele também libera as atividades de sábado).
 -- SDR comum vê só a própria linha; gestor (qs_pode_ver_monitor) vê todos.
--- Só leitura, nada é alterado. Volta: drop function public.qs_sla_painel();
+-- Só leitura, nenhum dado é alterado. Volta: drop function public.qs_sla_painel(),
+-- public.qs_horario_sla() e trocar o texto de volta na qs_desempenho.
 -- -----------------------------------------------------------------------------
+
+-- Horário do SLA = work_hours sem sábado (6) e domingo (0).
+create or replace function public.qs_horario_sla()
+returns jsonb
+language sql
+stable security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  select case when w is null then null
+              else jsonb_set(jsonb_set(w, '{6,enabled}', 'false'::jsonb, true), '{0,enabled}', 'false'::jsonb, true) end
+    from (select (select value from qs_settings where key = 'work_hours') as w) x
+$$;
+revoke all on function public.qs_horario_sla() from public, anon;
+grant execute on function public.qs_horario_sla() to authenticated;
 
 create or replace function public.qs_sla_painel()
 returns jsonb
@@ -36,7 +55,7 @@ declare
   v_ini    timestamptz;
   v_gestor boolean := qs_pode_ver_monitor();
   v_eu     uuid := auth.uid();
-  v_hor    jsonb := (select value from qs_settings where key = 'work_hours');
+  v_hor    jsonb := qs_horario_sla();
   v_meta   numeric := coalesce((select nullif(value #>> '{}', '')::numeric from qs_settings where key = 'sla_1o_contato_min'), 30);
   v_out    jsonb;
 begin
@@ -144,3 +163,23 @@ grant execute on function public.qs_sla_painel() to authenticated;
 
 comment on function public.qs_sla_painel() is
   '0400 (17/11): SLA do 1º atendimento por SDR — hoje/semana/mês + leads aguardando o 1º toque. Fila de hoje e Desempenho leem daqui.';
+
+-- ── O KPI antigo do Desempenho (qs_desempenho, 0353) segue a mesma regra ──────
+-- Troca de texto na função VIGENTE, só no cálculo do min_1o (cotações e o resto
+-- continuam no work_hours normal). Com trava: se o trecho não estiver lá, falha.
+do $mig$
+declare
+  v_def   text := pg_get_functiondef('public.qs_desempenho(date,date)'::regprocedure);
+  v_velho text := $t$qs_horas_uteis(c.chegou_em, least(t.primeira, tq.toque), v_hor)$t$;
+  v_novo  text := $t$qs_horas_uteis(c.chegou_em, least(t.primeira, tq.toque), qs_horario_sla() /* 0400: SLA só seg–sex */)$t$;
+begin
+  if position('0400: SLA só seg–sex' in v_def) > 0 then
+    raise notice '0400 já aplicada na qs_desempenho';
+    return;
+  end if;
+  if position(v_velho in v_def) = 0 then
+    raise exception '0400: a qs_desempenho vigente não tem o trecho do min_1o esperado — conferir antes';
+  end if;
+  execute replace(v_def, v_velho, v_novo);
+end
+$mig$;
