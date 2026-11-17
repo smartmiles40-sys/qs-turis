@@ -526,7 +526,7 @@ export default function SdrLayout() {
         >
         {activeNav === "painel" && (
           <PageErrorBoundary pageName="Painel de Atividades">
-            <TasksPanel onOpenLead={openLeadDetail} />
+            <TasksPanel onOpenLead={openLeadDetail} onIrParaDesempenho={() => navigate("dashboard")} />
           </PageErrorBoundary>
         )}
         {activeNav === "leads" && (
@@ -569,7 +569,7 @@ export default function SdrLayout() {
         {activeNav === "dashboard" && (
           <PageErrorBoundary pageName="Visão Geral">
             {/* Desempenho SDR (0322/0323, spec 06/11) pra gestor e SDR; o closer segue na tela dele. */}
-            {userRole === "closer" ? <SdrDashboard /> : <DesempenhoSdr onIrParaPainel={() => navigate("painel")} />}
+            {userRole === "closer" ? <SdrDashboard /> : <DesempenhoSdr onIrParaPainel={() => navigate("painel")} onOpenLead={openLeadDetail} />}
           </PageErrorBoundary>
         )}
         {activeNav === "analises" && (

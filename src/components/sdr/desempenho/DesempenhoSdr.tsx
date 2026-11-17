@@ -13,6 +13,7 @@ import {
   type BlocoDesempenho, type Desempenho, type LinhaSdr, type PeriodoDesempenho,
 } from "@/lib/qs/desempenho";
 import OperacaoSdr from "./OperacaoSdr";
+import SlaQuadro from "@/components/sdr/sla/SlaQuadro";
 
 const CSS = `
 .dsp{--bg:#F6F6F7;--card:#FFFFFF;--card2:#F4F4F5;--text:#0A0A0B;--muted:#5B5B63;--border:#E4E4E7;--track:#ECECEF;--ink:#0A0A0B;--accent:#1D4ED8;--warn:#C2410C;--warnBg:#FFF4EC;--cancel:#A1A1AA;--p1:#0A0A0B;--p2:#1D4ED8;--p3:#71717A;--p4:#C4C4CC}
@@ -32,7 +33,7 @@ const COR_PRODUTO: Record<string, string> = { expedicao: "var(--p1)", pacote: "v
 type Pagina = "principal" | "conversao" | "operacao";
 const n = (v: number) => v.toLocaleString("pt-BR");
 
-export default function DesempenhoSdr({ onIrParaPainel }: { onIrParaPainel?: () => void }) {
+export default function DesempenhoSdr({ onIrParaPainel, onOpenLead }: { onIrParaPainel?: () => void; onOpenLead?: (leadId: string) => void }) {
   const [pagina, setPagina] = useState<Pagina>("principal");
   const [periodo, setPeriodo] = useState<PeriodoDesempenho>("mes");
   const [sdrSel, setSdrSel] = useState<string>("");
@@ -107,6 +108,9 @@ export default function DesempenhoSdr({ onIrParaPainel }: { onIrParaPainel?: () 
 
         {erro && <div className="dsp-card p-5 text-sm" style={{ color: "var(--warn)" }}>{erro}</div>}
         {!dados && !erro && <div className="dsp-card p-10 text-center text-sm dsp-mut">Carregando…</div>}
+
+        {/* SLA do 1º atendimento (0400, Bruno 17/11): hoje · semana · mês por SDR. */}
+        {pagina === "principal" && <SlaQuadro onOpenLead={onOpenLead} />}
 
         {dados && bloco && pagina === "principal" && (
           <Principal d={dados} b={bloco} linha={linhaSel} periodo={periodo} onSdr={(id) => setSdrSel(id)} onIrParaPainel={onIrParaPainel} />

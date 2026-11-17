@@ -54,11 +54,14 @@ import {
 } from "@/lib/qs/produtoGanho";
 import { criarCotacao, fetchRotas } from "@/lib/qs/produtoGanhoDados";
 import FormularioCotacao from "@/components/sdr/produto/FormularioCotacao";
+import SlaFilaHoje from "@/components/sdr/sla/SlaFilaHoje";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
 interface TasksPanelProps {
   onOpenLead: (leadId: string) => void;
+  /** Atalho do quadro de SLA pro Desempenho (semana e mês). */
+  onIrParaDesempenho?: () => void;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -385,7 +388,7 @@ function tarefaVisivelNaFila(t: Task, statusDoLead: string | undefined): boolean
   return statusDoLead !== "ganho" && statusDoLead !== "perdido";
 }
 
-export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
+export default function TasksPanel({ onOpenLead, onIrParaDesempenho }: TasksPanelProps) {
   const { currentUser } = useQsAuth();
   const chatDock = useChatAppDock();
   // MODO APARELHO (SDR, desde 03/09): as atividades de WhatsApp levam o SDR pra
@@ -4368,6 +4371,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               {monthlyBeat && <span className="qsx-msub" style={{ color: "var(--ok)" }}>Meta mensal batida</span>}
             </div>
           </div>
+
+          {/* SLA do 1º atendimento (0400, Bruno 17/11): o do dia + quem está esperando. */}
+          <SlaFilaHoje onOpenLead={onOpenLead} onVerDesempenho={onIrParaDesempenho} />
 
           {/* Ligações e mensagens por usuário (hoje) — evita depender do Bitrix/telefonia
               pra saber a produção do dia. Ligação = ligacao/ligacao_whatsapp; Mensagem =
