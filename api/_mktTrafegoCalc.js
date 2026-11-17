@@ -71,6 +71,7 @@ export const DESTINOS_BASE = [
   { chave: 'islandia', rotulo: 'Islândia', termos: ['islandia'] },
   { chave: 'turquia e grecia', rotulo: 'Turquia e Grécia', termos: ['turquia e grecia', 'turquia grecia', 'turquia'] },
   { chave: 'pacote japao', rotulo: 'Pacote Japão', termos: ['pacote japao'] },
+  { chave: 'pacote peru', rotulo: 'Pacote Peru', termos: ['pacote peru', 'peru classico'] },
   { chave: 'amazonia', rotulo: 'Amazônia', termos: ['amazonia'] },
   { chave: 'atacama', rotulo: 'Atacama', termos: ['atacama'] },
   { chave: 'cancun', rotulo: 'Cancún', termos: ['cancun', 'xcaret'] },
