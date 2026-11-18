@@ -39,6 +39,13 @@ async function pessoaEnviar(req, res) {
   if (!u?.is_active || u.role === 'marketing') return res.status(403).json({ error: 'Sem permissão.' });
   let body = req.body || {};
   if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
+  // 18/11: a mesma SIMULAÇÃO do GET pessoas-conferir, pela sessão de um admin
+  // (o CRON_SECRET é "sensitive" na Vercel e não sai no env pull). Só lê o Bitrix.
+  if (body.acao === 'pessoas-conferir') {
+    if (u.role !== 'admin') return res.status(403).json({ error: 'Só admin.' });
+    if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE na Vercel.' });
+    return res.status(200).json(await rodadaPessoas({ bx, rest, seco: true, limite: 30, pular: body.pular, orcamentoMs: 40_000 }));
+  }
   if (body.acao !== 'pessoa-enviar') return res.status(400).json({ error: 'Ação inválida.' });
   const clienteId = String(body.clienteId || '');
   if (!UUID_RE.test(clienteId)) return res.status(400).json({ error: 'Pessoa inválida.' });
