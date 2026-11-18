@@ -10,7 +10,7 @@ export interface BlocoSla {
   recebidos: number; atendidos: number; na_meta: number; fora_meta: number;
   aguardando: number; mediana_min: number | null;
 }
-export interface LinhaSla { sdr_id: string; nome: string; hoje: BlocoSla; semana: BlocoSla; mes: BlocoSla }
+export interface LinhaSla { sdr_id: string; nome: string; hoje: BlocoSla; semana: BlocoSla; mes: BlocoSla; faixa: BlocoSla }
 export interface LeadAguardando {
   lead_id: string; nome: string | null; sdr_id: string; sdr_nome: string;
   chegou_em: string; minutos: number;
@@ -24,7 +24,9 @@ export const ROTULO_CANAL: Record<CanalToque, string> = { ligacao: "Ligação", 
 
 export interface PainelSla {
   meta_min: number; gestor: boolean; gerado_em: string;
-  time: { hoje: BlocoSla; semana: BlocoSla; mes: BlocoSla };
+  time: { hoje: BlocoSla; semana: BlocoSla; mes: BlocoSla; faixa: BlocoSla };
+  /** Intervalo do bloco "faixa" (0401). faixa_ok=false = banco ainda sem a 0401. */
+  faixa_de: string | null; faixa_ate: string | null; faixa_ok: boolean;
   sdrs: LinhaSla[];
   aguardando: LeadAguardando[];
   /** Cada cliente atendido no mês (mais recente primeiro). */
@@ -41,13 +43,18 @@ const bloco = (b?: Partial<BlocoSla> | null): BlocoSla => ({
 });
 
 export function normalizarPainelSla(d: unknown): PainelSla {
-  const r = (d ?? {}) as Partial<PainelSla> & { time?: Partial<Record<PeriodoSla, Partial<BlocoSla>>> };
+  const r = (d ?? {}) as Omit<Partial<PainelSla>, "time" | "sdrs"> & {
+    time?: Partial<Record<PeriodoSla | "faixa", Partial<BlocoSla>>>;
+    sdrs?: (Partial<Record<PeriodoSla | "faixa", Partial<BlocoSla>>> & { sdr_id: string; nome: string })[];
+  };
+  const ok = !!r.time?.faixa;
   return {
     meta_min: Number(r.meta_min ?? 30),
     gestor: !!r.gestor,
     gerado_em: r.gerado_em ?? new Date().toISOString(),
-    time: { hoje: bloco(r.time?.hoje), semana: bloco(r.time?.semana), mes: bloco(r.time?.mes) },
-    sdrs: (r.sdrs ?? []).map((s) => ({ sdr_id: s.sdr_id, nome: s.nome, hoje: bloco(s.hoje), semana: bloco(s.semana), mes: bloco(s.mes) })),
+    time: { hoje: bloco(r.time?.hoje), semana: bloco(r.time?.semana), mes: bloco(r.time?.mes), faixa: bloco(r.time?.faixa ?? r.time?.mes) },
+    faixa_de: r.faixa_de ?? null, faixa_ate: r.faixa_ate ?? null, faixa_ok: ok,
+    sdrs: (r.sdrs ?? []).map((s) => ({ sdr_id: s.sdr_id, nome: s.nome, hoje: bloco(s.hoje), semana: bloco(s.semana), mes: bloco(s.mes), faixa: bloco(s.faixa ?? s.mes) })),
     aguardando: (r.aguardando ?? []).map((a) => ({ ...a, minutos: Number(a.minutos ?? 0) })),
     atendidos: (r.atendidos ?? []).map((a) => ({ ...a, minutos: Number(a.minutos ?? 0) })),
   };
@@ -104,6 +111,13 @@ export function inicioPeriodoSla(p: PeriodoSla, agora: Date = new Date()): numbe
     dia = new Date(Date.UTC(y, m - 1, d - (dow - 1))).toISOString().slice(0, 10);
   } else if (p === "mes") dia = hoje.slice(0, 8) + "01";
   return new Date(dia + "T00:00:00-03:00").getTime();
+}
+
+/** Atendidos que chegaram entre de e ate (datas SP, inclusivas). */
+export function atendidosDaFaixa(lista: LeadAtendido[], de: string, ate: string, sdrId: string | null): LeadAtendido[] {
+  const ini = new Date(de + "T00:00:00-03:00").getTime();
+  const fim = new Date(ate + "T00:00:00-03:00").getTime() + 86_400_000;
+  return lista.filter((a) => { const t = new Date(a.chegou_em).getTime(); return t >= ini && t < fim && (!sdrId || a.sdr_id === sdrId); });
 }
 
 export function atendidosDoPeriodo(lista: LeadAtendido[], p: PeriodoSla, sdrId: string | null, agora: Date = new Date()): LeadAtendido[] {

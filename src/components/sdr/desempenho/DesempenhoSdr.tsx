@@ -7,10 +7,10 @@
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import {
-  ETAPAS_FUNIL, PERIODOS_DESEMPENHO, ROTULO_FONTE, ROTULO_MOTIVO, ROTULO_PRODUTO, ROTULO_TEMP,
+  ETAPAS_FUNIL, PERIODOS_DESEMPENHO, hojeSP, ROTULO_FONTE, ROTULO_MOTIVO, ROTULO_PRODUTO, ROTULO_TEMP,
   brl, comparecimento, fetchDesempenho, horasTxt, iniciais, intervaloDesempenho, ondeVaza, passagens,
   pctTxt, pontoDeAtencao, produtosReuniao, rotuloPeriodo, taxa, taxaReagendamento, taxaSal, tempoHumano,
-  type BlocoDesempenho, type Desempenho, type LinhaSdr, type PeriodoDesempenho,
+  type BlocoDesempenho, type Desempenho, type FaixaDatas, type LinhaSdr, type PeriodoDesempenho,
 } from "@/lib/qs/desempenho";
 import OperacaoSdr from "./OperacaoSdr";
 import SlaQuadro from "@/components/sdr/sla/SlaQuadro";
@@ -35,7 +35,17 @@ const n = (v: number) => v.toLocaleString("pt-BR");
 
 export default function DesempenhoSdr({ onIrParaPainel, onOpenLead }: { onIrParaPainel?: () => void; onOpenLead?: (leadId: string) => void }) {
   const [pagina, setPagina] = useState<Pagina>("principal");
+  // Filtro ÚNICO da página (18/11): funil, KPIs e a espera do lead leem o mesmo intervalo.
   const [periodo, setPeriodo] = useState<PeriodoDesempenho>("mes");
+  const [faixa, setFaixa] = useState<FaixaDatas>(() => intervaloDesempenho("mes"));
+  const [rascunho, setRascunho] = useState<FaixaDatas>(faixa);
+  const intervalo = useMemo(() => intervaloDesempenho(periodo, faixa), [periodo, faixa]);
+  const rotPer = rotuloPeriodo(periodo, faixa);
+  const rascunhoOk = !!rascunho.de && !!rascunho.ate && rascunho.de <= rascunho.ate;
+  const escolher = (id: PeriodoDesempenho) => {
+    if (id === "personalizado") setRascunho(periodo === "personalizado" ? faixa : intervalo);
+    setPeriodo(id);
+  };
   const [sdrSel, setSdrSel] = useState<string>("");
   const [dados, setDados] = useState<Desempenho | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -44,12 +54,11 @@ export default function DesempenhoSdr({ onIrParaPainel, onOpenLead }: { onIrPara
   const carregar = useCallback(async () => {
     setCarregando(true); setErro(null);
     try {
-      const { de, ate } = intervaloDesempenho(periodo);
-      setDados(await fetchDesempenho(de, ate));
+      setDados(await fetchDesempenho(intervalo.de, intervalo.ate));
     } catch (e) {
       setErro((e as Error)?.message ?? "Não consegui carregar o desempenho.");
     } finally { setCarregando(false); }
-  }, [periodo]);
+  }, [intervalo.de, intervalo.ate]);
   useEffect(() => { void carregar(); }, [carregar]);
 
   // SDR (não gestor) vê só a própria linha: já vem filtrada do banco.
@@ -77,10 +86,25 @@ export default function DesempenhoSdr({ onIrParaPainel, onOpenLead }: { onIrPara
         </header>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Período da página">
             {PERIODOS_DESEMPENHO.map((p) => (
-              <button key={p.id} type="button" className="dsp-chip" aria-pressed={periodo === p.id} onClick={() => setPeriodo(p.id)}>{p.rotulo}</button>
+              <button key={p.id} type="button" className="dsp-chip" aria-pressed={periodo === p.id} onClick={() => escolher(p.id)}>{p.rotulo}</button>
             ))}
+            {periodo === "personalizado" && (
+              <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (rascunhoOk) setFaixa(rascunho); }}>
+                <label className="flex items-center gap-1.5 text-[13px] dsp-mut">De
+                  <input type="date" value={rascunho.de} max={hojeSP()} onChange={(e) => setRascunho((r) => ({ ...r, de: e.target.value }))}
+                    className="min-h-[40px] rounded-[10px] px-2 text-sm" style={{ border: "1px solid var(--border)", background: "var(--card)", color: "var(--text)" }} />
+                </label>
+                <label className="flex items-center gap-1.5 text-[13px] dsp-mut">até
+                  <input type="date" value={rascunho.ate} max={hojeSP()} onChange={(e) => setRascunho((r) => ({ ...r, ate: e.target.value }))}
+                    className="min-h-[40px] rounded-[10px] px-2 text-sm" style={{ border: "1px solid var(--border)", background: "var(--card)", color: "var(--text)" }} />
+                </label>
+                <button type="submit" className="dsp-chip" aria-pressed disabled={!rascunhoOk || (rascunho.de === faixa.de && rascunho.ate === faixa.ate)}>Aplicar</button>
+                {!rascunhoOk && rascunho.de && rascunho.ate && <span className="text-[12px]" style={{ color: "var(--warn)" }}>a data final vem antes da inicial</span>}
+              </form>
+            )}
+            <span className="text-[13px] dsp-mut">Mostrando {rotPer}</span>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             {dados?.gestor && (
@@ -110,10 +134,10 @@ export default function DesempenhoSdr({ onIrParaPainel, onOpenLead }: { onIrPara
         {!dados && !erro && <div className="dsp-card p-10 text-center text-sm dsp-mut">Carregando…</div>}
 
         {/* Quanto tempo o lead espera (SLA 0400, Bruno 17/11; nome novo 18/11): hoje · semana · mês por SDR. */}
-        {pagina === "principal" && <SlaQuadro onOpenLead={onOpenLead} />}
+        {pagina === "principal" && <SlaQuadro de={intervalo.de} ate={intervalo.ate} rotPer={rotPer} onOpenLead={onOpenLead} />}
 
         {dados && bloco && pagina === "principal" && (
-          <Principal d={dados} b={bloco} linha={linhaSel} periodo={periodo} onSdr={(id) => setSdrSel(id)} onIrParaPainel={onIrParaPainel} />
+          <Principal d={dados} b={bloco} linha={linhaSel} rotPer={rotPer} onSdr={(id) => setSdrSel(id)} onIrParaPainel={onIrParaPainel} />
         )}
         {dados && bloco && pagina === "conversao" && <Conversao d={dados} b={bloco} linha={linhaSel} />}
         {dados && pagina === "operacao" && <OperacaoSdr de={dados.de} ate={dados.ate} sdrId={linhaSel?.sdr_id ?? null} velocidade={dados.velocidade} gestor={dados.gestor} />}
@@ -193,8 +217,8 @@ function Trilho({ v, cor = "var(--ink)", altura = 10 }: { v: number | null; cor?
 
 // ── Página 1 · Principal ─────────────────────────────────────────────────────
 
-function Principal({ d, b, linha, periodo, onSdr, onIrParaPainel }: {
-  d: Desempenho; b: BlocoDesempenho; linha: LinhaSdr | null; periodo: PeriodoDesempenho;
+function Principal({ d, b, linha, rotPer, onSdr, onIrParaPainel }: {
+  d: Desempenho; b: BlocoDesempenho; linha: LinhaSdr | null; rotPer: string;
   onSdr: (id: string) => void; onIrParaPainel?: () => void;
 }) {
   const r = b.reunioes;
@@ -225,7 +249,7 @@ function Principal({ d, b, linha, periodo, onSdr, onIrParaPainel }: {
             <div className="text-[13px] dsp-mut">feitas × programadas</div>
           </div>
         </div>
-        <Kpi rotulo={`Reuniões ${rotuloPeriodo(periodo)}`} valor={n(r.marcadas)} sub="marcadas pelos SDRs · lead distinto, remarcação não conta 2×" />
+        <Kpi rotulo={`Reuniões ${rotPer}`} valor={n(r.marcadas)} sub="marcadas pelos SDRs · lead distinto, remarcação não conta 2×" />
         <Kpi rotulo="Reuniões hoje" valor={n(b.reunioes_hoje)}
           sub={`${n(b.reunioes_hoje_confirmadas)} confirmadas · ${n(b.por_confirmar)} por confirmar até amanhã`}>
           <div className="flex gap-1">
@@ -234,13 +258,13 @@ function Principal({ d, b, linha, periodo, onSdr, onIrParaPainel }: {
           </div>
         </Kpi>
         <Kpi rotulo="Cotações de aéreo" valor={n(b.cotacoes.entregues_hoje)} sub={<>entregues hoje · SLA de entrega {horasTxt(b.cotacoes.sla_mediana_h)}</>}
-          chip={`${n(b.cotacoes.aprovadas)} aprovadas ${rotuloPeriodo(periodo)}`} alerta={b.cotacoes.vencidas > 0} />
+          chip={`${n(b.cotacoes.aprovadas)} aprovadas ${rotPer}`} alerta={b.cotacoes.vencidas > 0} />
         <Kpi escuro rotulo="For-cash gerado" valor={brl(forcashTotal)}
           sub={<>Reuniões {brl(r.forcash_reunioes)} · próprio (aéreo) {brl(b.cotacoes.forcash_proprio)}</>}
           chip={r.forcash_sem_valor > 0 ? `${r.forcash_sem_valor} SAL sem valor cadastrado` : undefined} />
       </section>
 
-      <Secao titulo={`O que aconteceu com as ${n(r.marcadas)} reuniões ${rotuloPeriodo(periodo)}`} direita="R.R = reunião realizada">
+      <Secao titulo={`O que aconteceu com as ${n(r.marcadas)} reuniões ${rotPer}`} direita="R.R = reunião realizada">
         <Barra partes={[
           { v: r.rr, cor: "var(--ink)", rotulo: "R.R" }, { v: r.futuras, cor: "var(--accent)", rotulo: "Futuras" },
           { v: r.no_show, cor: "var(--warn)", rotulo: "No-show" }, { v: r.canceladas, cor: "var(--cancel)", rotulo: "Canceladas" },
@@ -283,7 +307,7 @@ function Principal({ d, b, linha, periodo, onSdr, onIrParaPainel }: {
         <section aria-label="Desempenho por SDR" className="flex flex-col gap-3">
           <h2 className="m-0 text-[18px] font-semibold">Por SDR</h2>
           <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
-            {d.sdrs.map((s) => <CardSdr key={s.sdr_id} s={s} d={d} periodo={periodo} onAbrir={() => onSdr(s.sdr_id)} />)}
+            {d.sdrs.map((s) => <CardSdr key={s.sdr_id} s={s} d={d} rotPer={rotPer} onAbrir={() => onSdr(s.sdr_id)} />)}
           </div>
         </section>
       )}
@@ -316,7 +340,7 @@ function Acao({ n: v, titulo, sub, alerta, onClick }: { n: number; titulo: strin
   return onClick ? <button type="button" className={cls} style={st} onClick={onClick}>{corpo}</button> : <div className={cls} style={st}>{corpo}</div>;
 }
 
-function CardSdr({ s, d, periodo, onAbrir }: { s: LinhaSdr; d: Desempenho; periodo: PeriodoDesempenho; onAbrir: () => void }) {
+function CardSdr({ s, d, rotPer, onAbrir }: { s: LinhaSdr; d: Desempenho; rotPer: string; onAbrir: () => void }) {
   const r = s.reunioes;
   const prods = produtosReuniao(s.produtos);
   const ativ = taxa(s.atividades.concluidas, s.atividades.programadas);
@@ -330,7 +354,7 @@ function CardSdr({ s, d, periodo, onAbrir }: { s: LinhaSdr; d: Desempenho; perio
         </div>
       </button>
       <div className="grid grid-cols-3 gap-2">
-        <MiniBox rotulo={`Reuniões ${rotuloPeriodo(periodo).replace("do ", "").replace("da ", "").replace("de ", "")}`} valor={n(r.marcadas)} />
+        <MiniBox rotulo={`Reuniões ${rotPer.replace("do ", "").replace("da ", "").replace("de ", "")}`} valor={n(r.marcadas)} />
         <MiniBox rotulo="Reuniões hoje" valor={n(s.reunioes_hoje)} />
         <MiniBox rotulo="For-cash" valor={brl(r.forcash_reunioes + s.cotacoes.forcash_proprio)} pequeno />
       </div>

@@ -7,7 +7,7 @@
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
 import {
-  ROTULO_CANAL, atendidosDoPeriodo, minutosTxt, tomEspera,
+  ROTULO_CANAL, atendidosDaFaixa, atendidosDoPeriodo, minutosTxt, tomEspera,
   type PainelSla, type PeriodoSla, type TomSla,
 } from "@/lib/qs/sla";
 
@@ -44,8 +44,10 @@ const CSS = `
 
 type Ordem = "recentes" | "demorados";
 
-export default function SlaDetalhe({ painel, onFechar, onOpenLead, periodoInicial = "hoje", sdrInicial = "" }: {
+export default function SlaDetalhe({ painel, onFechar, onOpenLead, periodoInicial = "hoje", sdrInicial = "", faixa }: {
   painel: PainelSla;
+  /** Desempenho (18/11): intervalo do filtro da página — some a escolha Hoje/Semana/Mês daqui. */
+  faixa?: { de: string; ate: string; rotulo: string };
   onFechar: () => void;
   onOpenLead?: (leadId: string) => void;
   periodoInicial?: PeriodoSla;
@@ -63,9 +65,9 @@ export default function SlaDetalhe({ painel, onFechar, onOpenLead, periodoInicia
   }, [onFechar]);
 
   const atendidos = useMemo(() => {
-    const l = atendidosDoPeriodo(painel.atendidos, periodo, sdr || null);
+    const l = faixa ? atendidosDaFaixa(painel.atendidos, faixa.de, faixa.ate, sdr || null) : atendidosDoPeriodo(painel.atendidos, periodo, sdr || null);
     return ordem === "demorados" ? [...l].sort((a, b) => b.minutos - a.minutos) : l;
-  }, [painel.atendidos, periodo, sdr, ordem]);
+  }, [painel.atendidos, periodo, sdr, ordem, faixa]);
   // Quem ainda espera aparece em qualquer período: é o que precisa de ação agora.
   const esperando = useMemo(() => painel.aguardando.filter((a) => !sdr || a.sdr_id === sdr), [painel.aguardando, sdr]);
   const noPrazo = atendidos.filter((a) => a.minutos <= meta).length;
@@ -85,9 +87,11 @@ export default function SlaDetalhe({ painel, onFechar, onOpenLead, periodoInicia
 
         <div className="slad-corpo">
           <div className="flex flex-wrap items-center gap-2">
-            {PERIODOS.map((p) => (
-              <button key={p.id} type="button" className="slad-chip" aria-pressed={periodo === p.id} onClick={() => setPeriodo(p.id)}>{p.rot}</button>
-            ))}
+            {faixa
+              ? <span className="text-[13px] font-semibold">Leads que chegaram {faixa.rotulo}</span>
+              : PERIODOS.map((p) => (
+                <button key={p.id} type="button" className="slad-chip" aria-pressed={periodo === p.id} onClick={() => setPeriodo(p.id)}>{p.rot}</button>
+              ))}
             {painel.gestor && painel.sdrs.length > 1 && (
               <select value={sdr} onChange={(e) => setSdr(e.target.value)} className="slad-chip" aria-label="Filtrar por SDR">
                 <option value="">Time todo</option>

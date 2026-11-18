@@ -29,22 +29,31 @@ export async function fetchDesempenho(de: string, ate: string): Promise<Desempen
 
 // ── Período ──────────────────────────────────────────────────────────────────
 
-export type PeriodoDesempenho = "hoje" | "semana" | "mes" | "mes_passado";
+// Um filtro só pra página inteira (Bruno, 18/11): Hoje · Semana · Mês · Personalizado.
+// A espera do lead (SLA) e o funil leem o MESMO intervalo.
+export type PeriodoDesempenho = "hoje" | "semana" | "mes" | "personalizado";
+export interface FaixaDatas { de: string; ate: string }
 export const PERIODOS_DESEMPENHO: { id: PeriodoDesempenho; rotulo: string }[] = [
   { id: "hoje", rotulo: "Hoje" },
   { id: "semana", rotulo: "Semana" },
-  { id: "mes", rotulo: "Mês atual" },
-  { id: "mes_passado", rotulo: "Mês passado" },
+  { id: "mes", rotulo: "Mês" },
+  { id: "personalizado", rotulo: "Personalizado" },
 ];
-export function intervaloDesempenho(p: PeriodoDesempenho): { de: string; ate: string } {
-  if (p === "hoje") {
-    const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-    return { de: hoje, ate: hoje };
-  }
+export const hojeSP = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+export function intervaloDesempenho(p: PeriodoDesempenho, faixa?: FaixaDatas | null): FaixaDatas {
+  if (p === "hoje") { const h = hojeSP(); return { de: h, ate: h }; }
+  if (p === "personalizado") return faixa ?? intervaloFunil("mes");
   return intervaloFunil(p);
 }
-export const rotuloPeriodo = (p: PeriodoDesempenho) =>
-  ({ hoje: "de hoje", semana: "da semana", mes: "do mês", mes_passado: "do mês passado" })[p];
+const dm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+/** "de hoje", "da semana", "do mês" ou "de 01/11 a 15/11". */
+export function rotuloPeriodo(p: PeriodoDesempenho, faixa?: FaixaDatas | null): string {
+  if (p === "personalizado") {
+    const f = faixa ?? intervaloFunil("mes");
+    return f.de === f.ate ? `de ${dm(f.de)}` : `de ${dm(f.de)} a ${dm(f.ate)}`;
+  }
+  return ({ hoje: "de hoje", semana: "da semana", mes: "do mês" } as const)[p];
+}
 
 // ── Página 3 · Operação (0323) ───────────────────────────────────────────────
 
