@@ -1,7 +1,7 @@
 // SLA do 1º atendimento (src/lib/qs/slaContas.ts, 0400): as contas, sem rede.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { minutosTxt, normalizarPainelSla, pctNaMeta, tomEspera, tomSla } from "../../src/lib/qs/slaContas.ts";
+import { farolSla, minutosTxt, normalizarPainelSla, pctNaMeta, tomEspera, tomSla } from "../../src/lib/qs/slaContas.ts";
 
 const b = (x: Partial<{ recebidos: number; atendidos: number; na_meta: number; fora_meta: number; aguardando: number; mediana_min: number | null }>) =>
   ({ recebidos: 0, atendidos: 0, na_meta: 0, fora_meta: 0, aguardando: 0, mediana_min: null, ...x });
@@ -60,4 +60,11 @@ test("lista de atendidos por período (semana começa na segunda, fuso SP) e SDR
   assert.equal(atendidosDoPeriodo(lista, "hoje", null, agora).length, 1); // 02:30Z = 16/11 23:30 em SP
   assert.equal(atendidosDoPeriodo(lista, "semana", null, agora).length, 3);
   assert.equal(atendidosDoPeriodo(lista, "mes", "x", agora).length, 3);
+});
+
+test("farol: Bom / Médio / Ruim pelo mesmo tom do quadro", () => {
+  assert.equal(farolSla(b({ na_meta: 9, fora_meta: 1, mediana_min: 12 }), 30), "Bom");
+  assert.equal(farolSla(b({ na_meta: 6, fora_meta: 4, mediana_min: 20 }), 30), "Médio");
+  assert.equal(farolSla(b({ na_meta: 9, fora_meta: 1, mediana_min: 45 }), 30), "Ruim");
+  assert.equal(farolSla(b({}), 30), "Sem dados");
 });

@@ -69,6 +69,10 @@ export function tomSla(b: BlocoSla, meta: number): TomSla {
   return "ok";
 }
 
+/** Farol do atendimento (sugestão do Everton, 18/11): o mesmo tom em palavra. */
+export const ROTULO_FAROL: Record<TomSla, string> = { ok: "Bom", warn: "Médio", danger: "Ruim", neutro: "Sem dados" };
+export const farolSla = (b: BlocoSla, meta: number): string => ROTULO_FAROL[tomSla(b, meta)];
+
 /** Tom de um lead esperando: verde até 2/3 da meta, amarelo até a meta, vermelho depois. */
 export function tomEspera(minutos: number, meta: number): TomSla {
   if (minutos > meta) return "danger";
