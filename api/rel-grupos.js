@@ -26,7 +26,7 @@
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { guardarMidia } from './_waMidia.js';
 import { quemChama } from './_relWa.js';
-import { INSTANCIA, evo, ehGrupo, safeParse, grupoLiberado, chaveDe, meusIds, assinatura, gravarMsg } from './_relGruposEvo.js';
+import { INSTANCIA, evo, ehGrupo, safeParse, grupoLiberado, chaveDe, meusIds, nomeDoTopo, comNome, gravarMsg } from './_relGruposEvo.js';
 import { atualizarGrupos, gravarParticipantes, sincronizarGrupos, rodizioInfo } from './_relGruposSync.js';
 import { acaoMais, enviarAgendadas, agendadasLigadas } from './_relGruposMais.js';
 import { gravarPrivado, varrerPrivado } from './_relGruposPrivado.js';
@@ -370,8 +370,8 @@ export default async function handler(req, res) {
     const bytes = urlSubida ? null : Buffer.from(String(body.dataBase64 || ''), 'base64');
     if (bytes && (!bytes.length || bytes.length > 3 * 1024 * 1024)) return res.status(400).json({ error: 'Arquivo vazio ou maior que 3 MB.' });
     const legenda = String(body.legenda || '').trim().slice(0, 1000);
-    const nome = assinatura(u);
-    const caption = legenda ? `*${nome}:*\n${legenda}` : `*${nome}*`;
+    const nome = await nomeDoTopo(u);
+    const caption = comNome(nome, legenda);
     const citada = await citadaDe(body.respondendoA, jid);
     let r;
     try { r = await enviarImagemNoGrupo(jid, urlSubida || bytes.toString('base64'), mime, mediatype === 'audio' ? '' : caption, String(body.fileName || 'arquivo'), mediatype, citada); }
@@ -426,8 +426,8 @@ export default async function handler(req, res) {
     if (Date.now() - new Date(m.criado_em).getTime() > 15 * 60_000) return res.status(400).json({ error: 'O WhatsApp só deixa editar até 15 minutos depois de enviar.' });
     const novo = String(body.texto || '').trim();
     if (!novo) return res.status(400).json({ error: 'Mensagem vazia.' });
-    const nome = assinatura(u);
-    const final = `*${nome}:*\n${novo}`;
+    const nome = await nomeDoTopo(u);
+    const final = comNome(nome, novo);
     try {
       await grupoLiberado(m.grupo_jid);
       await evo(`/chat/updateMessage/${encodeURIComponent(INSTANCIA())}`, { method: 'POST', body: { number: m.grupo_jid, key: { remoteJid: m.grupo_jid, fromMe: true, id: m.msg_id }, text: final } });
@@ -472,8 +472,8 @@ export default async function handler(req, res) {
     if (!ehGrupo(jid)) return res.status(400).json({ error: 'Só dá pra mandar em grupo.' });
     if (!texto) return res.status(400).json({ error: 'Mensagem vazia.' });
     if (texto.length > MAX_TEXTO) return res.status(400).json({ error: 'Mensagem longa demais.' });
-    const nome = assinatura(u);
-    const final = `*${nome}:*\n${texto}`;
+    const nome = await nomeDoTopo(u);
+    const final = comNome(nome, texto);
     const citada = await citadaDe(body.respondendoA, jid);
     const todos = body.todos === true;
     // @: só dígitos de telefone; o texto já leva "@5511…" (é assim que o WhatsApp mostra o nome)

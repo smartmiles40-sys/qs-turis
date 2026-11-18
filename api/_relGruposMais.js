@@ -21,7 +21,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
-import { evo, inst, ehGrupo, grupoLiberado, assinatura, registrarSaida } from './_relGruposEvo.js';
+import { evo, inst, ehGrupo, grupoLiberado, nomeDoTopo, comNome, registrarSaida } from './_relGruposEvo.js';
 import { lerInfoDoGrupo } from './_relGruposSync.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -88,8 +88,9 @@ async function mandar(jid, { texto, url, mime, fileName, todos = false, mencoes 
 /** Manda uma agendada. Usada pelo cron. */
 async function enviarAgendada(a) {
   await grupoLiberado(a.grupo_jid);
-  const nome = a.assinatura || 'Relacionamento';
-  const final = a.texto ? `*${nome}:*\n${a.texto}` : `*${nome}*`;
+  // assinatura '' = agendada por quem manda sem nome (18/11); null (antigas) = 'Relacionamento'.
+  const nome = a.assinatura === '' ? '' : (a.assinatura || 'Relacionamento');
+  const final = comNome(nome, a.texto);
   const mime = a.anexo_url ? (a.anexo_mime || mimeDe(a.anexo_url)) : null;
   const { r, mediatype } = await mandar(a.grupo_jid, { texto: final, url: a.anexo_url, mime, fileName: a.anexo_nome, todos: a.mencionar_todos });
   const msgId = r?.key?.id || null;
@@ -231,7 +232,7 @@ export async function acaoMais(acao, body, u, res) {
     if (!m || m.apagada_em) { res.status(404).json({ error: 'Mensagem não encontrada.' }); return true; }
     const ASS = /^\*[^*\n]{1,80}:\*\n/;
     const corpo = String(m.texto || '').replace(ASS, '');
-    const final = `*${assinatura(u)}:*\n_↪ Encaminhada_${corpo ? `\n${corpo}` : ''}`;
+    const final = comNome(await nomeDoTopo(u), `_↪ Encaminhada_${corpo ? `\n${corpo}` : ''}`);
     const resultado = [];
     for (const destino of destinos) {
       try {
@@ -303,7 +304,7 @@ export async function acaoMais(acao, body, u, res) {
     const r = await rest('rel_wa_grupo_agendadas', {
       method: 'POST', prefer: 'return=representation',
       body: {
-        grupo_jid: jid, texto, enviar_em: quando.toISOString(), criado_por: u.id, assinatura: assinatura(u),
+        grupo_jid: jid, texto, enviar_em: quando.toISOString(), criado_por: u.id, assinatura: await nomeDoTopo(u),
         mencionar_todos: !!body.todos,
         ...(url ? { anexo_url: url, anexo_nome: String(body.fileName || 'arquivo').slice(0, 200), anexo_mime: String(body.mimeType || mimeDe(url)).split(';')[0].toLowerCase() } : {}),
       },

@@ -29,6 +29,7 @@ import { enviarTexto, enviarTemplate, enviarMidia, subirMidiaBytes, marcarComoLi
 import { resolverModeloMeta } from './_waSaida.js';
 import { guardarMidia } from './_waMidia.js';
 import { gravarRel } from './_relEntrada.js';
+import { enviaSemNome } from './_relGruposEvo.js';
 import { quemAtende, numeroDoRelacionamento } from './_relWa.js';
 
 const MAX_TEXTO = 4000;
@@ -330,7 +331,8 @@ export default async function handler(req, res) {
   // colocar Tainara Vasconcelos, sempre manda com o nome cadastrado lá").
   // O primeiro nome fica só pra reação.
   const nomeAssinatura = String(u.name || '').trim().replace(/\s+/g, ' ') || 'Relacionamento';
-  const assinar = async (t) => ((await lerAssinatura()) ? `*${nomeAssinatura}:*\n${t}` : t);
+  // Quem está em rel_config.assinatura.sem_nome (a Jacqueline, 18/11) manda sem o nome.
+  const assinar = async (t) => ((await lerAssinatura()) && !(await enviaSemNome(u)) ? `*${nomeAssinatura}:*\n${t}` : t);
   const gravar = (extra) => gravarRel({
     phoneId: alvo.phoneId, telefone: alvo.telefone, direcao: 'out', origem: 'qs',
     autorId: u.id, autorNome: u.name, status: 'sent', ...extra,

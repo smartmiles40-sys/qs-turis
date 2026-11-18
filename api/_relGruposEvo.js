@@ -65,6 +65,25 @@ export function chaveDe(m) {
 /** "*Nome:*\n" — tudo que sai pelo QS vai assinado com o nome de quem mandou. */
 export const assinatura = (u) => String(u?.name || '').trim().replace(/\s+/g, ' ') || 'Relacionamento';
 
+// ── Quem manda SEM o nome (Bruno, 18/11) ──
+// A Jacqueline (diretora) escreve aos clientes sem aparecer o nome dela. A lista
+// mora em rel_config (chave 'assinatura', valor.sem_nome = [ids de qs_users]) e
+// vale pra conversa individual (rel-wa.js) e pros grupos.
+export async function enviaSemNome(u) {
+  if (!u?.id) return false;
+  const r = await rest('rel_config?select=valor&chave=eq.assinatura&limit=1').catch(() => null);
+  const lista = r?.[0]?.valor?.sem_nome;
+  return Array.isArray(lista) && lista.includes(u.id);
+}
+
+/** O nome que vai no topo da mensagem; '' = esta pessoa manda sem nome. */
+export async function nomeDoTopo(u) {
+  return (await enviaSemNome(u)) ? '' : assinatura(u);
+}
+
+/** "*Nome:*\ntexto" — ou só o texto quando o nome é ''. */
+export const comNome = (nome, texto) => (nome ? (texto ? `*${nome}:*\n${texto}` : `*${nome}*`) : String(texto || ''));
+
 /**
  * Grava/atualiza mensagem de grupo pelo msg_id. Se o banco ainda não tem as
  * colunas da 0219 (status, encaminhada), grava sem elas em vez de perder a mensagem.
