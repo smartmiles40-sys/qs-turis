@@ -50,7 +50,7 @@ export default function SlaFilaHoje({ onOpenLead }: { onOpenLead: (leadId: strin
         title="Clique para ver o tempo de resposta de cada lead">
         <span className="qsx-mlab">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ color: tom === "neutro" ? "var(--info)" : COR[tom] }}><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2 2M9 2h6" /></svg>
-          SLA 1º atendimento
+          Lead esperando
         </span>
         <span className="qsx-mval" style={{ color: COR[tom] }}>
           {hoje ? minutosTxt(hoje.mediana_min) : erro ? "—" : "…"}

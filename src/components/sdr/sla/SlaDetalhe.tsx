@@ -13,8 +13,17 @@ import {
 
 const COR: Record<TomSla, string> = { ok: "var(--ok)", warn: "var(--warn)", danger: "var(--danger)", neutro: "var(--muted)" };
 const PERIODOS: { id: PeriodoSla; rot: string }[] = [{ id: "hoje", rot: "Hoje" }, { id: "semana", rot: "Semana" }, { id: "mes", rot: "Mês" }];
-const dataHora = (iso: string) =>
-  new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+// Com dia da semana: o tempo conta só seg–sex no expediente, então pra refazer a
+// conta à mão é preciso saber se passou por noite ou fim de semana.
+const dataHora = (iso: string) => {
+  const d = new Date(iso);
+  const sem = d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo", weekday: "short" }).replace(".", "");
+  const resto = d.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", "");
+  return `${sem} ${resto}`;
+};
+/** Diferença de relógio (24h, com noite e fim de semana) — pra comparar com o tempo útil. */
+const corridoMin = (de: string, ate: string) => Math.max(0, (new Date(ate).getTime() - new Date(de).getTime()) / 60000);
+const corridoTxt = (min: number) => (min < 60 ? `${Math.round(min)} min` : min < 48 * 60 ? minutosTxt(min) : `${Math.floor(min / 1440)}d ${Math.floor((min % 1440) / 60)}h`);
 
 const CSS = `
 .slad-fundo{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto}
@@ -68,8 +77,8 @@ export default function SlaDetalhe({ painel, onFechar, onOpenLead, periodoInicia
       <div className="slad" role="dialog" aria-modal="true" aria-label="Tempo de atendimento de cada cliente" onClick={(e) => e.stopPropagation()}>
         <div className="slad-cab">
           <div>
-            <div className="text-[17px] font-bold">Tempo do 1º atendimento, cliente a cliente</div>
-            <div className="slad-sub">Tempo útil (seg–sex, expediente) da chegada até a 1ª ligação, WhatsApp ou tarefa concluída · meta {minutosTxt(meta)}</div>
+            <div className="text-[17px] font-bold">Quanto cada lead esperou, cliente a cliente</div>
+            <div className="slad-sub">Da chegada até a 1ª interação do SDR (ligação, WhatsApp ou tarefa concluída). "Espera útil" conta só seg–sex no expediente; "relógio" é a diferença direta entre as duas horas · meta {minutosTxt(meta)}</div>
           </div>
           <button type="button" className="slad-chip" onClick={onFechar} aria-label="Fechar">Fechar</button>
         </div>
@@ -93,7 +102,7 @@ export default function SlaDetalhe({ painel, onFechar, onOpenLead, periodoInicia
 
           {esperando.length > 0 && (
             <div className="flex flex-col gap-1">
-              <div className="text-[13px] font-semibold" style={{ color: "var(--danger)" }}>Ainda sem 1º atendimento</div>
+              <div className="text-[13px] font-semibold" style={{ color: "var(--danger)" }}>Ainda sem nenhuma interação</div>
               <table>
                 <thead><tr><th>Cliente</th>{painel.gestor && <th>SDR</th>}<th>Chegou</th><th>Esperando há</th></tr></thead>
                 <tbody>
@@ -128,11 +137,11 @@ export default function SlaDetalhe({ painel, onFechar, onOpenLead, periodoInicia
                         Chegou{ordem === "recentes" ? " ↓" : ""}
                       </button>
                     </th>
-                    <th className="slad-esconde">1º contato</th>
+                    <th>1ª interação</th>
                     <th className="slad-esconde">Por onde</th>
                     <th>
                       <button type="button" className="slad-th-btn" onClick={() => setOrdem("demorados")} aria-pressed={ordem === "demorados"}>
-                        Tempo{ordem === "demorados" ? " ↓" : ""}
+                        Espera útil{ordem === "demorados" ? " ↓" : ""}
                       </button>
                     </th>
                   </tr>
@@ -145,9 +154,12 @@ export default function SlaDetalhe({ painel, onFechar, onOpenLead, periodoInicia
                         <td className="font-medium">{a.nome || "Sem nome"}</td>
                         {painel.gestor && <td>{a.sdr_nome}</td>}
                         <td>{dataHora(a.chegou_em)}</td>
-                        <td className="slad-esconde">{dataHora(a.atendido_em)}</td>
+                        <td>{dataHora(a.atendido_em)}</td>
                         <td className="slad-esconde">{ROTULO_CANAL[a.canal] ?? a.canal}</td>
-                        <td><b style={{ color: COR[t] }}>{minutosTxt(a.minutos)}</b></td>
+                        <td>
+                          <b style={{ color: COR[t] }}>{minutosTxt(a.minutos)}</b>
+                          <div className="slad-sub">relógio {corridoTxt(corridoMin(a.chegou_em, a.atendido_em))}</div>
+                        </td>
                       </tr>
                     );
                   })}

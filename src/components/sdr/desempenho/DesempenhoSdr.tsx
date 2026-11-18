@@ -109,7 +109,7 @@ export default function DesempenhoSdr({ onIrParaPainel, onOpenLead }: { onIrPara
         {erro && <div className="dsp-card p-5 text-sm" style={{ color: "var(--warn)" }}>{erro}</div>}
         {!dados && !erro && <div className="dsp-card p-10 text-center text-sm dsp-mut">Carregando…</div>}
 
-        {/* SLA do 1º atendimento (0400, Bruno 17/11): hoje · semana · mês por SDR. */}
+        {/* Quanto tempo o lead espera (SLA 0400, Bruno 17/11; nome novo 18/11): hoje · semana · mês por SDR. */}
         {pagina === "principal" && <SlaQuadro onOpenLead={onOpenLead} />}
 
         {dados && bloco && pagina === "principal" && (
@@ -209,7 +209,7 @@ function Principal({ d, b, linha, periodo, onSdr, onIrParaPainel }: {
   return (
     <>
       <section aria-label="Indicadores principais" className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
-        <Kpi rotulo="SLA do 1º contato" valor={tempoHumano(b.funil.sla_mediana_min)}
+        <Kpi rotulo="Espera do lead" valor={tempoHumano(b.funil.sla_mediana_min)}
           sub={`mediana em horas úteis · meta ${tempoHumano(d.meta_sla_min)}`}
           chip={`${pctTxt(slaNaMeta)} dentro da meta`} alerta={slaNaMeta !== null && slaNaMeta < 0.5} />
         <Kpi rotulo="Leads em trabalho" valor={n(b.cadencia.em_trabalho)} sub="em cadência de FUP agora"
@@ -360,7 +360,7 @@ function CardSdr({ s, d, periodo, onAbrir }: { s: LinhaSdr; d: Desempenho; perio
         ))}
       </div>
       <div className="flex items-center justify-between pt-3 text-[13px]" style={{ borderTop: "1px solid var(--border)" }}>
-        <span className="dsp-mut">SLA do 1º contato (mediana)</span><span className="text-[15px] font-bold">{tempoHumano(s.funil.sla_mediana_min)}</span>
+        <span className="dsp-mut">Espera do lead (típico)</span><span className="text-[15px] font-bold">{tempoHumano(s.funil.sla_mediana_min)}</span>
       </div>
       <div className="rounded-[10px] px-3.5 py-3 text-[13px] leading-snug" style={{ background: "var(--warnBg)" }}>
         <strong style={{ color: "var(--warn)" }}>Atenção</strong> · {pontoDeAtencao(s, d.time, d.sdrs.length)}

@@ -83,12 +83,12 @@ export default function SlaQuadro({ onOpenLead }: { onOpenLead?: (leadId: string
   const estourados = p.aguardando.filter((a) => a.minutos > meta);
 
   return (
-    <section className="dsp-card flex flex-col gap-4 p-5" aria-label="SLA do primeiro atendimento por SDR">
+    <section className="dsp-card flex flex-col gap-4 p-5" aria-label="Quanto tempo o lead espera pelo SDR">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="dsp-lbl">SLA do 1º atendimento</div>
+          <div className="dsp-lbl">Quanto tempo o lead espera pelo SDR</div>
           <div className="mt-1 text-[13px] dsp-mut">
-            Tempo útil da chegada do lead até a 1ª ligação, WhatsApp ou tarefa concluída (mediana). Meta: <b>{minutosTxt(meta)}</b>.
+            Da chegada do lead até a 1ª interação do SDR (ligação, WhatsApp ou tarefa concluída), contando só seg–sex no expediente. Tempo típico (metade dos leads espera menos que isso). Meta: <b>{minutosTxt(meta)}</b>.
             {" "}"No prazo" conta também quem ainda espera e já passou da meta.
           </div>
         </div>
@@ -155,7 +155,7 @@ export default function SlaQuadro({ onOpenLead }: { onOpenLead?: (leadId: string
       {p.aguardando.length > 0 && (
         <div className="flex flex-col gap-2">
           <div className="text-[13px] font-semibold">
-            Esperando o 1º atendimento agora: {p.aguardando.length}
+            Esperando a 1ª interação agora: {p.aguardando.length}
             {estourados.length > 0 && <span style={{ color: COR.danger }}> · {estourados.length} fora do prazo</span>}
           </div>
           <div className="flex flex-wrap gap-2">
