@@ -68,6 +68,7 @@ import { EnviarFinanceiroModal, StatusNoFinanceiro } from "../../fin/EnviarFinan
 import { devolverConversa } from "../../fin/lib/atendimentos";
 import NovaSolicitacao from "@/solicitacoes/NovaSolicitacao";
 import { PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
+import { nomeWhatsNaoBate } from "../lib/nomeWhatsapp";
 
 export type SetorAtendimento = "relacionamento" | "financeiro";
 
@@ -107,6 +108,8 @@ function useRepetir(fn: () => unknown, ms: number) {
 const semNumero = (t: string | null | undefined) => String(t || "").startsWith("lid:");
 const foneDaConversa = (t: string) => (semNumero(t) ? "sem número identificado" : formatarTelefone(t));
 const nomeDa = (c: Conversa) => c.cliente_nome || c.nome_contato || foneDaConversa(c.telefone);
+/** 18/11: a ficha ligada é de uma pessoa e o perfil do WhatsApp diz outra (mãe×filha, casal). */
+const fichaSuspeita = (c: Conversa) => !!c.cliente_id && nomeWhatsNaoBate(c.nome_contato, c.cliente_nome);
 
 /** Campos da 0231 (cópia da Evolution). Opcionais: a tela funciona sem a migration. */
 type GrupoCitado = { jid: string; nome?: string | null; texto?: string | null };
@@ -268,7 +271,10 @@ function Lista({ setor, todas, busca, setBusca, buscaRef, conversas, selecionada
                 <AvatarWa nome={nomeDa(c)} tamanho={49} />
                 <span className="flex-1 min-w-0 py-3 pr-3" style={{ borderBottom: "1px solid var(--wa-line)" }}>
                   <span className="flex items-baseline gap-2">
-                    <span className="flex-1 truncate text-[16px]" style={{ color: "var(--wa-txt)" }}>{nomeDa(c)}</span>
+                    <span className="flex-1 truncate text-[16px]" style={{ color: "var(--wa-txt)" }}>
+                      {fichaSuspeita(c) && <span title={`No WhatsApp: ${c.nome_contato} — confira se a ficha é da pessoa certa`} aria-label="Nome do WhatsApp diferente da ficha" style={{ color: "var(--warn-ink)" }}>⚠ </span>}
+                      {nomeDa(c)}
+                    </span>
                     <span className="text-[12px] flex-shrink-0" style={{ color: nl && !c.silenciada ? "var(--wa-green-ink)" : "var(--wa-meta)", fontWeight: nl ? 600 : 400 }}>{horaDaLista(quando)}</span>
                   </span>
                   <span className="flex items-center gap-1.5 mt-0.5">
@@ -466,8 +472,13 @@ function LigarFicha({ conversa, onFechar, onLigado, onCriar }: { conversa: Conve
     catch (e) { setErro(e instanceof Error ? e.message : "Falhou."); }
   }
   return (
-    <Modal aberto={aberto} titulo="Ligar a conversa a uma ficha" onFechar={onFechar}>
+    <Modal aberto={aberto} titulo={conversa.cliente_id ? "Trocar a ficha desta conversa" : "Ligar a conversa a uma ficha"} onFechar={onFechar}>
       <div className="space-y-3">
+        {conversa.cliente_id && conversa.nome_contato && (
+          <p className="text-[13px]" style={{ color: "var(--ink2)" }}>
+            Hoje está na ficha de <b>{conversa.cliente_nome}</b>; no WhatsApp a pessoa aparece como <b>{conversa.nome_contato}</b>. Escolha a ficha de quem usa este número.
+          </p>
+        )}
         <Entrada value={termo} onChange={(e) => setTermo(e.target.value)} placeholder="Nome, CPF ou telefone" autoFocus />
         {erro && <Aviso tom="erro">{erro}</Aviso>}
         <ul className="rel-card overflow-hidden">
@@ -558,6 +569,7 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
   const [chamados, setChamados] = useState<ChamadoK[]>([]);
   const [verChamado, setVerChamado] = useState<string | null>(null);
   const [foraPrazo, setForaPrazo] = useState(false);
+  const [confirmouFicha, setConfirmouFicha] = useState<string | null>(null);
   const [arquivo, setArquivo] = useState<File | null>(null);
   // editor de foto antes de enviar (16/10): recortar, girar, desenhar, emoji, texto
   const [editandoFoto, setEditandoFoto] = useState(false);
@@ -853,6 +865,9 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
             <span className="block text-[16px] truncate" style={{ color: "var(--wa-txt)" }}>{nome}</span>
             <span className="block text-[12.5px] truncate" style={{ color: "var(--wa-meta)" }}>
               {semNumero(c.telefone) ? <span style={{ color: "var(--warn-ink)", fontWeight: 600 }}>sem número identificado · só leitura</span> : formatarTelefone(c.telefone)}
+              {c.cliente_id && c.nome_contato && c.nome_contato !== c.cliente_nome && (
+                <span style={fichaSuspeita(c) ? { color: "var(--warn-ink)", fontWeight: 600 } : undefined}> · WhatsApp: {c.nome_contato}</span>
+              )}
               {c.cliente_id ? " · dados do contato" : <span style={{ color: "var(--warn-ink)", fontWeight: 600 }}> · ligar à ficha</span>}
               {c.atendente_nome && ` · com ${c.atendente_nome.split(" ")[0]}`}
             </span>
@@ -902,6 +917,16 @@ function Painel({ setor, extraCabecalho, id, meuId, meuNome, conversas, onVoltar
         </div>
       </div>
 
+      {fichaSuspeita(c) && confirmouFicha !== c.id && (
+        <div role="alert" className="px-3 sm:px-4 py-2 flex flex-wrap items-center gap-2 flex-shrink-0 text-[13px]"
+          style={{ background: "var(--warn-bg)", color: "var(--warn-ink)", borderBottom: "1px solid var(--wa-line)" }}>
+          <span className="flex-1 min-w-[220px]">
+            ⚠ No WhatsApp este número é de <b>{c.nome_contato}</b>, mas a conversa está na ficha de <b>{c.cliente_nome}</b>. Confira com quem está falando antes de responder.
+          </span>
+          {ehRel && <button onClick={() => onLigarFicha(c)} className="h-8 px-3 rounded-full text-[12.5px] font-semibold border" style={{ borderColor: "currentColor" }}>Trocar a ficha</button>}
+          <button onClick={() => setConfirmouFicha(c.id)} className="h-8 px-3 rounded-full text-[12.5px] font-semibold" title="A ficha está certa (é a mesma pessoa ou o número é da família)">Está certo</button>
+        </div>
+      )}
       {(c.setor === "financeiro" || sinalFin > 0) && (
         <div className="px-3 sm:px-4 py-1.5 flex-shrink-0" style={{ background: "var(--wa-head)", borderBottom: "1px solid var(--wa-line)" }}>
           {extraCabecalho ? extraCabecalho(c, () => { setSinalFin((n) => n + 1); void recarregar(); onMudou(); }) : (
