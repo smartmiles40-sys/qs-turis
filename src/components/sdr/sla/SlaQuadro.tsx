@@ -74,7 +74,7 @@ export default function SlaQuadro({ de, ate, rotPer, onOpenLead }: {
         <div>
           <div className="dsp-lbl">Quanto tempo o lead espera pelo SDR · {rotPer}</div>
           <div className="mt-1 text-[13px] dsp-mut">
-            Da chegada do lead até a 1ª interação do SDR (ligação, WhatsApp ou tarefa concluída), contando só seg–sex no expediente.
+            Da chegada do lead até a 1ª interação do SDR (ligação, WhatsApp ou tarefa concluída), contando só seg–sex no expediente. Se o cliente marcou a ligação, conta a partir da hora marcada.
             Tempo típico: metade dos leads espera menos que isso. Meta: <b>{minutosTxt(meta)}</b>.
           </div>
         </div>
@@ -123,10 +123,16 @@ export default function SlaQuadro({ de, ate, rotPer, onOpenLead }: {
                   style={{ border: "1px solid var(--border)", background: "var(--card)", color: "var(--text)" }}>
                   {a.nome || "Sem nome"}{p.gestor ? <span className="dsp-mut"> · {a.sdr_nome.split(" ")[0]}</span> : null}
                   {" "}<b style={{ color: fora ? COR.danger : "var(--warn)" }}>{minutosTxt(a.minutos)}</b>
+                  {a.sem_tarefa && <span className="dsp-mut" title="Sem nenhuma tarefa aberta: não aparece na Fila do SDR"> · sem tarefa</span>}
                 </button>
               );
             })}
           </div>
+        </div>
+      )}
+      {p.marcadas.length > 0 && (
+        <div className="text-[12px] dsp-mut">
+          + {p.marcadas.length} com ligação marcada pelo cliente para mais tarde (não conta como espera até a hora marcada) · clique em "Ver cada cliente".
         </div>
       )}
       {abrir && (

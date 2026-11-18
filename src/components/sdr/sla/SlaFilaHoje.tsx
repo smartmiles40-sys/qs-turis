@@ -65,6 +65,11 @@ export default function SlaFilaHoje({ onOpenLead }: { onOpenLead: (leadId: strin
             {p.aguardando.length} esperando{estourados ? ` · ${estourados} fora do prazo` : ""}
           </span>
         )}
+        {p && p.marcadas.length > 0 && (
+          <span className="qsx-msub" title="Ligações marcadas pelo cliente cuja hora ainda não chegou — não contam como espera">
+            {p.marcadas.length} ligação{p.marcadas.length !== 1 ? "ões" : ""} marcada{p.marcadas.length !== 1 ? "s" : ""}
+          </span>
+        )}
       </button>
       {aberto && p && <SlaDetalhe painel={p} onFechar={() => setAberto(false)} onOpenLead={onOpenLead} />}
     </>

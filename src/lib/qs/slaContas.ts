@@ -4,21 +4,35 @@
 // hoje e o Desempenho leem a MESMA resposta — o número é igual nas duas telas.
 //   1º toque = tarefa concluída, ligação do webfone ou WhatsApp enviado pelo SDR
 //   (o que vier primeiro), medido em minutos ÚTEIS (work_hours).
+//   0405 (18/11): ligação marcada pelo cliente conta a partir da HORA MARCADA;
+//   enquanto ela não chega o lead fica em "marcadas", não em "aguardando".
 // -----------------------------------------------------------------------------
 
 export interface BlocoSla {
   recebidos: number; atendidos: number; na_meta: number; fora_meta: number;
   aguardando: number; mediana_min: number | null;
+  /** 0405: ligações marcadas pelo cliente cuja hora ainda não chegou (fora do "aguardando"). */
+  marcadas: number;
 }
 export interface LinhaSla { sdr_id: string; nome: string; hoje: BlocoSla; semana: BlocoSla; mes: BlocoSla; faixa: BlocoSla }
 export interface LeadAguardando {
   lead_id: string; nome: string | null; sdr_id: string; sdr_nome: string;
   chegou_em: string; minutos: number;
+  /** 0405: hora que o cliente marcou (a espera conta a partir dela). */
+  marcada_para?: string | null;
+  /** 0405: lead sem nenhuma tarefa aberta — não aparece na Fila do SDR. */
+  sem_tarefa?: boolean;
+}
+/** 0405: ligação marcada pelo cliente com hora ainda no futuro. */
+export interface LeadMarcado {
+  lead_id: string; nome: string | null; sdr_id: string; sdr_nome: string;
+  chegou_em: string; marcada_para: string;
 }
 export type CanalToque = "ligacao" | "whatsapp" | "tarefa";
 export interface LeadAtendido {
   lead_id: string; nome: string | null; sdr_id: string; sdr_nome: string;
   chegou_em: string; atendido_em: string; canal: CanalToque; minutos: number;
+  marcada_para?: string | null;
 }
 export const ROTULO_CANAL: Record<CanalToque, string> = { ligacao: "Ligação", whatsapp: "WhatsApp", tarefa: "Tarefa concluída" };
 
@@ -29,16 +43,18 @@ export interface PainelSla {
   faixa_de: string | null; faixa_ate: string | null; faixa_ok: boolean;
   sdrs: LinhaSla[];
   aguardando: LeadAguardando[];
+  /** 0405: ligações marcadas que ainda não chegaram na hora (mais próxima primeiro). */
+  marcadas: LeadMarcado[];
   /** Cada cliente atendido no mês (mais recente primeiro). */
   atendidos: LeadAtendido[];
 }
 export type PeriodoSla = "hoje" | "semana" | "mes";
 
-const B0: BlocoSla = { recebidos: 0, atendidos: 0, na_meta: 0, fora_meta: 0, aguardando: 0, mediana_min: null };
+const B0: BlocoSla = { recebidos: 0, atendidos: 0, na_meta: 0, fora_meta: 0, aguardando: 0, mediana_min: null, marcadas: 0 };
 const bloco = (b?: Partial<BlocoSla> | null): BlocoSla => ({
   recebidos: Number(b?.recebidos ?? 0), atendidos: Number(b?.atendidos ?? 0),
   na_meta: Number(b?.na_meta ?? 0), fora_meta: Number(b?.fora_meta ?? 0),
-  aguardando: Number(b?.aguardando ?? 0),
+  aguardando: Number(b?.aguardando ?? 0), marcadas: Number(b?.marcadas ?? 0),
   mediana_min: b?.mediana_min === null || b?.mediana_min === undefined ? null : Number(b.mediana_min),
 });
 
@@ -55,7 +71,8 @@ export function normalizarPainelSla(d: unknown): PainelSla {
     time: { hoje: bloco(r.time?.hoje), semana: bloco(r.time?.semana), mes: bloco(r.time?.mes), faixa: bloco(r.time?.faixa ?? r.time?.mes) },
     faixa_de: r.faixa_de ?? null, faixa_ate: r.faixa_ate ?? null, faixa_ok: ok,
     sdrs: (r.sdrs ?? []).map((s) => ({ sdr_id: s.sdr_id, nome: s.nome, hoje: bloco(s.hoje), semana: bloco(s.semana), mes: bloco(s.mes), faixa: bloco(s.faixa ?? s.mes) })),
-    aguardando: (r.aguardando ?? []).map((a) => ({ ...a, minutos: Number(a.minutos ?? 0) })),
+    aguardando: (r.aguardando ?? []).map((a) => ({ ...a, minutos: Number(a.minutos ?? 0), sem_tarefa: !!a.sem_tarefa })),
+    marcadas: r.marcadas ?? [],
     atendidos: (r.atendidos ?? []).map((a) => ({ ...a, minutos: Number(a.minutos ?? 0) })),
   };
 }

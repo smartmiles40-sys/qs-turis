@@ -39,6 +39,7 @@ const CSS = `
 .slad tbody tr{cursor:pointer}
 .slad tbody tr:hover{background:var(--surface-2)}
 .slad-th-btn{background:none;border:0;padding:0;font:inherit;color:inherit;text-transform:inherit;letter-spacing:inherit;cursor:pointer}
+.slad-selo{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn);vertical-align:middle}
 @media (max-width:640px){.slad-esconde{display:none}}
 `;
 
@@ -70,6 +71,8 @@ export default function SlaDetalhe({ painel, onFechar, onOpenLead, periodoInicia
   }, [painel.atendidos, periodo, sdr, ordem, faixa]);
   // Quem ainda espera aparece em qualquer período: é o que precisa de ação agora.
   const esperando = useMemo(() => painel.aguardando.filter((a) => !sdr || a.sdr_id === sdr), [painel.aguardando, sdr]);
+  // 0405: ligação marcada pelo cliente que ainda não chegou na hora — não é espera.
+  const marcadas = useMemo(() => painel.marcadas.filter((a) => !sdr || a.sdr_id === sdr), [painel.marcadas, sdr]);
   const noPrazo = atendidos.filter((a) => a.minutos <= meta).length;
   const abrir = (id: string) => { if (onOpenLead) { onOpenLead(id); onFechar(); } };
 
@@ -80,7 +83,7 @@ export default function SlaDetalhe({ painel, onFechar, onOpenLead, periodoInicia
         <div className="slad-cab">
           <div>
             <div className="text-[17px] font-bold">Quanto cada lead esperou, cliente a cliente</div>
-            <div className="slad-sub">Da chegada até a 1ª interação do SDR (ligação, WhatsApp ou tarefa concluída). "Espera útil" conta só seg–sex no expediente; "relógio" é a diferença direta entre as duas horas · meta {minutosTxt(meta)}</div>
+            <div className="slad-sub">Da chegada até a 1ª interação do SDR (ligação, WhatsApp ou tarefa concluída). Se o cliente marcou a ligação, conta a partir da hora marcada. "Espera útil" conta só seg–sex no expediente; "relógio" é a diferença direta entre as duas horas · meta {minutosTxt(meta)}</div>
           </div>
           <button type="button" className="slad-chip" onClick={onFechar} aria-label="Fechar">Fechar</button>
         </div>
@@ -101,6 +104,7 @@ export default function SlaDetalhe({ painel, onFechar, onOpenLead, periodoInicia
             <span className="slad-sub" style={{ marginLeft: "auto" }}>
               {atendidos.length} atendido{atendidos.length !== 1 ? "s" : ""} · {noPrazo} no prazo
               {esperando.length > 0 && <> · <b style={{ color: "var(--danger)" }}>{esperando.length} esperando</b></>}
+              {marcadas.length > 0 && <> · {marcadas.length} com ligação marcada</>}
             </span>
           </div>
 
@@ -114,13 +118,41 @@ export default function SlaDetalhe({ painel, onFechar, onOpenLead, periodoInicia
                     const t = tomEspera(a.minutos, meta);
                     return (
                       <tr key={a.lead_id} onClick={() => abrir(a.lead_id)}>
-                        <td className="font-medium">{a.nome || "Sem nome"}</td>
+                        <td className="font-medium">
+                          {a.nome || "Sem nome"}
+                          {a.sem_tarefa && (
+                            <span className="slad-selo" title="Este lead não tem nenhuma tarefa aberta, então não aparece na Fila do SDR. Abra o lead e crie uma tarefa ou dê o desfecho.">sem tarefa</span>
+                          )}
+                        </td>
                         {painel.gestor && <td>{a.sdr_nome}</td>}
-                        <td>{dataHora(a.chegou_em)}</td>
+                        <td>
+                          {dataHora(a.chegou_em)}
+                          {a.marcada_para && <div className="slad-sub">ligação marcada {dataHora(a.marcada_para)}</div>}
+                        </td>
                         <td><b style={{ color: COR[t] }}>{minutosTxt(a.minutos)}</b></td>
                       </tr>
                     );
                   })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {marcadas.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <div className="text-[13px] font-semibold">Ligação marcada pelo cliente (a hora ainda não chegou)</div>
+              <div className="slad-sub">Não conta como espera. Se ninguém ligar até a hora marcada, o lead passa para a lista de cima.</div>
+              <table>
+                <thead><tr><th>Cliente</th>{painel.gestor && <th>SDR</th>}<th>Chegou</th><th>Marcou para</th></tr></thead>
+                <tbody>
+                  {marcadas.map((a) => (
+                    <tr key={a.lead_id + a.chegou_em} onClick={() => abrir(a.lead_id)}>
+                      <td className="font-medium">{a.nome || "Sem nome"}</td>
+                      {painel.gestor && <td>{a.sdr_nome}</td>}
+                      <td>{dataHora(a.chegou_em)}</td>
+                      <td><b>{dataHora(a.marcada_para)}</b></td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -162,7 +194,11 @@ export default function SlaDetalhe({ painel, onFechar, onOpenLead, periodoInicia
                         <td className="slad-esconde">{ROTULO_CANAL[a.canal] ?? a.canal}</td>
                         <td>
                           <b style={{ color: COR[t] }}>{minutosTxt(a.minutos)}</b>
-                          <div className="slad-sub">relógio {corridoTxt(corridoMin(a.chegou_em, a.atendido_em))}</div>
+                          <div className="slad-sub">
+                            {a.marcada_para
+                              ? new Date(a.atendido_em) < new Date(a.marcada_para) ? "antes da hora marcada" : "desde a hora marcada"
+                              : `relógio ${corridoTxt(corridoMin(a.chegou_em, a.atendido_em))}`}
+                          </div>
                         </td>
                       </tr>
                     );
