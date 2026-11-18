@@ -22,6 +22,7 @@ import { waKey } from './_wa.js';
 
 const FUNIL_PRE_VENDAS = 25;
 const ETAPA_NOVO_LEAD = 'C25:PREPAYMENT_INVOIC';   // "Novo Lead - Aguardando resposta"
+const ETAPA_REUNIAO_AGENDADA = 'C25:WON';          // "Reunião Agendada" (automação leva pro funil 0)
 const CAMPO_PRIMEIRO_CONTATO = 'UF_CRM_1767799598309';  // "Primeiro contato Lead" (date)
 
 function base() {
@@ -78,6 +79,20 @@ async function usuariosDoBitrix() {
     }
   } catch (e) {
     console.warn('[bitrix-lead] não consegui listar usuários:', e?.message);
+  }
+  // 18/11: o webhook atual não tem o escopo "user" (user.get → insufficient_scope),
+  // então a lista vinha vazia e TODO card criado pelo QS nascia no dono do
+  // webhook (usuário 23), fora do SDR/closer. Reserva: o mapa e-mail → id em
+  // qs_settings.bitrix_usuarios (só completa o que o user.get não trouxe).
+  try {
+    const rows = await rest('qs_settings?select=value&key=eq.bitrix_usuarios&limit=1');
+    const mapa = rows?.[0]?.value || {};
+    for (const [e, id] of Object.entries(mapa)) {
+      const k = String(e).toLowerCase().trim();
+      if (k && id && !porEmail.has(k)) porEmail.set(k, String(id));
+    }
+  } catch (e) {
+    console.warn('[bitrix-lead] não consegui ler qs_settings.bitrix_usuarios:', e?.message);
   }
   cacheUsuarios = { porEmail, em: Date.now() };
   return porEmail;
@@ -306,7 +321,10 @@ export async function criarNegocioParaLead(lead) {
   const campos = {
     TITLE: nome ? `${nome}` : `WhatsApp ${String(lead.phone || '').slice(-8)}`,
     CATEGORY_ID: FUNIL_PRE_VENDAS,
-    STAGE_ID: ETAPA_NOVO_LEAD,
+    // Lead que já é GANHO no QS (reunião marcada) não pode nascer em "Novo Lead":
+    // 18/11 a retentativa abriu 3 clientes de closer lá (56511/13/15). Ganho vai
+    // pra "Reunião Agendada" — a automação do Bitrix leva pro funil dos closers.
+    STAGE_ID: lead.status === 'ganho' ? ETAPA_REUNIAO_AGENDADA : ETAPA_NOVO_LEAD,
     TYPE_ID: 'SALE',
     CURRENCY_ID: 'BRL',
     OPENED: 'Y',

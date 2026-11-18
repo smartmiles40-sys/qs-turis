@@ -1082,7 +1082,12 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
     !!currentUser &&
     // O closer atende qualquer conversa (0050) — o card do cliente acompanha,
     // senão o "Abrir card" da lista de WhatsApp termina num beco sem saída.
-    (canSeeAllData(currentUser.role) || currentUser.role === "closer" || lead.owner_id === currentUser.id);
+    (canSeeAllData(currentUser.role) || currentUser.role === "closer" || lead.owner_id === currentUser.id ||
+      // SDR que MARCOU reunião com este lead continua com acesso depois que o
+      // card passa pro closer (Bruno, 18/11: "eles precisam mudar status de
+      // reuniões… ter acesso ao perfil mesmo depois do agendamento"). A RLS
+      // leads_select já libera por qs_meetings.owner_id; aqui só a tela.
+      meetings.some((m) => m.owner_id === currentUser.id));
   if (!canView) {
     return <Aviso titulo="Este lead é de outro SDR." texto="Você só tem acesso aos seus próprios leads." />;
   }
