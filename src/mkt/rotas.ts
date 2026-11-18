@@ -41,6 +41,8 @@ export interface RotaMkt {
   icone?: string;
   componente: React.LazyExoticComponent<React.ComponentType>;
   papeis?: string[];
+  /** ids de qs_users que veem a rota mesmo fora do time (ex.: Giovanna nos links, 18/11). */
+  pessoas?: string[];
 }
 
 export type GrupoMkt = RotaMkt["grupo"];

@@ -63,10 +63,12 @@ export function rotaVisivel(rotaPapeis: string[] | undefined, visao: VisaoMkt, g
 }
 
 /** Agrupa as rotas na ordem dos grupos; grupo vazio some. */
-export function agruparRotas<R extends { grupo: string; papeis?: string[] }>(
-  rotas: R[], grupos: { id: string; rotulo: string }[], visao: VisaoMkt, gestor: boolean,
+export function agruparRotas<R extends { grupo: string; papeis?: string[]; pessoas?: string[] }>(
+  rotas: R[], grupos: { id: string; rotulo: string }[], visao: VisaoMkt, gestor: boolean, userId?: string,
 ): { id: string; rotulo: string; rotas: R[] }[] {
+  // `pessoas`: liberada pra alguém específico mesmo fora do time (18/11).
+  const ve = (r: R) => rotaVisivel(r.papeis, visao, gestor) || (!!userId && !!r.pessoas?.includes(userId));
   return grupos
-    .map((g) => ({ ...g, rotas: rotas.filter((r) => r.grupo === g.id && rotaVisivel(r.papeis, visao, gestor)) }))
+    .map((g) => ({ ...g, rotas: rotas.filter((r) => r.grupo === g.id && ve(r)) }))
     .filter((g) => g.rotas.length > 0);
 }

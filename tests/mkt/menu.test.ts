@@ -45,3 +45,11 @@ test("agrupa na ordem dos grupos e some com grupo vazio", () => {
   assert.deepEqual(g[0].rotas.map((r) => r.id), ["biblioteca", "pedidos"]);
   assert.deepEqual(agruparRotas(rotas, grupos, "tudo", false).map((x) => x.id), ["organico", "trafego", "comum"]);
 });
+
+test("rota liberada pra uma pessoa aparece pra ela fora do time (18/11)", () => {
+  const rotas = [{ id: "links", grupo: "comum", papeis: ["trafego"], pessoas: ["u-gio"] }];
+  const grupos = [{ id: "comum", rotulo: "Comum" }];
+  assert.equal(agruparRotas(rotas, grupos, "organico", false, "u-gio").length, 1);
+  assert.equal(agruparRotas(rotas, grupos, "organico", false, "u-carol").length, 0);
+  assert.equal(agruparRotas(rotas, grupos, "organico", false).length, 0);
+});

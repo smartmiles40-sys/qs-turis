@@ -81,7 +81,7 @@ function Area() {
   const rotas = comCentral ? [...ROTAS_MKT, ROTA_SOLICITACOES_MKT] : ROTAS_MKT;
 
   if (!currentUser) return null;
-  const grupos: GrupoDoMenu[] = agruparRotas(rotas, GRUPOS_MKT, visao, gestor).map((g) => ({
+  const grupos: GrupoDoMenu[] = agruparRotas(rotas, GRUPOS_MKT, visao, gestor, currentUser.id).map((g) => ({
     id: g.id,
     rotulo: g.rotulo,
     icone: ICONE_GRUPO_MKT[g.id] ?? ICONES_MKT.lista,
