@@ -43,7 +43,6 @@ import DiscadorPainel from "@/components/sdr/telefone/DiscadorPainel";
 import { discadorLigado } from "@/lib/discador/controlador";
 import type { ItemFila } from "@/lib/discador/motor";
 import CotandoAereo from "@/components/sdr/aereo/CotandoAereo";
-import { fetchCotacoesAereo, formatarDuracao, ouvirCotacaoAereo, resumir, type ResumoAereo } from "@/lib/qs/aereo";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, nextExecutionDay, nextWorkMoment, clampToWorkWindow, scheduleWeekdays, isWithinHours, workdaysBetween, type WorkHours } from "@/lib/workHours";
 import type { SdrUser } from "../types";
 import RelogioPrimeiroContato, { type LeadEsperando } from "./RelogioPrimeiroContato";
@@ -60,8 +59,6 @@ import SlaFilaHoje from "@/components/sdr/sla/SlaFilaHoje";
 
 interface TasksPanelProps {
   onOpenLead: (leadId: string) => void;
-  /** Atalho do quadro de SLA pro Desempenho (semana e mês). */
-  onIrParaDesempenho?: () => void;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -388,7 +385,7 @@ function tarefaVisivelNaFila(t: Task, statusDoLead: string | undefined): boolean
   return statusDoLead !== "ganho" && statusDoLead !== "perdido";
 }
 
-export default function TasksPanel({ onOpenLead, onIrParaDesempenho }: TasksPanelProps) {
+export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const { currentUser } = useQsAuth();
   const chatDock = useChatAppDock();
   // MODO APARELHO (SDR, desde 03/09): as atividades de WhatsApp levam o SDR pra
@@ -631,22 +628,13 @@ export default function TasksPanel({ onOpenLead, onIrParaDesempenho }: TasksPane
   const [contactBreakdown, setContactBreakdown] = useState<ContactBreakdownRow[]>([]);
   const [meetingKpis, setMeetingKpis] = useState<MeetingKpis>({ agendadas: 0, realizadas: 0, agendadasHoje: 0, realizadasHoje: 0, metaAgendadas: null, metaRealizadas: null });
   const countsScope = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : (ownerFilter || null);
-  // Aéreos de hoje (0206): quantidade e tempo — informativo, sem meta.
-  const [aereoHoje, setAereoHoje] = useState<ResumoAereo>({ quantidade: 0, segundos: 0 });
-  const refreshAereoHoje = useCallback(() => {
-    const ini = new Date(); ini.setHours(0, 0, 0, 0);
-    const fim = new Date(ini); fim.setDate(fim.getDate() + 1);
-    fetchCotacoesAereo(ini, fim, countsScope).then((l) => setAereoHoje(resumir(l)));
-  }, [countsScope]);
-  useEffect(() => ouvirCotacaoAereo(refreshAereoHoje), [refreshAereoHoje]);
   const refreshCounts = useCallback(() => {
     fetchActivityCounts(countsScope).then(setDoneCounts);
     fetchMeetingCounts(countsScope).then(setMeetingCounts);
     fetchMeetingKpis(countsScope).then(setMeetingKpis);
     fetchContactBreakdownToday(countsScope).then(setContactBreakdown);
-    refreshAereoHoje();
     refreshDoneTodayMine(); // placar pessoal "feitas hoje" acompanha os desfechos
-  }, [countsScope, refreshDoneTodayMine, refreshAereoHoje]);
+  }, [countsScope, refreshDoneTodayMine]);
   useEffect(() => {
     refreshCounts();
     fetchActivityGoals(countsScope).then(setGoalTargets);
@@ -2540,18 +2528,9 @@ export default function TasksPanel({ onOpenLead, onIrParaDesempenho }: TasksPane
   const MONTHLY_DONE = doneCounts.doneMonth;
   const dailyGoal = goalTargets.daily ?? DAILY_GOAL;
   const monthlyGoal = goalTargets.monthly ?? MONTHLY_GOAL;
-  const monthlyBeat = MONTHLY_DONE >= monthlyGoal;
   // Métricas de tempo dentro do horário de funcionamento (Configurações → Horário de Trabalho)
   const now = new Date();
   const totalMinLeft = minutesLeftToday(workHours, now);
-  const hoursLeft = Math.floor(totalMinLeft / 60);
-  const minutesLeft = totalMinLeft % 60;
-  const hoursWorked = Math.max(0.1, minutesWorkedToday(workHours, now) / 60);
-  const rhythm = Math.round((DAILY_DONE / hoursWorked) * 10) / 10;
-  // Fora do expediente (folga/fim de semana ou depois do fim), o ritmo/h e o
-  // "restam Xh" não fazem sentido (o denominador zera e viraria número absurdo):
-  // mostramos um estado neutro em vez do lixo. O SDR ainda pode trabalhar.
-  const withinHours = isWithinHours(workHours, now);
 
   // Ritmo das metas (Bruno, 26/10): a barra compara o FEITO com o ESPERADO até
   // agora. Verde = à frente do ritmo; amarelo = perto (80% do esperado ou
@@ -2643,7 +2622,6 @@ export default function TasksPanel({ onOpenLead, onIrParaDesempenho }: TasksPane
   const greetWord = greetHour < 12 ? "Bom dia" : greetHour < 18 ? "Boa tarde" : "Boa noite";
   const firstName = currentUser?.name?.split(" ")[0] ?? "";
   const todayLabel = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "short" });
-  const remainingGoal = Math.max(0, dailyGoal - DAILY_DONE);
 
   // Celebration effect when daily goal is hit
   useEffect(() => {
@@ -4325,13 +4303,9 @@ export default function TasksPanel({ onOpenLead, onIrParaDesempenho }: TasksPane
               {precisaRealizarHoje ? barraDaMeta(ritmoRealizadas) : <div className="qsx-bar qsx-bar--ritmo" />}
               <span className="qsx-msub">mês: {meetingKpis.realizadas}{meetingKpis.metaRealizadas ? ` de ${meetingKpis.metaRealizadas}` : " · sem meta cadastrada"}</span>
             </div>
-            {/* Aéreo (Bruno, 27/10): não é meta, é o tempo que a cotação tomou hoje.
-                O SDR marca no card do lead ("Cotando aéreo" → "Terminei"). */}
-            <div className="qsx-meta" title="Cotações de aéreo marcadas no card do lead. Não é meta: mostra o tempo que isso tomou.">
-              <span className="qsx-mlab"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--info)" }} aria-hidden><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" /></svg>Aéreo hoje</span>
-              <span className="qsx-mval">{aereoHoje.quantidade}<small>{aereoHoje.quantidade === 1 ? "cotação" : "cotações"}</small></span>
-              <span className="qsx-msub">{aereoHoje.segundos > 0 ? `${formatarDuracao(aereoHoje.segundos)} cotando` : "nenhum tempo registrado"}</span>
-            </div>
+            {/* SLA do 1º atendimento (0400, Bruno 17/11): quadradinho; o clique abre o
+                tempo de resposta de cada lead. Substitui o "Aéreo hoje". */}
+            <SlaFilaHoje onOpenLead={onOpenLead} />
             {/* Atividades feitas num dia passado (padrão: ontem) */}
             <div
               className="qsx-meta"
@@ -4353,27 +4327,7 @@ export default function TasksPanel({ onOpenLead, onIrParaDesempenho }: TasksPane
                 <span className="qsx-msub">{pastDayCount.ligacoes} lig. · {pastDayCount.mensagens} msg. · {pastDayCount.leads} leads</span>
               )}
             </div>
-            <div className="qsx-meta">
-              <span className="qsx-mlab">{withinHours ? "Ritmo necessário" : "Fora do expediente"}</span>
-              {withinHours ? (
-                <>
-                  <span className="qsx-mval">{rhythm.toFixed(1)}/h</span>
-                  <span className="qsx-msub">faltam {remainingGoal} · ~{hoursLeft}h{String(minutesLeft).padStart(2, "0")}</span>
-                </>
-              ) : remainingGoal > 0 ? (
-                <>
-                  <span className="qsx-mval">{remainingGoal}</span>
-                  <span className="qsx-msub">faltam pra meta de hoje</span>
-                </>
-              ) : (
-                <span className="qsx-mval" style={{ color: "var(--ok)", fontSize: 16 }}>Meta de hoje batida</span>
-              )}
-              {monthlyBeat && <span className="qsx-msub" style={{ color: "var(--ok)" }}>Meta mensal batida</span>}
-            </div>
           </div>
-
-          {/* SLA do 1º atendimento (0400, Bruno 17/11): o do dia + quem está esperando. */}
-          <SlaFilaHoje onOpenLead={onOpenLead} onVerDesempenho={onIrParaDesempenho} />
 
           {/* Ligações e mensagens por usuário (hoje) — evita depender do Bitrix/telefonia
               pra saber a produção do dia. Ligação = ligacao/ligacao_whatsapp; Mensagem =

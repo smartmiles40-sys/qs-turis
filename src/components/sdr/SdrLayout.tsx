@@ -526,7 +526,7 @@ export default function SdrLayout() {
         >
         {activeNav === "painel" && (
           <PageErrorBoundary pageName="Painel de Atividades">
-            <TasksPanel onOpenLead={openLeadDetail} onIrParaDesempenho={() => navigate("dashboard")} />
+            <TasksPanel onOpenLead={openLeadDetail} />
           </PageErrorBoundary>
         )}
         {activeNav === "leads" && (
