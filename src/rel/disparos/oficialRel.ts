@@ -29,7 +29,11 @@ export interface RespostaBotao { texto?: string; etiqueta?: string; tirar_etique
 export type EnvioExtraRel = EnvioExtra & { respostas?: Record<string, RespostaBotao> };
 
 export interface RitmoRel { por_segundo: number; por_dia: number; margem_tier: number; inicio: string; fim: string; dias: number[]; tier_padrao: string; intervalo_dias: number }
+export interface NumeroTeste { nome: string; telefone: string }
+
 export interface EstadoRel {
+  /** Os números de teste (aba Número e ritmo) — o teste vai pra todos eles. */
+  numerosTeste?: NumeroTeste[];
   simulacao: boolean; envLigado: boolean; real: boolean; faltam: string[]; temToken: boolean;
   numero: { phone_number_id: string; numero: string | null; rotulo?: string; conectado: boolean } | null;
   ritmo: RitmoRel; precos: PrecosMkt;
@@ -48,6 +52,7 @@ export const estadoRel = (conferir = false) => chamar<EstadoRel>({ acao: "rel_of
 export const sincronizarModelosRel = () => chamar<{ ok: true; total: number; aprovados: number }>({ acao: "rel_sincronizar_modelos" });
 export const aoVivoRel = (campanhaId: string) => chamar<AoVivoRel>({ acao: "rel_kpis", campanhaId });
 export const salvarRitmoRel = (ritmo: RitmoRel) => chamar<{ ok: true; ritmo: RitmoRel }>({ acao: "rel_salvar_ritmo", ritmo });
+export const salvarNumerosTesteRel = (numeros: NumeroTeste[]) => chamar<{ ok: true; numeros: NumeroTeste[] }>({ acao: "rel_salvar_numeros_teste", numeros });
 
 export const criarCampanhaRel = (c: { nome: string; modelo_nome: string; modelo_idioma: string; params: MapaVariaveis; publico: PublicoRel; envio_extra?: EnvioExtraRel; grupo_link?: string | null }) =>
   chamar<{ campanha: Campanha }>({ acao: "criar", ...c });
@@ -58,6 +63,17 @@ export const desagendarRel = (campanhaId: string) => chamar<{ ok: true }>({ acao
 /** Manda UMA mensagem agora pra um número (campanha salva ou o rascunho da tela). */
 export const testarRel = (telefone: string, alvo: { campanhaId: string } | { rascunho: { nome: string; modelo_nome: string; modelo_idioma: string; params: MapaVariaveis; envio_extra?: EnvioExtraRel; grupo_link?: string | null } }) =>
   chamar<{ ok: true; wamid: string }>({ acao: "rel_teste", telefone, ...alvo });
+
+/** Manda pra TODOS os números de teste configurados. */
+export const testarRelNumerosTeste = (alvo: Parameters<typeof testarRel>[1]) =>
+  chamar<{ ok: true; enviados: string[]; erros: { nome: string; erro: string }[] }>({ acao: "rel_teste", paraTeste: true, ...alvo });
+
+/** "Enviado pra Ana e Bruno" (+ quem falhou). */
+export function avisoDoTeste(r: { enviados: string[]; erros: { nome: string; erro: string }[] }) {
+  const ok = r.enviados.length ? `Teste enviado pra ${r.enviados.join(", ")}.` : "";
+  const ruim = r.erros.length ? ` Falhou: ${r.erros.map((e) => `${e.nome} (${e.erro})`).join("; ")}` : "";
+  return (ok + ruim).trim();
+}
 
 // ── Etiquetas ───────────────────────────────────────────────────────────────
 

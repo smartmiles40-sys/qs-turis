@@ -14,7 +14,7 @@ import {
 import { Aviso, Botao, Campo, Entrada, Modal } from "@/rel/ui";
 import PreviaWhatsApp from "@/mkt/disparos/PreviaWhatsApp";
 import { ROTULO_CATEGORIA, type FonteExtra } from "@/mkt/disparos/oficial";
-import { agendarRel, criarCampanhaRel, testarRel, type EnvioExtraRel, type ModeloRel, type RespostaBotao } from "./oficialRel";
+import { agendarRel, avisoDoTeste, criarCampanhaRel, testarRel, testarRelNumerosTeste, type EnvioExtraRel, type ModeloRel, type NumeroTeste, type RespostaBotao } from "./oficialRel";
 import { CampoEtiquetas, limparPublico, PublicoRelForm, useEtiquetas } from "./PublicoRel";
 
 const FONTES_REL = FONTES.filter((f) => f.setores.includes("relacionamento"));
@@ -94,8 +94,8 @@ function RespostaDoBotao({ rotulo, r, set, etiquetas }: { rotulo: string; r: Res
   );
 }
 
-export default function NovoDisparoRel({ modelos, simulacao, onFechar, onCriado }: {
-  modelos: ModeloRel[]; simulacao: boolean; onFechar: () => void; onCriado: () => void;
+export default function NovoDisparoRel({ modelos, simulacao, numerosTeste = [], onFechar, onCriado }: {
+  modelos: ModeloRel[]; simulacao: boolean; numerosTeste?: NumeroTeste[]; onFechar: () => void; onCriado: () => void;
 }) {
   const etiquetas = useEtiquetas();
   const [passo, setPasso] = useState(0);
@@ -139,6 +139,15 @@ export default function NovoDisparoRel({ modelos, simulacao, onFechar, onCriado 
     const respostas = Object.fromEntries(Object.entries(extra.respostas ?? {}).filter(([i]) => botoesResposta.some((b) => String(b.indice) === i)));
     return { ...extra, respostas };
   };
+
+  async function testarNaLista() {
+    if (!modelo) return;
+    setOcupado("teste");
+    try {
+      const r = await testarRelNumerosTeste({ rascunho: { nome: nome || "teste", modelo_nome: modelo.nome, modelo_idioma: modelo.idioma, params: mapa, envio_extra: envioExtra(), grupo_link: grupoLink || null } });
+      (r.erros.length ? notifyError : notifySuccess)(avisoDoTeste(r));
+    } catch (e) { notifyError(erroDe(e, "O teste não saiu.")); } finally { setOcupado(""); }
+  }
 
   async function testar() {
     if (!modelo) return;
@@ -311,7 +320,13 @@ export default function NovoDisparoRel({ modelos, simulacao, onFechar, onCriado 
                 )}
               </dl>
               <div className="rounded-xl border p-3" style={{ borderColor: "var(--line)" }}>
-                <p className="mb-2 text-[12.5px] font-semibold" style={{ color: "var(--ink2)" }}>Mandar um teste pro meu WhatsApp antes</p>
+                <p className="mb-2 text-[12.5px] font-semibold" style={{ color: "var(--ink2)" }}>Mandar um teste antes</p>
+                {numerosTeste.length > 0 && (
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <Botao variante="primario" disabled={!!ocupado} onClick={() => void testarNaLista()}>{ocupado === "teste" ? "Enviando…" : `Mandar pros números de teste (${numerosTeste.length})`}</Botao>
+                    <span className="text-[12px]" style={{ color: "var(--ink3)" }}>{numerosTeste.map((n) => n.nome).join(", ")}</span>
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2">
                   <div className="min-w-[180px] flex-1"><Entrada value={telTeste} placeholder="DDD + número" onChange={(e) => setTelTeste(e.target.value)} /></div>
                   <Botao disabled={!!ocupado || telTeste.replace(/\D/g, "").length < 10} onClick={() => void testar()}>{ocupado === "teste" ? "Enviando…" : "Mandar teste"}</Botao>

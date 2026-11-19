@@ -172,7 +172,7 @@ export default function FluxosRel({ est }: { est: EstadoRel | null }) {
                 <p style={{ color: "var(--ink3)" }}>Ações: pôr/tirar etiqueta, avisar alguém do time no sino, parar outros fluxos, descadastrar.</p>
               </>
             ),
-          })} />
+          }, est?.numerosTeste ?? [])} />
         {disparar && <Disparar fluxo={disparar} simulacao={simulacao} onFechar={() => setDisparar(null)} onFeito={() => { setDisparar(null); setVersao((v) => v + 1); }} />}
       </div>
     );

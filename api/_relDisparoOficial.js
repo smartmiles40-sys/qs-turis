@@ -444,6 +444,27 @@ const num = (v, min, max, d) => Math.min(max, Math.max(min, Number.isFinite(Numb
 const hhmm = (v, d) => (/^([01]\d|2[0-3]):[0-5]\d$/.test(String(v || '')) ? String(v) : d);
 const gestorOuAdmin = (u) => u.role === 'admin' || u.role === 'gestor';
 
+/**
+ * NÚMEROS DE TESTE (19/11): lista fixa (até 10) que o time configura uma vez em
+ * "Número e ritmo". O "Mandar teste" do disparo e o "Testar" do fluxo mandam pra
+ * todos eles de uma vez. qs_settings.rel_disparo_numeros_teste = [{nome, telefone}].
+ */
+export function limparNumerosTeste(lista) {
+  const vistos = new Set();
+  const out = [];
+  for (const x of Array.isArray(lista) ? lista : []) {
+    const tel = String(x?.telefone ?? '').replace(/\D/g, '');
+    if (tel.length < 10 || tel.length > 13 || vistos.has(tel)) continue;
+    vistos.add(tel);
+    out.push({ nome: String(x?.nome ?? '').trim().slice(0, 40) || 'Teste', telefone: tel });
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+export async function numerosTesteRel() {
+  return limparNumerosTeste(await lerSetting('rel_disparo_numeros_teste').catch(() => []));
+}
+
 export async function estadoRel({ conferir = false } = {}) {
   const cfg = await lerConfigRel();
   const numero = await lerNumeroRel();
@@ -451,7 +472,9 @@ export async function estadoRel({ conferir = false } = {}) {
   const travas = travasDoEnvioRel({ envLigado: cfg.envLigado, simulacao: cfg.simulacao, numero: numero?.conectado ? numero : null, temToken: Boolean(cr?.token) });
   const modelos = await lerModelosRel();
   const saude = conferir && cr ? await saudeDoNumero(numero.phone_number_id, cr) : null;
+  const numerosTeste = await numerosTesteRel();
   return {
+    numerosTeste,
     simulacao: cfg.simulacao, envLigado: cfg.envLigado, real: travas.real, faltam: travas.motivos,
     temToken: Boolean(cr?.token), numero, ritmo: cfg.ritmo, precos: cfg.precos, saude,
     modelos: { total: modelos.length, aprovados: modelos.filter((m) => m.status === 'APPROVED').length, sincronizadoEm: modelos[0]?.sincronizado_em || null },
@@ -504,6 +527,13 @@ export async function acaoRelOficial({ acao, body, u }) {
     return { status: 200, json: { ok: true, ritmo } };
   }
 
+  if (acao === 'rel_salvar_numeros_teste') {
+    if (!gestorOuAdmin(u)) return { status: 403, json: { error: 'Só gestor ou admin muda os números de teste.' } };
+    const lista = limparNumerosTeste(body.numeros);
+    await rest('qs_settings?on_conflict=key', { method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal', body: { key: 'rel_disparo_numeros_teste', value: lista } });
+    return { status: 200, json: { ok: true, numeros: lista } };
+  }
+
   if (acao === 'rel_teste') {
     const c = UUID.test(String(body.campanhaId || ''))
       ? (await rest(`qs_disparo_campanhas?select=*&id=eq.${body.campanhaId}&limit=1`).catch(() => null))?.[0]
@@ -511,6 +541,19 @@ export async function acaoRelOficial({ acao, body, u }) {
         ? { nome: String(body.rascunho.nome || 'rascunho'), modelo_nome: body.rascunho.modelo_nome, modelo_idioma: body.rascunho.modelo_idioma || 'pt_BR', params: body.rascunho.params || {}, envio_extra: body.rascunho.envio_extra || {}, grupo_link: body.rascunho.grupo_link || null }
         : null;
     if (!c || (c.setor && c.setor !== 'relacionamento')) return { status: 400, json: { error: 'Escolha o modelo antes de testar.' } };
+    // paraTeste: manda pra TODOS os números de teste configurados, cada um com o próprio nome.
+    if (body.paraTeste === true) {
+      const lista = await numerosTesteRel();
+      if (!lista.length) return { status: 400, json: { error: 'Nenhum número de teste configurado (aba Número e ritmo).' } };
+      const enviados = [], erros = [];
+      for (const n of lista) {
+        const r = await enviarTeste({ telefone: n.telefone, campanha: c, nomeTeste: n.nome.split(/\s+/)[0] });
+        if (r.erro) erros.push({ nome: n.nome, erro: r.erro }); else enviados.push(n.nome);
+        if (r.erro && /travado|conectado|token/i.test(r.erro)) break; // trava geral: nem tenta os outros
+      }
+      if (!enviados.length) return { status: 400, json: { error: erros[0]?.erro || 'Não enviou.', erros } };
+      return { status: 200, json: { ok: true, enviados, erros } };
+    }
     const r = await enviarTeste({ telefone: body.telefone, campanha: c, nomeTeste: String(u.name || '').split(/\s+/)[0] });
     return r.erro ? { status: 400, json: { error: r.erro } } : { status: 200, json: r };
   }

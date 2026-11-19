@@ -24,9 +24,10 @@ import { supabase } from "@/lib/supabase";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal, Vazio } from "@/rel/ui";
 import { ROTULO_TIER } from "@/mkt/disparos/oficial";
 import {
-  aoVivoRel, desagendarRel, estadoRel, salvarRitmoRel, sincronizarModelosRel, testarRel, agendarRel,
-  type AoVivoRel, type EstadoRel, type ModeloRel, type RitmoRel,
+  aoVivoRel, avisoDoTeste, desagendarRel, estadoRel, salvarRitmoRel, sincronizarModelosRel, testarRel, testarRelNumerosTeste, agendarRel,
+  type AoVivoRel, type EstadoRel, type ModeloRel, type NumeroTeste, type RitmoRel,
 } from "./oficialRel";
+import NumerosTeste from "./NumerosTeste";
 import NovoDisparoRel from "./NovoDisparoRel";
 import ContatosRel from "./ContatosRel";
 import FluxosRel from "./FluxosRel";
@@ -132,7 +133,7 @@ function AoVivo({ c, onFechar, onMudou }: { c: Campanha; onFechar: () => void; o
 
 // ── Lista ───────────────────────────────────────────────────────────────────
 
-function CartaoCampanha({ c, r, onAoVivo, onMudou }: { c: Campanha; r?: Resumo; onAoVivo: () => void; onMudou: () => void }) {
+function CartaoCampanha({ c, r, numerosTeste, onAoVivo, onMudou }: { c: Campanha; r?: Resumo; numerosTeste: NumeroTeste[]; onAoVivo: () => void; onMudou: () => void }) {
   const [ocupado, setOcupado] = useState(false);
   const [agendando, setAgendando] = useState(false);
   const [quando, setQuando] = useState("");
@@ -178,6 +179,18 @@ function CartaoCampanha({ c, r, onAoVivo, onMudou }: { c: Campanha; r?: Resumo; 
         <div className="flex flex-wrap items-end gap-2">
           <Campo rotulo="Dia e hora (Brasília)"><Entrada type="datetime-local" value={quando} onChange={(e) => setQuando(e.target.value)} /></Campo>
           <Botao variante="primario" disabled={ocupado || !localParaIso(quando)} onClick={() => void agir(() => agendarRel(c.id, localParaIso(quando)), "Agendado.").then(() => setAgendando(false))}>Confirmar</Botao>
+        </div>
+      )}
+      {testando && numerosTeste.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Botao variante="primario" disabled={ocupado} onClick={() => {
+            setOcupado(true);
+            void testarRelNumerosTeste({ campanhaId: c.id })
+              .then((x) => (x.erros.length ? notifyError : notifySuccess)(avisoDoTeste(x)))
+              .catch((e) => notifyError(erroDe(e, "O teste não saiu.")))
+              .finally(() => setOcupado(false));
+          }}>Mandar pros números de teste ({numerosTeste.length})</Botao>
+          <span className="text-[12px]" style={{ color: "var(--ink3)" }}>{numerosTeste.map((n) => n.nome).join(", ")} · ou um número avulso:</span>
         </div>
       )}
       {testando && (
@@ -227,8 +240,8 @@ function AbaDisparos({ est, modelos, onIrNumero }: { est: EstadoRel | null; mode
       </div>
       {lista === null ? <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>
         : !visiveis.length ? <Vazio titulo="Nenhum disparo ainda" texto="Monte o primeiro: escolha quem recebe (por etiqueta, viagem, aniversário…), o modelo aprovado e o que cada botão faz." acao={<Botao variante="primario" onClick={() => setNovo(true)}>+ Novo disparo</Botao>} />
-        : <ul className="space-y-3">{visiveis.map((c) => <CartaoCampanha key={c.id} c={c} r={res[c.id]} onAoVivo={() => setAoVivo(c)} onMudou={() => void ler()} />)}</ul>}
-      {novo && <NovoDisparoRel modelos={modelos} simulacao={est?.simulacao !== false} onFechar={() => setNovo(false)} onCriado={() => { setNovo(false); void ler(); }} />}
+        : <ul className="space-y-3">{visiveis.map((c) => <CartaoCampanha key={c.id} c={c} r={res[c.id]} numerosTeste={est?.numerosTeste ?? []} onAoVivo={() => setAoVivo(c)} onMudou={() => void ler()} />)}</ul>}
+      {novo && <NovoDisparoRel modelos={modelos} simulacao={est?.simulacao !== false} numerosTeste={est?.numerosTeste ?? []} onFechar={() => setNovo(false)} onCriado={() => { setNovo(false); void ler(); }} />}
       {aoVivo && <AoVivo c={aoVivo} onFechar={() => setAoVivo(null)} onMudou={() => void ler()} />}
     </div>
   );
@@ -236,7 +249,7 @@ function AbaDisparos({ est, modelos, onIrNumero }: { est: EstadoRel | null; mode
 
 // ── Número e ritmo ──────────────────────────────────────────────────────────
 
-function AbaNumero({ est, ehAdmin, onMudou }: { est: EstadoRel | null; ehAdmin: boolean; onMudou: () => void }) {
+function AbaNumero({ est, ehAdmin, podeTeste, onMudou }: { est: EstadoRel | null; ehAdmin: boolean; podeTeste: boolean; onMudou: () => void }) {
   const [saude, setSaude] = useState<EstadoRel["saude"]>(null);
   const [ocupado, setOcupado] = useState<"" | "sync" | "meta" | "ritmo">("");
   const [ritmo, setRitmo] = useState<RitmoRel | null>(null);
@@ -317,6 +330,7 @@ function AbaNumero({ est, ehAdmin, onMudou }: { est: EstadoRel | null; ehAdmin: 
         {ehAdmin ? <Botao variante="primario" disabled={!!ocupado} onClick={() => void salvar()}>{ocupado === "ritmo" ? "Salvando…" : "Salvar ritmo"}</Botao>
           : <p className="text-[12px]" style={{ color: "var(--ink3)" }}>Só admin muda o ritmo.</p>}
       </div>
+      <NumerosTeste atuais={est.numerosTeste ?? []} podeEditar={podeTeste} onMudou={onMudou} />
     </div>
   );
 }
@@ -362,7 +376,7 @@ export default function DisparosRelPage() {
       {aba === "fluxos" && <FluxosRel est={est} />}
       {aba === "disparos" && <AbaDisparos est={est} modelos={modelos} onIrNumero={() => ir("numero")} />}
       {aba === "contatos" && <ContatosRel ehGestor={ehGestor} />}
-      {aba === "numero" && <AbaNumero est={est} ehAdmin={ehAdmin} onMudou={() => void ler()} />}
+      {aba === "numero" && <AbaNumero est={est} ehAdmin={ehAdmin} podeTeste={ehAdmin || currentUser?.role === "gestor"} onMudou={() => void ler()} />}
     </div>
   );
 }

@@ -11,7 +11,7 @@ import type { AdaptadorFluxo } from "@/mkt/automacoes/EditorFluxo";
 import type { ResultadoSimulacao } from "@/mkt/automacoes/Simulacao";
 import { novoId, noPadrao, type Acao, type Fluxo, type Grafo, type No } from "@/mkt/automacoes/tipos";
 import type { ModeloMkt } from "@/mkt/automacoes/api";
-import { chamar } from "./oficialRel";
+import { chamar, type NumeroTeste } from "./oficialRel";
 
 function ok<T>(r: { data: T | null; error: { message: string } | null }): T {
   if (r.error) throw new Error(/rel_fluxo|schema cache|does not exist/i.test(r.error.message) ? "Os fluxos do Relacionamento precisam da migration 0409 aplicada no banco." : r.error.message);
@@ -51,7 +51,8 @@ async function usuariosRel(): Promise<{ id: string; name: string }[]> {
 export const ACOES_REL: Acao["tipo"][] = ["adicionar_tag", "remover_tag", "avisar_humano", "parar_outros_fluxos", "descadastrar", "reinscrever"];
 
 /** O adaptador do editor (o resto — botões extra, ajuda — a página completa). */
-export function adaptadorRel(extra: Partial<AdaptadorFluxo> = {}): AdaptadorFluxo {
+export function adaptadorRel(extra: Partial<AdaptadorFluxo> = {}, numerosTeste: NumeroTeste[] = []): AdaptadorFluxo {
+  const nomes = numerosTeste.map((n) => n.nome).join(", ");
   return {
     lerFluxo: lerFluxoRel,
     listarFluxos: listarFluxosRel,
@@ -63,6 +64,12 @@ export function adaptadorRel(extra: Partial<AdaptadorFluxo> = {}): AdaptadorFlux
     listarCampos: async () => [{ id: "destino", chave: "destino", rotulo: "Destino da viagem", tipo: "texto", descricao: null }],
     simular: (fluxoId, grafo) => chamar<ResultadoSimulacao>({ acao: "rel_fluxo_simular", fluxoId, grafo }),
     testar: async (fluxoId) => {
+      // Com números de teste configurados: vai pra todos eles, sem perguntar.
+      if (numerosTeste.length) {
+        const r = await chamar<{ enviados: string[]; erros: { nome: string; erro: string }[] }>({ acao: "rel_fluxo_testar", fluxoId, paraTeste: true });
+        if (r.erros?.length) throw new Error(`Saiu pra ${r.enviados.join(", ") || "ninguém"}. Falhou: ${r.erros.map((e) => `${e.nome} (${e.erro})`).join("; ")}`);
+        return;
+      }
       let telefone: string | null = null;
       try { telefone = localStorage.getItem("rel_disparo_tel_teste"); } catch { /* sem storage */ }
       const t = window.prompt("Mandar o fluxo de verdade pra qual WhatsApp? (DDD + número)", telefone ?? "");
@@ -70,7 +77,9 @@ export function adaptadorRel(extra: Partial<AdaptadorFluxo> = {}): AdaptadorFlux
       try { localStorage.setItem("rel_disparo_tel_teste", t); } catch { /* sem storage */ }
       await chamar({ acao: "rel_fluxo_testar", fluxoId, telefone: t });
     },
-    avisoTeste: "Isto MANDA as mensagens de verdade, pelo número do Relacionamento, só pro número que você digitar. Comece o fluxo por um Template (ou mande um 'oi' pro número antes). Continuar?",
+    avisoTeste: numerosTeste.length
+      ? `Isto MANDA o fluxo de verdade, pelo número do Relacionamento, pros ${numerosTeste.length} número(s) de teste: ${nomes}. Comece o fluxo por um Template. Continuar?`
+      : "Isto MANDA as mensagens de verdade, pelo número do Relacionamento, só pro número que você digitar (dica: cadastre números de teste na aba Número e ritmo). Comece o fluxo por um Template (ou mande um 'oi' pro número antes). Continuar?",
     semRelatorio: true,
     acoesPermitidas: ACOES_REL,
     resumoInicio: "Quando você dispara pra um público",

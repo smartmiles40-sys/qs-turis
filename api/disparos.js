@@ -51,7 +51,7 @@ import {
 import { acaoMarketing, acordarAgendadas, lerNumeroMkt, rodarRecorrencias, rodarSequencias } from './_mktDisparo.js';
 import { acaoMktOficial, juntarModelosMkt, rodadaMkt } from './_mktDisparoOficial.js';
 import { conferirExtra } from './_mktOficialRegras.js';
-import { acaoRelOficial, estadoRel, juntarModelosRel, lerConfigRel, registrarClique, rodadaRel } from './_relDisparoOficial.js';
+import { acaoRelOficial, estadoRel, juntarModelosRel, lerConfigRel, numerosTesteRel, registrarClique, rodadaRel } from './_relDisparoOficial.js';
 import { conferirRespostas, urlSegura } from './_relDisparoRegras.js';
 import { rodadaFluxosRel, iniciarTesteRel, agendarDisparoFluxo, cancelarDisparoFluxo, modelosParaFluxo } from './_relFluxoMotor.js';
 import { simularFluxo } from './_mktAutoRegras.js';
@@ -196,6 +196,19 @@ export default async function handler(req, res) {
       return res.status(200).json(simularFluxo(fluxo, { pessoa, janela: body.janela !== false, respostas: body.respostas || {} }));
     }
     if (acao === 'rel_fluxo_modelos') return res.status(200).json(await modelosParaFluxo());
+    if (acao === 'rel_fluxo_testar' && body.paraTeste === true) {
+      // Os números de teste configurados (aba Número e ritmo): o fluxo começa pra cada um.
+      const lista = await numerosTesteRel();
+      if (!lista.length) return res.status(400).json({ error: 'Nenhum número de teste configurado (aba Número e ritmo).' });
+      const enviados = [], erros = [];
+      for (const n of lista) {
+        const r = await iniciarTesteRel({ fluxoId: String(body.fluxoId || ''), telefone: n.telefone, nome: n.nome });
+        if (r.erro) erros.push({ nome: n.nome, erro: r.erro }); else enviados.push(n.nome);
+        if (r.erro && /travado|não encontrado|Template|Ligue/i.test(r.erro)) break; // problema do fluxo/trava: igual pra todos
+      }
+      if (!enviados.length) return res.status(422).json({ error: erros[0]?.erro || 'Não enviou.', erros });
+      return res.status(200).json({ ok: true, enviados, erros });
+    }
     if (acao === 'rel_fluxo_testar') {
       const telefone = body.telefone || u.whatsapp_number;
       if (!telefone) return res.status(400).json({ error: 'Informe o número pra testar (ou cadastre seu WhatsApp no perfil do QS).' });
