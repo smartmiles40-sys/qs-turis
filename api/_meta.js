@@ -241,6 +241,10 @@ export async function listarModelos(phoneId = null) {
       cabecalho: header?.format === 'TEXT' ? header.text : null,
       cabecalhoMidia: header && header.format !== 'TEXT' ? header.format : null,
       rodape: comp.find((c) => String(c.type).toUpperCase() === 'FOOTER')?.text || null,
+      botoes: (comp.find((c) => String(c.type).toUpperCase() === 'BUTTONS')?.buttons || []).map((b) => ({
+        tipo: b.type === 'QUICK_REPLY' ? 'resposta' : b.type === 'URL' ? 'link' : b.type === 'PHONE_NUMBER' ? 'ligar' : String(b.type || '').toLowerCase(),
+        texto: b.text || '', url: b.url || null, telefone: b.phone_number || null,
+      })),
       variaveis: [...corpo.matchAll(/{{\s*([^}]+?)\s*}}/g)].map((m) => m[1]),
       // O exemplo que foi pra Meta aprovar ({{1}} → "Maria"): a tela de envio
       // mostra ele pra pessoa saber o que vai em cada campo.
@@ -315,11 +319,53 @@ export async function subirExemploDoTopo(bytes, mime, nomeArquivo = 'exemplo', p
 }
 
 /**
+ * BOTÕES DO MODELO (19/11): resposta rápida, link (site) e ligar.
+ * Entrada: [{ tipo: 'resposta'|'link'|'ligar', texto, url?, telefone? }].
+ * Regras da Meta: até 10 botões, até 2 de link, 1 de ligar, texto até 25
+ * caracteres e sem repetir; respostas rápidas têm que vir JUNTAS (antes dos
+ * outros) — a função já ordena. Link FIXO (sem {{1}}): quem envia não precisa
+ * preencher nada, então funciona em todo lugar (disparo, fluxo, conversa).
+ * Devolve { componente } (ou null sem botões) ou { erro }.
+ */
+export function montarBotoesModelo(botoes) {
+  const lista = (Array.isArray(botoes) ? botoes : []).filter((b) => b && typeof b === 'object');
+  if (!lista.length) return { componente: null };
+  if (lista.length > 10) return { erro: 'No máximo 10 botões por modelo.' };
+  const vistos = new Set();
+  const respostas = [], outros = [];
+  let nLink = 0, nLigar = 0;
+  for (const b of lista) {
+    const texto = String(b.texto ?? '').trim();
+    if (!texto) return { erro: 'Escreva o texto de cada botão.' };
+    if (texto.length > 25) return { erro: `O botão "${texto}" passa de 25 caracteres.` };
+    if (/[\u{1F000}-\u{1FFFF}\u2600-\u27BF]/u.test(texto)) return { erro: `Tire o emoji do botão "${texto}" — a Meta recusa.` };
+    const chave = texto.toLowerCase();
+    if (vistos.has(chave)) return { erro: `Dois botões com o texto "${texto}".` };
+    vistos.add(chave);
+    if (b.tipo === 'resposta') respostas.push({ type: 'QUICK_REPLY', text: texto });
+    else if (b.tipo === 'link') {
+      const url = String(b.url ?? '').trim();
+      if (!/^https?:\/\/[^\s]+\.[^\s]+$/i.test(url)) return { erro: `O link do botão "${texto}" precisa ser um endereço completo (https://…).` };
+      if (/{{/.test(url)) return { erro: `O link do botão "${texto}" tem que ser fixo (sem {{1}}).` };
+      if (++nLink > 2) return { erro: 'No máximo 2 botões de link.' };
+      outros.push({ type: 'URL', text: texto, url });
+    } else if (b.tipo === 'ligar') {
+      let tel = String(b.telefone ?? '').replace(/\D/g, '');
+      if (tel.length === 10 || tel.length === 11) tel = `55${tel}`;
+      if (tel.length < 12 || tel.length > 15) return { erro: `O telefone do botão "${texto}" está inválido (DDD + número).` };
+      if (++nLigar > 1) return { erro: 'Só 1 botão de ligar.' };
+      outros.push({ type: 'PHONE_NUMBER', text: texto, phone_number: `+${tel}` });
+    } else return { erro: 'Tipo de botão desconhecido.' };
+  }
+  return { componente: { type: 'BUTTONS', buttons: [...respostas, ...outros] } };
+}
+
+/**
  * `midia` (14/10) = topo com arquivo: { formato: 'IMAGE'|'VIDEO'|'DOCUMENT',
  * bytes, mime, nomeArquivo } — o arquivo é o EXEMPLO que o revisor da Meta vê.
  * Com `midia`, o `cabecalho` de texto é ignorado (o topo é um só).
  */
-export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, rodape, exemplos = null, midia = null, phoneId = null }) {
+export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, rodape, exemplos = null, midia = null, botoes = null, phoneId = null }) {
   // phoneId = número de SDR (29/09): o modelo vai pra análise na conta DELE.
   const cr = await credenciaisDaMeta(phoneId);
   if (!cr) return { erro: 'sem-caixa-oficial' };
@@ -327,6 +373,8 @@ export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, r
 
   const problema = validarModelo({ nome, categoria, corpo });
   if (problema) return { erro: 'invalido', mensagem: problema };
+  const bt = montarBotoesModelo(botoes);
+  if (bt.erro) return { erro: 'invalido', mensagem: bt.erro };
 
   const components = [];
   if (midia) {
@@ -347,6 +395,7 @@ export async function criarModelo({ nome, categoria, idioma, corpo, cabecalho, r
   if (vars.length) corpoBloco.example = { body_text: [vars.map(ex)] };
   components.push(corpoBloco);
   if (rodape?.trim()) components.push({ type: 'FOOTER', text: rodape.trim() });
+  if (bt.componente) components.push(bt.componente);
 
   try {
     const d = await graph(`/${cr.waba}/message_templates`, {

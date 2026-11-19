@@ -13,7 +13,7 @@
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import type { NumeroMeta } from "@/lib/qs/metaConexao";
-import { criarModeloNaMeta, excluirModeloNaMeta, listarModelosAdmin, type WaModeloAdmin } from "@/lib/qs/waInbox";
+import { criarModeloNaMeta, excluirModeloNaMeta, listarModelosAdmin, type BotaoModelo, type WaModeloAdmin } from "@/lib/qs/waInbox";
 import { ACEITA_DO_TOPO, ROTULO_DO_TOPO, arquivoParaBase64, problemaDoArquivoDoTopo } from "@/lib/qs/modeloCampos";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
 
@@ -29,6 +29,31 @@ const STATUS_MODELO: Record<string, { txt: string; tom: "rel" | "aviso" | "erro"
 };
 
 const NOME_OK = /^[a-z0-9_]{1,512}$/;
+
+const TIPO_BOTAO: Record<BotaoModelo["tipo"], { rotulo: string; dica: string; icone: string }> = {
+  resposta: { rotulo: "Resposta rápida", dica: "O cliente toca e a resposta volta pra conversa (ex.: Quero saber, Agora não). Nos fluxos, cada uma vira uma saída.", icone: "↩" },
+  link: { rotulo: "Link", dica: "Abre um site. Endereço fixo, completo (https://…).", icone: "🔗" },
+  ligar: { rotulo: "Ligar", dica: "Liga pro número que você puser.", icone: "📞" },
+};
+
+/** O problema dos botões (o servidor confere de novo), ou null. */
+function problemaDosBotoes(bs: BotaoModelo[]): string | null {
+  if (bs.length > 10) return "No máximo 10 botões.";
+  if (bs.filter((b) => b.tipo === "link").length > 2) return "No máximo 2 botões de link.";
+  if (bs.filter((b) => b.tipo === "ligar").length > 1) return "Só 1 botão de ligar.";
+  const textos = new Set<string>();
+  for (const b of bs) {
+    const t = b.texto.trim();
+    if (!t) return "Escreva o texto de cada botão.";
+    if (t.length > 25) return `O botão "${t}" passa de 25 caracteres.`;
+    if (textos.has(t.toLowerCase())) return `Dois botões com o texto "${t}".`;
+    textos.add(t.toLowerCase());
+    if (b.tipo === "link" && !/^https?:\/\/\S+\.\S+$/i.test((b.url ?? "").trim())) return `O link do botão "${t}" precisa ser completo (https://…).`;
+    if (b.tipo === "link" && /{{/.test(b.url ?? "")) return `O link do botão "${t}" tem que ser fixo (sem {{1}}).`;
+    if (b.tipo === "ligar" && (b.telefone ?? "").replace(/\D/g, "").length < 10) return `O telefone do botão "${t}" está incompleto (DDD + número).`;
+  }
+  return null;
+}
 
 export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, podeEditar = true, podeExcluir = podeEditar, area }: {
   n: Pick<NumeroMeta, "phoneId" | "numero">;
@@ -62,6 +87,8 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
   const [titulo, setTitulo] = useState("");
   // Arquivo de EXEMPLO do topo — o revisor da Meta vê; no envio vai o de verdade.
   const [arquivoTopo, setArquivoTopo] = useState<File | null>(null);
+  const [botoes, setBotoes] = useState<BotaoModelo[]>([]);
+  const mudarBotao = (i: number, m: Partial<BotaoModelo>) => setBotoes((bs) => bs.map((b, j) => (j === i ? { ...b, ...m } : b)));
 
   const carregar = useCallback(async () => {
     const r = await listarModelosAdmin(n.phoneId, area);
@@ -79,6 +106,8 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
     if (area && numeros.some((v) => !rotuloDe(v).trim())) { setErroForm("Diga o que é cada campo (ex.: Primeiro nome do cliente) — quem envia vê isso."); return; }
     if (topo === "TEXT" && !titulo.trim()) { setErroForm("Escreva o título do topo (ou escolha Topo: nenhum)."); return; }
     if (topo === "TEXT" && /{{/.test(titulo)) { setErroForm("O título do topo não aceita campos {{n}} por aqui — escreva um texto fixo."); return; }
+    const pb = problemaDosBotoes(botoes);
+    if (pb) { setErroForm(pb); return; }
     const ehArquivo = topo === "IMAGE" || topo === "VIDEO" || topo === "DOCUMENT";
     if (ehArquivo) {
       const p = problemaDoArquivoDoTopo(topo, arquivoTopo);
@@ -97,6 +126,7 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
       nome, categoria: form.categoria, idioma: "pt_BR", corpo: form.corpo.trim(), rodape: form.rodape.trim() || undefined, exemplos: listaEx,
       cabecalho: topo === "TEXT" ? titulo.trim() : undefined, midia,
       campos: area ? Object.fromEntries(numeros.map((v) => [v, rotuloDe(v).trim()])) : undefined,
+      botoes: botoes.length ? botoes.map((b) => ({ tipo: b.tipo, texto: b.texto.trim(), url: b.tipo === "link" ? (b.url ?? "").trim() : null, telefone: b.tipo === "ligar" ? b.telefone ?? "" : null })) : undefined,
     }, n.phoneId, area);
     setSalvando(false);
     if (!r.ok) { setErroForm(r.error || "A Meta recusou."); return; }
@@ -104,7 +134,7 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
     setForm({ nome: "", categoria: "UTILITY", corpo: "", rodape: "" });
     setExemplos({});
     setRotulos({});
-    setTopo("nenhum"); setTitulo(""); setArquivoTopo(null);
+    setTopo("nenhum"); setTitulo(""); setArquivoTopo(null); setBotoes([]);
     await carregar();
   }
 
@@ -158,6 +188,14 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
                       {m.cabecalhoMidia && <Etiqueta>📎 {ROTULO_DO_TOPO[m.cabecalhoMidia.toUpperCase()] ?? m.cabecalhoMidia.toLowerCase()} no topo</Etiqueta>}
                     </div>
                     <p className="text-[13px] mt-1 whitespace-pre-wrap" style={{ color: "var(--ink2)" }}>{m.corpo}</p>
+                    {!!m.botoes?.length && (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {m.botoes.map((b, i) => (
+                          <span key={i} className="rounded-full border px-2.5 py-0.5 text-[12px]" style={{ borderColor: "var(--line)", color: "var(--ink2)" }}
+                            title={b.url || b.telefone || "Resposta rápida"}>{TIPO_BOTAO[b.tipo as BotaoModelo["tipo"]]?.icone ?? "•"} {b.texto}</span>
+                        ))}
+                      </div>
+                    )}
                     {m.motivo && <p className="text-[12px] mt-1" style={{ color: "var(--err-ink)" }}>Motivo da Meta: {m.motivo}</p>}
                   </div>
                   {podeExcluir && (confirmar === chave ? (
@@ -246,6 +284,37 @@ export default function ModelosDoNumero({ n, onCopiar, ocupadoFora = false, pode
           <Campo rotulo="Rodapé (opcional)">
             <Entrada value={form.rodape} onChange={(e) => setForm({ ...form, rodape: e.target.value })} placeholder="Se Tu For, Eu Vou! Viagens" />
           </Campo>
+          <div className="rel-card p-3 space-y-2">
+            <div>
+              <p className="text-[12px] font-semibold" style={{ color: "var(--ink2)" }}>Botões (opcional)</p>
+              <p className="text-[12px]" style={{ color: "var(--ink3)" }}>Respostas rápidas, link pra um site ou botão de ligar, embaixo da mensagem. Até 10 botões (no máximo 2 links e 1 de ligar), texto até 25 letras, sem emoji.</p>
+            </div>
+            {botoes.map((b, i) => (
+              <div key={i} className="rounded-lg p-2 space-y-1.5" style={{ background: "var(--line2)" }}>
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] font-semibold whitespace-nowrap" style={{ color: "var(--ink2)" }} title={TIPO_BOTAO[b.tipo].dica}>{TIPO_BOTAO[b.tipo].icone} {TIPO_BOTAO[b.tipo].rotulo}</span>
+                  <Entrada value={b.texto} maxLength={25} aria-label={`Texto do botão ${i + 1}`}
+                    placeholder={b.tipo === "resposta" ? "Ex.: Quero saber" : b.tipo === "link" ? "Ex.: Ver as datas" : "Ex.: Falar com a gente"}
+                    onChange={(e) => mudarBotao(i, { texto: e.target.value })} />
+                  <span className="text-[11px] tabular-nums" style={{ color: "var(--ink3)" }}>{b.texto.length}/25</span>
+                  <button type="button" className="px-1.5 text-[16px] leading-none" style={{ color: "var(--ink3)" }} aria-label={`Tirar o botão ${i + 1}`}
+                    onClick={() => setBotoes((bs) => bs.filter((_, j) => j !== i))}>×</button>
+                </div>
+                {b.tipo === "link" && <Entrada value={b.url ?? ""} inputMode="url" aria-label={`Link do botão ${i + 1}`} placeholder="https://seturforeuvou.com.br/datas-2027" onChange={(e) => mudarBotao(i, { url: e.target.value })} />}
+                {b.tipo === "ligar" && <Entrada value={b.telefone ?? ""} inputMode="tel" aria-label={`Telefone do botão ${i + 1}`} placeholder="DDD + número" onChange={(e) => mudarBotao(i, { telefone: e.target.value })} />}
+              </div>
+            ))}
+            {botoes.length < 10 && (
+              <div className="flex flex-wrap gap-2">
+                <Botao variante="fantasma" onClick={() => setBotoes((bs) => [...bs, { tipo: "resposta", texto: "" }])}>+ Resposta rápida</Botao>
+                <Botao variante="fantasma" disabled={botoes.filter((b) => b.tipo === "link").length >= 2} onClick={() => setBotoes((bs) => [...bs, { tipo: "link", texto: "", url: "" }])}>+ Link</Botao>
+                <Botao variante="fantasma" disabled={botoes.some((b) => b.tipo === "ligar")} onClick={() => setBotoes((bs) => [...bs, { tipo: "ligar", texto: "", telefone: "" }])}>+ Ligar</Botao>
+              </div>
+            )}
+            {botoes.some((b) => b.tipo === "resposta") && botoes.some((b) => b.tipo !== "resposta") && (
+              <p className="text-[11.5px]" style={{ color: "var(--ink3)" }}>A Meta mostra as respostas rápidas primeiro e depois os links/ligar — o QS já organiza.</p>
+            )}
+          </div>
           <Aviso>A Meta analisa cada modelo: costuma levar de alguns minutos a algumas horas. Só dá pra usar depois de <b>Aprovado</b>.</Aviso>
           {erroForm && <Aviso tom="erro">{erroForm}</Aviso>}
         </div>

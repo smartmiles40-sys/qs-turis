@@ -368,6 +368,7 @@ export default async function handler(req, res) {
       nome, categoria: body.categoria, idioma: body.idioma || 'pt_BR',
       corpo: body.corpo, cabecalho: body.cabecalho, rodape: body.rodape,
       exemplos: Array.isArray(body.exemplos) ? body.exemplos.map((x) => String(x ?? '').slice(0, 200)) : null,
+      botoes: Array.isArray(body.botoes) ? body.botoes.slice(0, 10) : null,
       phoneId: phone,
     });
     if (r.erro) return res.status(faltaConfig(r.erro) ? 503 : 400).json({ error: r.mensagem || textoDeConfig(r.erro) || 'Não consegui criar o modelo.' });
@@ -437,6 +438,7 @@ export default async function handler(req, res) {
         corpo: body.corpo, cabecalho: body.cabecalho, rodape: body.rodape,
         exemplos: Array.isArray(body.exemplos) ? body.exemplos.map((x) => String(x ?? '').slice(0, 200)) : null,
         midia,
+        botoes: Array.isArray(body.botoes) ? body.botoes.slice(0, 10) : null,
         phoneId: phoneModelo,
       });
       if (r.erro) return res.status(faltaConfig(r.erro) ? 503 : 400).json({ error: r.mensagem || textoDeConfig(r.erro) || 'Não consegui criar o modelo.' });

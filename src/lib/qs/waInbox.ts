@@ -214,7 +214,12 @@ export interface WaModeloAdmin extends WaModelo {
   motivo: string | null;
   /** Modelo com cabeçalho de mídia (IMAGE/VIDEO) — não dá pra enviar pelo QS. */
   cabecalhoMidia?: string | null;
+  /** Botões do modelo (resposta rápida, link, ligar). */
+  botoes?: BotaoModelo[];
 }
+
+/** Botão de modelo (19/11): resposta rápida, link fixo ou ligar. */
+export interface BotaoModelo { tipo: "resposta" | "link" | "ligar"; texto: string; url?: string | null; telefone?: string | null }
 
 /** `phoneId` = número de um SDR (conta própria na Meta); sem ele, o oficial. */
 /** area "financeiro" (19/10): só os fin_* do número do Relacionamento — o servidor escolhe o número. */
@@ -243,6 +248,8 @@ export interface NovoModelo {
   midia?: { formato: "IMAGE" | "VIDEO" | "DOCUMENT"; base64: string; mime: string; nome: string };
   /** O que é cada {{n}} ("Primeiro nome do cliente") — só na área do Financeiro (19/10). */
   campos?: Record<string, string>;
+  /** Botões (19/11): até 10; até 2 links e 1 ligar. */
+  botoes?: BotaoModelo[];
 }
 
 export async function criarModeloNaMeta(m: NovoModelo, phoneId?: string | null, area?: "financeiro"): Promise<{ ok: boolean; status?: string; error?: string }> {
