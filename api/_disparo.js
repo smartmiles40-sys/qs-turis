@@ -547,7 +547,8 @@ export async function rodada({ limiteMs = 45_000 } = {}) {
 
   // Marketing (0341): as campanhas dele têm rodada própria (api/_mktDisparoOficial.js,
   // cron /api/disparos?mkt=1), com travas próprias. Aqui só Comercial e Rel.
-  const campanhas = await rest('qs_disparo_campanhas?select=*&status=eq.enviando&setor=neq.marketing&order=iniciada_em.asc').catch(() => []);
+  // Marketing (0341) e Relacionamento (0408) têm rodada OFICIAL própria: aqui só o Comercial.
+  const campanhas = await rest('qs_disparo_campanhas?select=*&status=eq.enviando&setor=eq.comercial&order=iniciada_em.asc').catch(() => []);
   const resumo = [];
   const folga = new Map(); // número → quanto ainda pode nesta rodada (vale entre campanhas)
   const velho = new Date(Date.now() - TRAVA_MS).toISOString();

@@ -22,6 +22,7 @@ import { rotuloDaMidia } from './_waMidia.js';
 import { ehPedidoDeParada } from './_waOptout.js';
 import { chaveDoWamid } from './_relGruposPrivado.js';
 import { motivoDaFalha, ehMidiaDoClienteQueNaoChegou } from './_waFalhas.js';
+import { tratarCliqueDeDisparo } from './_relDisparoBotoes.js';
 
 const STATUS_OK = new Set(['sent', 'delivered', 'read', 'failed']);
 
@@ -204,6 +205,8 @@ export async function processarRelacionamento(ch, numero, nomes) {
         // "PARAR" antes de qualquer resposta automática.
         if (r.conversa && ehPedidoDeParada(lerMensagemMeta(m)?.texto || '')) await registrarOptoutRel(r.conversa);
         if (r.conversa) await talvezAvisarForaDoHorario({ phoneId, telefone, conversaId: r.conversa });
+        // 0408: tocou num botão de um disparo do Rel → registra e faz o que a campanha mandou.
+        await tratarCliqueDeDisparo({ m, phoneId, telefone, conversaId: r.conversa });
       }
     }
     for (const st of value.statuses || []) {

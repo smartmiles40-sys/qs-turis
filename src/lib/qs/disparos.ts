@@ -13,7 +13,7 @@ export type SetorDisparo = "comercial" | "relacionamento" | "marketing";
 
 // ── Variáveis do modelo ─────────────────────────────────────────────────────
 
-export type Fonte = "nome" | "sdr" | "destino" | "link_grupo" | "texto" | "campo";
+export type Fonte = "nome" | "sdr" | "destino" | "link_grupo" | "texto" | "campo" | "link";
 export type MapaVariaveis = Record<string, { fonte: Fonte; valor?: string }>;
 
 export const FONTES: { id: Fonte; rotulo: string; dica: string; setores: SetorDisparo[] }[] = [
@@ -23,6 +23,8 @@ export const FONTES: { id: Fonte; rotulo: string; dica: string; setores: SetorDi
   { id: "link_grupo", rotulo: "Link do grupo da expedição", dica: "https://chat.whatsapp.com/…", setores: ["relacionamento"] },
   { id: "texto", rotulo: "Texto fixo", dica: "o que você escrever", setores: ["comercial", "relacionamento", "marketing"] },
   { id: "campo", rotulo: "Campo do contato (coluna do CSV)", dica: "valor do campo", setores: ["marketing"] },
+  // 0408: o link passa pelo QS (conta quem clicou) e segue pro endereço.
+  { id: "link", rotulo: "Link rastreado (conta o clique)", dica: "https://qs…/l/…", setores: ["relacionamento"] },
 ];
 
 export const variaveisDoCorpo = (corpo: string) =>
@@ -35,6 +37,7 @@ export function preverTexto(corpo: string, mapa: MapaVariaveis, grupoLink?: stri
     if (c.fonte === "texto") return c.valor || `[${k}]`;
     if (c.fonte === "link_grupo") return grupoLink || "https://chat.whatsapp.com/…";
     if (c.fonte === "campo") return c.valor ? `[${c.valor}]` : `[${k}]`;
+    if (c.fonte === "link") return c.valor || "https://…";
     return FONTES.find((f) => f.id === c.fonte)?.dica ?? `[${k}]`;
   });
 }
@@ -81,6 +84,15 @@ export interface PublicoRel {
   sem_viagem_futura?: boolean;
   niveis?: string[];
   viajou?: "" | "sim" | "nao";
+  // 0408 (igual ao ManyChat)
+  etiquetas?: string[];
+  etiquetas_modo?: "qualquer" | "todas";
+  sem_etiquetas?: string[];
+  aniversario_mes?: number | "";
+  embarque_de?: string;
+  embarque_ate?: string;
+  estados?: string[];
+  clientes?: string[];
 }
 export type Publico = PublicoComercial & PublicoRel;
 
@@ -122,9 +134,16 @@ export function descreverPublico(setor: SetorDisparo, p: Publico): string {
   if (p.niveis?.length) partes.push(`nível: ${p.niveis.join(", ")}`);
   if (p.viajou === "sim") partes.push("já viajou com a gente");
   if (p.viajou === "nao") partes.push("nunca viajou");
+  if (p.etiquetas?.length) partes.push(`etiquetas ${p.etiquetas_modo === "todas" ? "(todas)" : "(qualquer)"}: ${p.etiquetas.join(", ")}`);
+  if (p.sem_etiquetas?.length) partes.push(`sem: ${p.sem_etiquetas.join(", ")}`);
+  if (p.aniversario_mes) partes.push(`aniversário em ${MESES[Number(p.aniversario_mes) - 1] ?? p.aniversario_mes}`);
+  if (p.embarque_de || p.embarque_ate) partes.push(`embarca ${p.embarque_de ? `de ${br(p.embarque_de)}` : ""} ${p.embarque_ate ? `até ${br(p.embarque_ate)}` : ""}`.trim());
+  if (p.estados?.length) partes.push(`UF: ${p.estados.join(", ")}`);
+  if (p.clientes?.length) partes.push(`${p.clientes.length} cliente(s) escolhido(s)`);
   return partes.length ? `Clientes — ${partes.join(" · ")}` : "Todos os clientes";
 }
 const br = (iso: string) => iso.split("-").reverse().join("/");
+export const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
 
 // ── Campanhas e envios ──────────────────────────────────────────────────────
 
@@ -151,6 +170,8 @@ export interface Campanha {
   recorrencia_id?: string | null;
   sequencia_id?: string | null;
   sequencia_passo?: number | null;
+  // 0341/0408: mídia do topo, botões e respostas dos botões
+  envio_extra?: Record<string, unknown> | null;
 }
 
 export type StatusEnvio = "pendente" | "pulado" | "enviado" | "entregue" | "lido" | "respondeu" | "erro" | "cancelado";

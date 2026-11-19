@@ -28,6 +28,14 @@
 //          'mkt_salvar_ritmo_oficial' | 'mkt_salvar_precos' }
 //   A rodada do Comercial/Rel (rodada()) não pega mais campanha do Marketing.
 //
+// RELACIONAMENTO "IGUAL AO MANYCHAT" (0408) — envio oficial pelo número do Rel
+// (api/_relDisparoOficial.js):
+//   GET  /api/disparos?rel=1 (Vercel Cron) → rodadaRel
+//   GET  /l/<envio>/<variável> → /api/disparos?l=…&k=… (público): conta o clique e segue
+//   POST { acao: 'rel_oficial_estado' | 'rel_sincronizar_modelos' | 'rel_kpis' |
+//          'rel_salvar_ritmo' | 'rel_teste' | 'rel_etiquetar' | 'rel_etiqueta_renomear' | 'rel_etiqueta_apagar' }
+//   'agendar'/'desagendar' valem pro Rel também. O clique no botão é api/_relDisparoBotoes.js.
+//
 // Ler a lista de campanhas e de envios a tela faz direto no banco (RLS 0217).
 // Escrever é SÓ aqui (service_role). O interruptor da simulação NÃO tem botão:
 // desligar é uma decisão do Bruno, por SQL (ver docs/DISPARO-EM-MASSA.md).
@@ -43,13 +51,17 @@ import {
 import { acaoMarketing, acordarAgendadas, lerNumeroMkt, rodarRecorrencias, rodarSequencias } from './_mktDisparo.js';
 import { acaoMktOficial, juntarModelosMkt, rodadaMkt } from './_mktDisparoOficial.js';
 import { conferirExtra } from './_mktOficialRegras.js';
+import { acaoRelOficial, estadoRel, juntarModelosRel, lerConfigRel, registrarClique, rodadaRel } from './_relDisparoOficial.js';
+import { conferirRespostas, urlSegura } from './_relDisparoRegras.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SETORES = ['comercial', 'relacionamento', 'marketing'];
 const FONTES = ['nome', 'sdr', 'destino', 'link_grupo', 'texto'];
 // Marketing (0242): sem SDR; ganha o "campo" livre do contato.
 const FONTES_MKT = ['nome', 'destino', 'texto', 'campo'];
-const fontesDo = (setor) => (setor === 'marketing' ? FONTES_MKT : FONTES);
+// Relacionamento (0408): sem SDR; ganha o "link" rastreado (conta o clique).
+const FONTES_REL = ['nome', 'destino', 'link_grupo', 'texto', 'link'];
+const fontesDo = (setor) => (setor === 'marketing' ? FONTES_MKT : setor === 'relacionamento' ? FONTES_REL : FONTES);
 function safeParse(s) { try { return JSON.parse(s); } catch { return {}; } }
 const varsDoCorpo = (corpo) => [...new Set([...String(corpo || '').matchAll(/{{\s*([^}]+?)\s*}}/g)].map((m) => m[1]))];
 
@@ -99,9 +111,26 @@ function pacoteDaMeta(m) {
 export default async function handler(req, res) {
   // ── Cron ──
   if (req.method === 'GET') {
+    // Link rastreado do Rel (0408): público, sem login — só registra o 1º clique e segue.
+    if (req.query?.l) {
+      const destino = await registrarClique(String(req.query.l), String(req.query.k || '')).catch(() => null);
+      if (destino && urlSegura(destino)) {
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Location', destino);
+        return res.status(302).end();
+      }
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.status(404).send('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><p style="font-family:sans-serif;padding:24px">Este link não está mais disponível.</p>');
+    }
     const segredo = String(process.env.CRON_SECRET || '').trim();
     const veio = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
     if (!segredo || veio !== segredo) return res.status(401).json({ error: 'Não autorizado' });
+    // Relacionamento (0408): cron próprio, só a rodada do Rel.
+    if (String(req.query?.rel || '') === '1') {
+      const r = await rodadaRel().catch((e) => ({ erro: e?.message }));
+      console.log('[disparos] cron rel:', JSON.stringify(r).slice(0, 800));
+      return res.status(200).json({ relacionamento: r });
+    }
     // Marketing (0341): cron próprio, só a rodada do Marketing.
     if (String(req.query?.mkt || '') === '1') {
       const r = await rodadaMkt().catch((e) => ({ erro: e?.message }));
@@ -141,10 +170,22 @@ export default async function handler(req, res) {
       setor = campanha.setor;
     }
     if (acao.startsWith('mkt_')) setor = 'marketing';
+    if (acao.startsWith('rel_')) setor = 'relacionamento';
     if (!(await podeDisparar(u, setor))) return res.status(403).json({ error: 'Seu cargo não permite disparos.' });
     const cfg = await lerConfig();
     // Marketing (0341): os modelos sincronizados da WABA dele entram na lista.
     if (setor === 'marketing') cfg.modelos = await juntarModelosMkt(cfg.modelos);
+    // Relacionamento (0408): os da WABA do Rel + ritmo próprio (intervalo entre disparos).
+    if (setor === 'relacionamento') {
+      cfg.modelos = await juntarModelosRel(cfg.modelos);
+      cfg.ritmo = { ...cfg.ritmo, ...(await lerConfigRel()).ritmo };
+    }
+
+    if (acao.startsWith('rel_')) {
+      const r = await acaoRelOficial({ acao, body, u });
+      if (r) return res.status(r.status).json(r.json);
+      return res.status(400).json({ error: 'Ação inválida.' });
+    }
 
     // Marketing (0242): agendar, número, recorrências e sequências.
     if (acao.startsWith('mkt_') || acao === 'agendar' || acao === 'desagendar') {
@@ -165,6 +206,11 @@ export default async function handler(req, res) {
         // Marketing (0242): o número dele (null = não envia).
         ...(setor === 'marketing' ? { numeroMkt: await lerNumeroMkt() } : {}),
         // Marketing (0341): simulação e travas são DELE (mkt_disparo_simulacao + env).
+        // Relacionamento (0408): simulação e travas são DELE (rel_disparo_simulacao + env).
+        ...(setor === 'relacionamento' ? await (async () => {
+          const est = await estadoRel();
+          return { simulacao: est.simulacao !== false, envioRealPlugado: true, relOficial: est };
+        })() : {}),
         ...(setor === 'marketing' ? await (async () => {
           const est = (await acaoMktOficial({ acao: 'mkt_oficial_estado', body: {}, u }))?.json || {};
           return { simulacao: est.simulacao !== false, envioRealPlugado: true, mktOficial: est };
@@ -194,6 +240,8 @@ export default async function handler(req, res) {
       const params = body.params && typeof body.params === 'object' ? body.params : {};
       const falta = varsDoCorpo(modelo.corpo).find((k) => !params[k] || !fontesDo(setor).includes(params[k].fonte) || (['texto', 'campo'].includes(params[k].fonte) && !String(params[k].valor || '').trim()));
       if (falta) return res.status(400).json({ error: `Falta dizer de onde vem a variável {{${falta}}}.` });
+      const linkRuim = Object.entries(params).find(([, x]) => x?.fonte === 'link' && !urlSegura(x.valor));
+      if (linkRuim) return res.status(400).json({ error: `O link da variável {{${linkRuim[0]}}} precisa começar com https://` });
       if (setor === 'comercial' && !UUID.test(String(body.cadence_id || ''))) return res.status(400).json({ error: 'Escolha a cadência: o disparo é o passo 1 dela.' });
       if (Object.values(params).some((x) => x.fonte === 'link_grupo') && !/^https:\/\/chat\.whatsapp\.com\//.test(String(body.grupo_link || ''))) {
         return res.status(400).json({ error: 'Cole o link de convite do grupo (https://chat.whatsapp.com/…).' });
@@ -201,10 +249,16 @@ export default async function handler(req, res) {
       // Marketing (0341): modelo da Meta com mídia no topo, título variável ou
       // botão de link dinâmico precisa dos extras. Só entra no insert quando há.
       let extraMkt = null;
-      if (setor === 'marketing' && modelo.origem === 'meta') {
+      if ((setor === 'marketing' || setor === 'relacionamento') && modelo.origem === 'meta') {
         const ex = conferirExtra(modelo, body.envio_extra);
         if (ex.erro) return res.status(400).json({ error: ex.erro });
         extraMkt = { modelo_categoria: modelo.categoriaMeta || modelo.categoria, envio_extra: ex.extra };
+        // Relacionamento (0408): o que fazer quando tocarem em cada botão.
+        if (setor === 'relacionamento') {
+          const rs = conferirRespostas(modelo, body.envio_extra?.respostas);
+          if (rs.erro) return res.status(400).json({ error: rs.erro });
+          if (Object.keys(rs.respostas).length) extraMkt.envio_extra = { ...ex.extra, respostas: rs.respostas };
+        }
       }
       const nova = await rest('qs_disparo_campanhas', {
         method: 'POST', prefer: 'return=representation',
@@ -225,7 +279,8 @@ export default async function handler(req, res) {
       if (setor === 'marketing' && !p.numeroOk) return res.status(409).json({ error: 'O Marketing ainda não tem número (aba Número). Sem número, não envia.' });
       if (!p.recebem.length) return res.status(400).json({ error: 'Ninguém recebe com esse filtro.' });
       const f = await montarFila({ campanha, recebem: p.recebem, de: 'rascunho' });
-      return res.status(200).json({ ok: true, total: f.total, simulacao: cfg.simulacao });
+      const simIniciar = setor === 'relacionamento' ? (await lerConfigRel()).simulacao : cfg.simulacao;
+      return res.status(200).json({ ok: true, total: f.total, simulacao: simIniciar });
     }
 
     if (acao === 'pausar') {

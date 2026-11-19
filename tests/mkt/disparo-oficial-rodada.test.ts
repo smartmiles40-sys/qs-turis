@@ -284,7 +284,8 @@ test("Comercial: a rodada compartilhada não pega campanha do Marketing e contin
   const get = chamadas.find((c) => c.metodo === "GET" && c.url.includes("/rest/v1/qs_disparo_campanhas"));
   assert.ok(get, "consultou as campanhas");
   assert.match(get!.url, /status=eq\.enviando/);
-  assert.match(get!.url, /setor=neq\.marketing/);
+  // 0408: o Relacionamento também tem rodada própria — aqui só o Comercial.
+  assert.match(get!.url, /setor=eq\.comercial/);
   assert.deepEqual(r, { ok: true, simulacao: true, campanhas: [] }); // a do Marketing ficou de fora
   assert.equal(envios[0].status, "pendente");
   assert.equal(graphTodas().length, 0);

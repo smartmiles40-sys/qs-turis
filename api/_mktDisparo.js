@@ -337,7 +337,8 @@ export async function acaoMarketing({ acao, body, u, cfg, fontes }) {
 
   if (acao === 'agendar') {
     const c = body._campanha;
-    if (c.setor !== 'marketing') return { status: 400, json: { error: 'Agendamento é do Marketing.' } };
+    // 0408: o Relacionamento também agenda (a rodada dele pega quando acordar).
+    if (c.setor !== 'marketing' && c.setor !== 'relacionamento') return { status: 400, json: { error: 'Agendamento é do Marketing e do Relacionamento.' } };
     if (c.status !== 'rascunho') return { status: 409, json: { error: 'Só rascunho pode ser agendado.' } };
     const quando = new Date(String(body.agendada_para || ''));
     if (Number.isNaN(quando.getTime()) || quando.getTime() < agora.getTime() + 60_000) return { status: 400, json: { error: 'Escolha uma data e hora no futuro.' } };

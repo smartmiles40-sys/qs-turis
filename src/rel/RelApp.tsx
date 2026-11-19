@@ -56,7 +56,9 @@ const PrioridadesPage = lazy(() => import("@/prioridades/PrioridadesPage")); // 
 // Disparos (28/10, 0217): o motor único do disparo em massa (o mesmo do
 // Comercial), com o público de clientes e o link do grupo. A tela antiga
 // (rel_campanhas, 0 usos) saiu do menu; as Automações seguem em rel-disparos.
-const DisparosPage = lazy(() => import("@/components/sdr/disparos/DisparosPage"));
+// 19/11 (0408): o Rel ganhou o disparo "igual ao ManyChat" (envio oficial pelo
+// número dele, etiquetas, botões que respondem sozinhos) — tela própria.
+const DisparosPage = lazy(() => import("./disparos/DisparosRelPage"));
 const AutomacoesPage = lazy(() => import("./disparos/AutomacoesPage"));
 const PesquisasPage = lazy(() => import("./pos/PesquisasPage"));
 const RecompraPage = lazy(() => import("./pos/RecompraPage"));
@@ -481,7 +483,7 @@ export default function RelApp() {
             <ViagemPage key={rota.id} id={rota.id} onVoltar={() => ir({ tela: "viagens" })} onAbrirCliente={abrirCliente} onAbrirConversa={abrirConversa}
               onAbrirExpedicao={(exp, tipo) => ir({ tela: tipo === "pacote" ? "exp-pacotes" : "exp-expedicoes", id: exp })} />
           )}
-          {rota.tela === "disparos" && <DisparosPage setor="relacionamento" />}
+          {rota.tela === "disparos" && <DisparosPage />}
           {rota.tela === "automacoes" && <AutomacoesPage />}
           {rota.tela === "pesquisas" && <PesquisasPage onAbrirCliente={abrirCliente} onAbrirViagem={abrirViagem} />}
           {rota.tela === "recompra" && <RecompraPage onAbrirCliente={abrirCliente} onAbrirOportunidade={(id) => ir({ tela: "vendas", id })} />}
