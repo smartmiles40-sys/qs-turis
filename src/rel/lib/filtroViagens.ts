@@ -229,6 +229,9 @@ export function semanasDaLinha(hoje: string, n: number, paraTras = false): Seman
     out.push({ de, ate, rotulo: `${de.slice(8, 10)}/${de.slice(5, 7)}`, mes: mes !== mesAnterior ? mes : null });
     mesAnterior = mes;
   }
+  // a semana de hoje conta só de hoje pra frente (ou, olhando pra trás, só até hoje) —
+  // senão a barra "hoje" somava dias que o filtro não pega e os números não batiam
+  if (paraTras) out[out.length - 1].ate = hoje; else out[0].de = hoje;
   return out;
 }
 

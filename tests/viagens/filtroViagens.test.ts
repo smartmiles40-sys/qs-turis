@@ -89,10 +89,10 @@ test("filtro guardado: lixo volta pro padrão e a busca não fica; padrão = nad
 
 test("linha do tempo: semanas de segunda a domingo; venda olha pra trás", () => {
   const s = semanasDaLinha("2026-11-19", 3); // quinta
-  assert.deepEqual(s.map((x) => [x.de, x.ate]), [["2026-11-16", "2026-11-22"], ["2026-11-23", "2026-11-29"], ["2026-11-30", "2026-12-06"]]);
+  assert.deepEqual(s.map((x) => [x.de, x.ate]), [["2026-11-19", "2026-11-22"], ["2026-11-23", "2026-11-29"], ["2026-11-30", "2026-12-06"]]);
   assert.deepEqual(s.map((x) => x.mes), ["nov", null, null]); // o mês só aparece quando muda
   const t = semanasDaLinha("2026-11-19", 2, true);
-  assert.deepEqual(t.map((x) => x.de), ["2026-11-09", "2026-11-16"]);
+  assert.deepEqual(t.map((x) => [x.de, x.ate]), [["2026-11-09", "2026-11-15"], ["2026-11-16", "2026-11-19"]]);
 });
 
 test("barras por semana separam pacote e expedição e ignoram o período escolhido", () => {
