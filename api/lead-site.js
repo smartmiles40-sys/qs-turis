@@ -23,7 +23,6 @@
 import { rest } from './_supabaseAdmin.js';
 import { normPhone, createInboundLead } from './_leads.js';
 import { lerConfig, origemPermitida, aplicarCors, chaveIp, texto } from './lead.js';
-import { lerIndicacao, registrarIndicacao } from './_indicacao.js';
 
 // A própria página de formulário do QS (/api/whatsapp) posta pra cá.
 const ORIGEM_PROPRIA = 'https://qs-turis.vercel.app';
@@ -51,29 +50,6 @@ export default async function handler(req, res) {
 
   // Robô preencheu o campo escondido: responde ok e não cria nada.
   if (texto(body.site, 200)) return res.status(200).json({ ok: true });
-
-  // INDICAÇÕES DA BLACK (18/11): a página /indique/ manda a indicadora + uma
-  // lista de indicados. Mesmas travas desta rota; o resto mora em _indicacao.js.
-  if (Array.isArray(body.indicados)) {
-    const v = lerIndicacao(body);
-    if (v.erro) return res.status(400).json({ ok: false, error: v.erro });
-    try {
-      const chave = chaveIp(req);
-      if (chave) {
-        const ok = await rest('rpc/qs_lp_rate_bump', { method: 'POST', body: { p_chave: chave, p_teto: teto }, timeoutMs: 2000 });
-        if (ok === false) return res.status(429).json({ ok: false, error: 'Muitos envios. Tente de novo em alguns minutos.' });
-      }
-    } catch (e) {
-      console.warn('[lead-site] limite por IP indisponível:', e?.message || e);
-    }
-    try {
-      const r = await registrarIndicacao(v);
-      return res.status(200).json({ ok: true, recebidos: r.recebidos, descartados: v.descartados });
-    } catch (err) {
-      console.error('[lead-site] indicação:', err?.code || '', err?.message || err);
-      return res.status(503).json({ ok: false, error: 'Não conseguimos registrar agora. Tente de novo em instantes.' });
-    }
-  }
 
   const nome = texto(body.nome, 120);
   const telefone = normPhone(body.telefone);
