@@ -19,8 +19,11 @@
 // duas fontes conta uma vez só.
 // -----------------------------------------------------------------------------
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { useQsAuth } from "@/contexts/QsAuthContext";
+import { FILTRO_PADRAO, lerFiltro, passaNoFiltro, quantosAtivos, type FiltroPainel } from "../lib/filtroViagens";
+import FiltrosPainel, { baixarCsv } from "./FiltrosPainel";
 import {
-  SERVICOS, grupoDe, grupoTipo, horaDoLugar, hojeSP, momentoDoProximo, proximoVoo, pendenciasViagens, proximosTrechos, revisoesDe, viagensEmAndamento, TIPOS_TRECHO,
+  SERVICOS, grupoDe, listarEquipeRel, grupoTipo, horaDoLugar, hojeSP, momentoDoProximo, proximoVoo, pendenciasViagens, proximosTrechos, revisoesDe, viagensEmAndamento, TIPOS_TRECHO,
   type FiltroViagens, type PendenciasViagens, type Revisao, type Trecho, type Viagem,
 } from "../lib/viagens";
 import { Aviso } from "../ui";
@@ -33,6 +36,7 @@ import { ehVooQueVale } from "../lib/agendaServicos";
 const pedeCheckin = (t: Trecho) => t.tipo === "trem" || ehVooQueVale(t);
 
 type Filtro = "todos" | "expedicao" | "pacote";
+const CHAVE_FILTRO = "rel_painel_filtro";
 const SEM_DESTINO = "\u0000sem-destino";
 type Situacao = "em_viagem" | "embarcando" | "checkin" | "revisada" | "pendente";
 
@@ -370,6 +374,12 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
   // "nenhum voo" ou "tudo PENDENTE" pareceria verdade.
   const [aviso, setAviso] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<Filtro>("todos");
+  // 19/11 (Bruno): filtro de data/serviço/voo interno/dono DENTRO do painel — guardado no navegador
+  const { currentUser } = useQsAuth();
+  const [fp, setFpState] = useState<FiltroPainel>(() => { try { return lerFiltro(localStorage.getItem(CHAVE_FILTRO)); } catch { return FILTRO_PADRAO; } });
+  const setFp = (f: FiltroPainel) => { setFpState(f); try { localStorage.setItem(CHAVE_FILTRO, JSON.stringify({ ...f, busca: "" })); } catch { /* sem localStorage */ } };
+  const [equipe, setEquipe] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { listarEquipeRel().then(setEquipe).catch(() => setEquipe([])); }, []);
 
   useEffect(() => {
     let vivo = true;
@@ -407,10 +417,25 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
 
   const vale = (t: "expedicao" | "pacote") => filtro === "todos" || filtro === t;
 
+  // o que o filtro do topo deixa passar — tudo abaixo (mapa, cards, quadros) usa só essas
+  const tiposDoRoteiro = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const [id, a] of analises ?? []) m.set(id, new Set(a.trechos.filter((t) => t.status_manual !== "cancelado").map((t) => t.tipo)));
+    return m;
+  }, [analises]);
+  const filtrando = quantosAtivos(fp) > 0;
+  const vf = useMemo(() => {
+    const todas = viagens ?? [];
+    if (!filtrando) return todas;
+    const ctx = { hoje: hojeISO(), userId: currentUser?.id ?? "", tiposDoRoteiro };
+    return todas.filter((v) => passaNoFiltro(v, fp, ctx));
+  }, [viagens, fp, filtrando, tiposDoRoteiro, currentUser?.id]);
+  const idsVf = useMemo(() => new Set(vf.map((v) => v.id)), [vf]);
+
   const { pontos, semLugar, semDestino } = useMemo(() => {
     const m = new Map<string, PontoMapa>();
     const sem = new Map<string, number>();
-    for (const v of viagens ?? []) {
+    for (const v of vf) {
       const tipo = grupoDe(v);
       if (!vale(tipo)) continue;
       // destino → expedição → título ("Antonia Exp Tailandia" só tem o lugar no título)
@@ -431,11 +456,11 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
     const semDestino = sem.get(SEM_DESTINO) ?? 0;
     sem.delete(SEM_DESTINO);
     return { pontos: [...m.values()], semLugar: [...sem.entries()].sort((a, b) => b[1] - a[1]), semDestino };
-  }, [viagens, filtro]);
+  }, [vf, filtro]);
 
-  const partidas = useMemo(() => montarPartidas(viagens ?? [], rev, trechos), [viagens, rev, trechos]);
+  const partidas = useMemo(() => montarPartidas(vf, rev, trechos), [vf, rev, trechos]);
   const partidasExp = partidas.filter((p) => p.tipo === "expedicao");
-  const linhasPac = useMemo<LinhaPac[]>(() => (viagens ?? [])
+  const linhasPac = useMemo<LinhaPac[]>(() => vf
     .filter((v) => grupoDe(v) === "pacote")
     .map((v) => {
       const c = contar(analises?.get(v.id)?.problemas ?? []);
@@ -445,23 +470,23 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
         interno: r && r.voos.some((x) => x.valido) ? r.internos : null };
     })
     .sort((a, b) => (a.voo?.partida_em ?? a.v.data_embarque ?? "9999").localeCompare(b.voo?.partida_em ?? b.v.data_embarque ?? "9999")),
-  [viagens, voosPac, rev, analises, resumos]);
+  [vf, voosPac, rev, analises, resumos]);
 
   const hoje = hojeISO();
   const proxEmbarque = (t: "expedicao" | "pacote") => partidas.find((p) => p.tipo === t && p.data && p.data >= hoje && p.situacao !== "em_viagem");
   const agora = Date.now();
-  const trechosVale = trechos.filter((t) => vale(grupoTipo(t.viagem_tipo)));
+  const trechosVale = trechos.filter((t) => idsVf.has(t.viagem_id) && vale(grupoTipo(t.viagem_tipo)));
   const proxVooInterno = trechosVale.find((t) => t.tipo === "voo_interno" && new Date(t.partida_em).getTime() >= agora);
   const proxCheckin = trechosVale
     .filter((t) => pedeCheckin(t) && t.checkin_em && !t.checkin_feito_em && !t.status_manual && new Date(t.partida_em).getTime() > agora)
     .sort((a, b) => a.checkin_em!.localeCompare(b.checkin_em!))[0];
   const contaRev = (t: "expedicao" | "pacote") => {
-    const vs = (viagens ?? []).filter((v) => grupoDe(v) === t);
+    const vs = vf.filter((v) => grupoDe(v) === t);
     return { feitas: vs.filter((v) => rev.get(v.id)?.revisado_em).length, total: vs.length };
   };
   const revExp = contaRev("expedicao"), revPac = contaRev("pacote");
-  const emViagem = (viagens ?? []).filter((v) => v.fase === "em_viagem" && vale(grupoDe(v))).reduce((s, v) => s + pax(v), 0);
-  const totalPax = (viagens ?? []).filter((v) => vale(grupoDe(v))).reduce((s, v) => s + pax(v), 0);
+  const emViagem = vf.filter((v) => v.fase === "em_viagem" && vale(grupoDe(v))).reduce((s, v) => s + pax(v), 0);
+  const totalPax = vf.filter((v) => vale(grupoDe(v))).reduce((s, v) => s + pax(v), 0);
 
   if (viagens === null) return (
     <div className="space-y-4" aria-busy="true">
@@ -491,11 +516,15 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
           ))}
         </div>
         <p className="text-[12.5px]" style={{ color: "var(--ink2)" }}>
+          {filtrando && <><b style={{ color: "var(--rel-ink)" }}>Filtrado:</b> {vf.filter((v) => vale(grupoDe(v))).length} de {(viagens ?? []).filter((v) => vale(grupoDe(v))).length} vendas · </>}
           <b style={{ color: "var(--ink)" }}>{totalPax}</b> viajante{totalPax === 1 ? "" : "s"} com viagem marcada
           {emViagem > 0 && <> · <b style={{ color: "var(--ink)" }}>{emViagem}</b> viajando agora</>}
           {" "}· {pontos.length} destino{pontos.length === 1 ? "" : "s"}
+          {" "}· <button className="underline" onClick={() => baixarCsv(vf.filter((v) => vale(grupoDe(v))))}>baixar planilha</button>
         </p>
       </div>
+
+      <FiltrosPainel f={fp} onMudar={setFp} equipe={equipe} />
 
       {/* 16/11 (Bruno, limpeza): as pendências "sem dono / para classificar / sem data"
           só aparecem se a tela pedir a fila (onVerFila) — o Painel do Rel não pede mais:
