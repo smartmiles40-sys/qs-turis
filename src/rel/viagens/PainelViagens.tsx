@@ -27,7 +27,7 @@ import { Aviso } from "../ui";
 import MapaMundi, { COR_EXP, COR_PAC, MarcaTipo, type PontoMapa } from "./MapaMundi";
 import { lugaresDe } from "./destinos";
 import { conferirViagens, contar, type Analise } from "../lib/problemas";
-import { resumirVoos } from "../lib/statusViagem";
+import { codigoDe, resumirVoos, vooDaVez } from "../lib/statusViagem";
 import { ehVooQueVale } from "../lib/agendaServicos";
 import { FILTRO_QUADRO_VAZIO, PERIODOS_VOO, lerFiltroQuadro, passaNoQuadro, quantosAtivosQuadro, somaDias, type FiltroQuadro, type LinhaFiltravel, type PeriodoVoo } from "../lib/filtroQuadro";
 // 0359: check-in só de voo de verdade (a data do Bitrix de venda de hotel não é voo); trem segue
@@ -233,7 +233,7 @@ function Quadro({ titulo, cor, partidas, onAbrirViagem }: { titulo: string; cor:
 // Pacote é onde mais tem o que cruzar: cada linha é uma venda, com o voo de ida
 // (de onde, pra onde, hora local e localizador) e a situação da checagem.
 
-type SituacaoPac = "pendente" | "revisado" | "ida" | "volta" | "voos";
+type SituacaoPac = "pendente" | "revisado" | "ida" | "volta" | "voos" | "concluida";
 const SITUACAO_PAC: Record<SituacaoPac, { texto: string; cor: string }> = {
   // 30/10: voo fora das datas (ex.: Vinícius, card do Pós-Venda de mar/2026 numa viagem de jun/2027)
   voos: { texto: "VOOS A CONFERIR", cor: "#FF5252" },
@@ -241,6 +241,8 @@ const SITUACAO_PAC: Record<SituacaoPac, { texto: string; cor: string }> = {
   revisado: { texto: "REVISADO ✓", cor: "#5BE3B0" },
   ida: { texto: "VIAGEM DE IDA", cor: "#7CC4FF" },
   volta: { texto: "VIAGEM DE VOLTA", cor: "#FF8A65" },
+  // 19/11: não sobra nenhum voo — riscada, no fim da fila
+  concluida: { texto: "VIAGEM CONCLUÍDA", cor: "#6B7A82" },
 };
 
 interface LinhaPac { v: Viagem; voo: Trecho | null; situacao: SituacaoPac; alertas: { alta: number; media: number }; interno: number | null }
@@ -261,6 +263,8 @@ const ESTILO_CAMPO: React.CSSProperties = {
   fontSize: 11, padding: "4px 6px", fontFamily: "inherit", letterSpacing: 0, textTransform: "none", fontWeight: 500, outline: "none",
 };
 const ESTILO_ATIVO: React.CSSProperties = { borderColor: "#FFD54F", background: "rgba(255,213,79,.08)" };
+
+const aeroDe = (codigo?: string | null, nome?: string | null) => codigoDe(codigo, nome) || (nome || "").trim();
 
 function linhaFiltravel({ v, voo, situacao, alertas, interno }: LinhaPac): LinhaFiltravel {
   return {
@@ -283,12 +287,13 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
   const hoje = hojeISO();
   const filtradas = useMemo(() => (ativos ? linhas.filter((l) => passaNoQuadro(linhaFiltravel(l), f, hoje)) : linhas), [linhas, f, ativos, hoje]);
   const lista = todas ? filtradas : filtradas.slice(0, 12);
+  const concluidas = linhas.filter((l) => l.situacao === "concluida").length;
   // opções e sugestões: o que existe no quadro
   const servicos = useMemo(() => [...new Set(linhas.map((l) => l.v.servico).filter((s): s is NonNullable<typeof s> => !!s))], [linhas]);
   const sugestoes = useMemo(() => {
     const de = new Set<string>(), para = new Set<string>();
     for (const { v, voo } of linhas) {
-      const o = voo?.origem_codigo || voo?.origem, d = voo?.destino_codigo || voo?.destino || v.destino;
+      const o = voo ? aeroDe(voo.origem_codigo, voo.origem) : "", d = (voo ? aeroDe(voo.destino_codigo, voo.destino) : "") || v.destino;
       if (o) de.add(o.trim());
       if (d) para.add(d.trim());
     }
@@ -310,6 +315,7 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
             </button>
           )}
           {ativos > 0 ? `${filtradas.length} de ${linhas.length} vendas` : `${linhas.length} venda${linhas.length === 1 ? "" : "s"}`}
+          {concluidas > 0 && <span title="Sem mais nenhum voo: ficam riscadas no fim da fila"> · {concluidas} concluída{concluidas > 1 ? "s" : ""}</span>}
         </span>
       </div>
       {linhas.length === 0 ? (
@@ -396,12 +402,13 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
               {lista.map(({ v, voo, situacao, alertas, interno }, i) => {
                 const s = SITUACAO_PAC[situacao];
                 const atraso = Math.min(i, 12) * 0.06;
-                const de = voo ? (voo.origem_codigo || voo.origem || "—") : "—";
-                const para = voo ? (voo.destino_codigo || voo.destino || v.destino || "—") : (v.destino || v.titulo);
-                const ida = voo ? (voo.fonte === "bitrix" ? dataBoard(hojeDe(voo.partida_em)) : horaDoLugar(voo.partida_em, voo.partida_fuso).texto) : dataBoard(v.data_embarque);
+                const fim = situacao === "concluida";
+                const de = voo ? (aeroDe(voo.origem_codigo, voo.origem) || "—") : "—";
+                const para = voo ? (aeroDe(voo.destino_codigo, voo.destino) || v.destino || "—") : (v.destino || v.titulo);
+                const ida = fim ? "CONCLUÍDA" : voo ? (voo.fonte === "bitrix" ? dataBoard(hojeDe(voo.partida_em)) : horaDoLugar(voo.partida_em, voo.partida_fuso).texto) : dataBoard(v.data_embarque);
                 const abrir = () => onAbrirViagem(v.id);
                 return (
-                  <tr key={v.id} className="rel-quadro-linha cursor-pointer" style={{ borderTop: "1px solid #182026" }} onClick={abrir}
+                  <tr key={v.id} className="rel-quadro-linha cursor-pointer" style={{ borderTop: "1px solid #182026", ...(fim ? { opacity: 0.45, textDecoration: "line-through" } : {}) }} onClick={abrir}
                     tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } }}
                     aria-label={`${v.cliente_nome || v.titulo}, ${v.servico ? SERVICOS[v.servico] : ""}, de ${de} para ${para}, próximo voo ${ida}, ${pax(v)} passageiros, ${s.texto.replace(" ✓", "")}`}>
                     <td className="px-4 py-2 uppercase max-w-[240px] truncate"><Flap texto={(v.cliente_nome || v.titulo).slice(0, 28)} atraso={atraso} /></td>
@@ -470,7 +477,9 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
   const [viagens, setViagens] = useState<Viagem[] | null>(null);
   const [rev, setRev] = useState<Map<string, Revisao>>(new Map());
   const [trechos, setTrechos] = useState<Trecho[]>([]);
-  const [voosPac, setVoosPac] = useState<Map<string, Trecho>>(new Map());
+  // 19/11: o próximo voo anda com o relógio (voo pousou → próximo trecho → concluída)
+  const [relogio, setRelogio] = useState(() => Date.now());
+  useEffect(() => { const i = setInterval(() => setRelogio(Date.now()), 60_000); return () => clearInterval(i); }, []);
   const [analises, setAnalises] = useState<Map<string, Analise> | null>(null);
   const [resumos, setResumos] = useState<Map<string, ReturnType<typeof resumirVoos<Trecho>>>>(new Map());
   const [erro, setErro] = useState<string | null>(null);
@@ -494,17 +503,15 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
         // dentro das datas, não cancelado, partida ≥ agora). 30/10: antes, sem voo
         // futuro caía no "1º da viagem" — e o Vinícius (Turquia jun/2027) mostrava
         // 21/03/2026, a data do card do Pós-Venda de outra viagem. Sem voo futuro = sem voo.
-        const vp = new Map<string, Trecho>();
         const rs = new Map<string, ReturnType<typeof resumirVoos<Trecho>>>();
         for (const v of vs) {
           const r = resumirVoos(v, tp.get(v.id)?.trechos ?? []);
           rs.set(v.id, r);
-          if (r.proximo) vp.set(v.id, r.proximo);
         }
         if (!vivo) return;
         // só os trechos das viagens do painel (arquivada, seguro sozinho e sem classificação ficam fora)
         const doPainel = new Set(vs.map((v) => v.id));
-        setViagens(vs); setTrechos(ts.filter((t) => doPainel.has(t.viagem_id) && t.status_manual !== "cancelado")); setRev(rv); setVoosPac(vp); setResumos(rs); setAnalises(tp); setErro(null);
+        setViagens(vs); setTrechos(ts.filter((t) => doPainel.has(t.viagem_id) && t.status_manual !== "cancelado")); setRev(rv); setResumos(rs); setAnalises(tp); setErro(null);
         setAviso(falhas.length ? `Não consegui carregar ${falhas.join(" e ")} — os números abaixo podem estar incompletos.` : null);
       } catch (e) {
         if (vivo) { setErro(e instanceof Error ? e.message : "Não carregou o painel."); setViagens([]); }
@@ -549,15 +556,18 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
       const c = contar(analises?.get(v.id)?.problemas ?? []);
       const r = resumos.get(v.id);
       const voosErrados = !!r?.inconsistencias.some((i) => !i.ignorada && i.chave.startsWith("voo_fora:"));
-      return { v, voo: voosPac.get(v.id) ?? null, situacao: situacaoPac(v, !!rev.get(v.id)?.revisado_em, voosErrados), alertas: { alta: c.alta, media: c.media },
+      const vez = r ? vooDaVez(r, relogio, v) : { voo: null, concluida: false };
+      return { v, voo: vez.voo, situacao: vez.concluida ? "concluida" as const : situacaoPac(v, !!rev.get(v.id)?.revisado_em, voosErrados), alertas: { alta: c.alta, media: c.media },
         interno: r && r.voos.some((x) => x.valido) ? r.internos : null };
     })
-    .sort((a, b) => (a.voo?.partida_em ?? a.v.data_embarque ?? "9999").localeCompare(b.voo?.partida_em ?? b.v.data_embarque ?? "9999")),
-  [viagens, voosPac, rev, analises, resumos]);
+    // concluídas saem da fila: vão pro fim
+    .sort((a, b) => Number(a.situacao === "concluida") - Number(b.situacao === "concluida")
+      || (a.voo?.partida_em ?? a.v.data_embarque ?? "9999").localeCompare(b.voo?.partida_em ?? b.v.data_embarque ?? "9999")),
+  [viagens, rev, analises, resumos, relogio]);
 
   const hoje = hojeISO();
   const proxEmbarque = (t: "expedicao" | "pacote") => partidas.find((p) => p.tipo === t && p.data && p.data >= hoje && p.situacao !== "em_viagem");
-  const agora = Date.now();
+  const agora = relogio;
   const trechosVale = trechos.filter((t) => vale(grupoTipo(t.viagem_tipo)));
   const proxVooInterno = trechosVale.find((t) => t.tipo === "voo_interno" && new Date(t.partida_em).getTime() >= agora);
   const proxCheckin = trechosVale

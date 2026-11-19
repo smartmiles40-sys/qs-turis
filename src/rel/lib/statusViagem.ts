@@ -398,3 +398,29 @@ export function textoVooInterno(r: Pick<ResumoVoos<TrechoVoo>, "internos" | "voo
   if (!r.voos.some((x) => x.valido)) return "sem voos cadastrados";
   return r.internos > 0 ? `sim (${r.internos} trecho${r.internos > 1 ? "s" : ""})` : "não";
 }
+
+// ── o voo da vez (quadro de Pacotes do Painel) ──────────────────────────────
+
+/** Até quando o voo "está na vez": até pousar (chegada), senão até a partida; sem horário, até o fim do dia. */
+export function fimDoVoo(t: Pick<TrechoVoo, "fonte" | "partida_em" | "chegada_em">): number {
+  const lim = limiteDoVoo(t);
+  const chegada = t.chegada_em ? new Date(t.chegada_em).getTime() : NaN;
+  return Number.isFinite(chegada) && chegada > lim ? chegada : lim;
+}
+
+/**
+ * 19/11 (Bruno): "o próximo voo deve estar sempre atualizado — voo hoje às 20h
+ * aparece; passou, ele mesmo vai pro trecho interno; sem outro voo, fica riscado
+ * / viagem concluída, saindo da fila". Recalcula com o relógio (a tela chama a
+ * cada minuto). Concluída = já teve voo e não sobra nenhum; sem voo nenhum,
+ * concluída só se a volta da venda já passou.
+ */
+export function vooDaVez<T extends TrechoVoo>(
+  r: Pick<ResumoVoos<T>, "voos">, agora: number, v?: Pick<ViagemDatas, "data_retorno" | "data_embarque"> | null,
+): { voo: T | null; concluida: boolean } {
+  const validos = r.voos.filter((x) => x.valido).map((x) => x.t);
+  const voo = validos.find((t) => t.status_manual !== "voado" && t.status_manual !== "cancelado" && fimDoVoo(t) >= agora) ?? null;
+  if (validos.length) return { voo, concluida: !voo };
+  const volta = v?.data_retorno || v?.data_embarque;
+  return { voo: null, concluida: !!volta && volta < diaSP(agora) };
+}

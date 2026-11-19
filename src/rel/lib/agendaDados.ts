@@ -114,3 +114,19 @@ export async function carregarAcoesPorEmbarque(de: string, ate: string): Promise
   const [trechos, viagens] = await Promise.all([trechosDe(ids), viagensDaAgenda(ids)]);
   return { trechos, viagens, cortado: ids.length >= 1000 };
 }
+
+/**
+ * CALENDÁRIO de check-ins (19/11): os voos que partem em [deIso, ateIso + 4 dias)
+ * — o check-in abre até ~48–72h antes, então um voo do começo do mês seguinte
+ * pode abrir dentro do período. A regra (só pacote, só voo com bilhete) é a
+ * checkinsDoCalendario().
+ */
+export async function carregarVoosDoPeriodo(deIso: string, ateIso: string): Promise<{ trechos: TrechoAgenda[]; viagens: Map<string, ViagemAgenda> }> {
+  const ate = new Date(new Date(ateIso).getTime() + 4 * 86_400_000).toISOString();
+  const trechos = await paginado<TrechoAgenda>((de, a) => supabase.from("rel_trechos_v").select("*")
+    .eq("viagem_status", "ativa").in("tipo", TIPOS_VOO).gte("partida_em", deIso).lt("partida_em", ate)
+    .order("partida_em").order("id").range(de, a));
+  const viagens = await viagensDaAgenda(trechos.map((t) => t.viagem_id));
+  for (const [id, v] of viagens) if (v.status && v.status !== "ativa") viagens.delete(id);
+  return { trechos: trechos.filter((t) => viagens.has(t.viagem_id)), viagens };
+}

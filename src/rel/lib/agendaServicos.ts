@@ -20,6 +20,8 @@
 // Lógica PURA (sem banco) — testes em tests/viagens/agendaServicos.test.ts.
 // -----------------------------------------------------------------------------
 import { aberturaCheckin, ehVoo, limiteDoVoo, semHora, vendaTemAereo, JANELA_CHECKIN_HORAS } from "./statusViagem.ts";
+import { tipoDoServico } from "./tiposViagem.ts";
+import type { Servico } from "./viagens.ts";
 
 const H = 3600_000;
 
@@ -357,4 +359,54 @@ export function contarPorCategoria(acoes: Acao[]): Record<CategoriaAcao, number>
   const c = Object.fromEntries(CATEGORIAS_ACAO.map((x) => [x.id, 0])) as Record<CategoriaAcao, number>;
   for (const a of acoes) c[a.categoria]++;
   return c;
+}
+
+// ── 4. calendário de check-ins dos PACOTES ──────────────────────────────────
+// Bruno, 19/11: "no calendário só vai entrar os check-ins dos voos, e nada mais
+// (exclusivamente dos pacotes) — sem o check-in das expedições". Cada voo que
+// vale (com bilhete) de venda que NÃO é expedição vira UM item no dia em que o
+// check-in abre. Diferente da fila, mostra também o passado: feito ou não marcado.
+
+export type SituacaoCal = "aberto" | "abre_logo" | "futuro" | "feito" | "nao_marcado";
+export const ROTULO_SITUACAO_CAL: Record<SituacaoCal, string> = {
+  aberto: "Aberto — fazer agora",
+  abre_logo: "Abre em menos de 24h",
+  futuro: "Agendado",
+  feito: "Feito",
+  nao_marcado: "Voo saiu sem marcar",
+};
+
+export interface CheckinCal {
+  chave: string;
+  trechoIds: string[];
+  viagem_id: string;
+  t: TrechoAgenda;
+  abre: number;
+  estimado: boolean;
+  situacao: SituacaoCal;
+  passageiros: string[];
+}
+
+export function checkinsDoCalendario(trechos: TrechoAgenda[], viagens: Map<string, ViagemAgenda>, agora: number): CheckinCal[] {
+  const grupos = new Map<string, TrechoAgenda[]>();
+  for (const t of trechos) {
+    const v = viagens.get(t.viagem_id);
+    if (!v || !t.partida_em || tipoDoServico(v.servico as Servico | null) === "expedicao") continue;
+    if (!ehVooQueVale(t, v) || semBilhete(t)) continue;
+    const k = chaveDoVoo(t);
+    const g = grupos.get(k);
+    if (g) g.push(t); else grupos.set(k, [t]);
+  }
+  const out: CheckinCal[] = [];
+  for (const [chave, ts] of grupos) {
+    ts.sort((a, b) => a.id.localeCompare(b.id));
+    const t = ts.find((x) => x.checkin_abre_em) ?? ts[0];
+    const abre = aberturaCheckin({ partida_em: t.partida_em, checkin_abre_em: t.checkin_abre_em ?? null, checkin_em: null });
+    const feito = ts.every((x) => !!x.checkin_feito_em);
+    const saiu = ts.every((x) => x.status_manual === "voado") || limiteDoVoo(t) < agora;
+    const situacao: SituacaoCal = feito ? "feito" : saiu ? "nao_marcado" : abre <= agora ? "aberto" : abre - agora <= 24 * H ? "abre_logo" : "futuro";
+    const passageiros = [...new Set(ts.flatMap((x) => x.passageiros ?? []).map((p) => p.trim()).filter(Boolean))];
+    out.push({ chave, trechoIds: ts.map((x) => x.id), viagem_id: t.viagem_id, t, abre, estimado: !t.checkin_abre_em, situacao, passageiros });
+  }
+  return out.sort((a, b) => a.abre - b.abre || a.chave.localeCompare(b.chave));
 }

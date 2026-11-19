@@ -14,7 +14,16 @@ import { carregarVoosFuturos } from "../lib/agendaDados";
 import { ROTULO_SITUACAO_CHECKIN, TEXTO_ESTIMADO, filaDeCheckins, textoQuemFez, type ItemCheckin, type SituacaoCheckin, type TrechoAgenda, type ViagemAgenda } from "../lib/agendaServicos";
 import { checkinDoTrecho } from "../lib/correcoes";
 import { horaDoLugar, type Servico } from "../lib/viagens";
-import { TIPOS_FILTRO, tipoDoServico, type TipoFiltro } from "../lib/tiposViagem";
+import { tipoDoServico } from "../lib/tiposViagem";
+
+// 19/11 (Bruno): "só precisamos de 2 filtros do tipo de venda: Expedições e
+// Pacotes". Pacotes = tudo o que não é expedição (pacote, aéreo, hotel…), como no Painel.
+type Grupo = "expedicao" | "pacote";
+const GRUPOS: { id: Grupo; rotulo: string; dica: string }[] = [
+  { id: "expedicao", rotulo: "Expedições", dica: "Passageiros das expedições em grupo" },
+  { id: "pacote", rotulo: "Pacotes", dica: "Pacotes e as outras vendas com aéreo (não expedição)" },
+];
+const CHAVE_GRUPO = "rel_checkins_grupo";
 import { Aviso, Botao, Entrada, Etiqueta, Vazio } from "../ui";
 
 type Janela = "48h" | "7d" | "30d" | "tudo";
@@ -46,7 +55,8 @@ export default function CheckinsViagens({ onAbrirViagem, onAbrirCliente }: { onA
   const [erro, setErro] = useState<string | null>(null);
   const [versao, setVersao] = useState(0);
   const [janela, setJanela] = useState<Janela>("7d");
-  const [tipo, setTipo] = useState<TipoFiltro>("todos");
+  const [tipo, setTipoState] = useState<Grupo>(() => { try { return localStorage.getItem(CHAVE_GRUPO) === "expedicao" ? "expedicao" : "pacote"; } catch { return "pacote"; } });
+  const setTipo = (g: Grupo) => { setTipoState(g); try { localStorage.setItem(CHAVE_GRUPO, g); } catch { /* */ } };
   const [feitos, setFeitos] = useState(false);
   const [semBilhete, setSemBilhete] = useState(false);
   const [busca, setBusca] = useState("");
@@ -68,16 +78,15 @@ export default function CheckinsViagens({ onAbrirViagem, onAbrirCliente }: { onA
   const { porTipo, lista } = useMemo(() => {
     const q = busca.trim().toLowerCase();
     const viagens = dados?.viagens;
-    const tipoDe = (it: ItemCheckin) => tipoDoServico((viagens?.get(it.viagem_id)?.servico ?? null) as Servico | null);
+    const tipoDe = (it: ItemCheckin): Grupo => (tipoDoServico((viagens?.get(it.viagem_id)?.servico ?? null) as Servico | null) === "expedicao" ? "expedicao" : "pacote");
     const achados = (base ?? []).filter((it) => {
       if (!q) return true;
       const v = viagens?.get(it.viagem_id);
       return [v?.cliente_nome, v?.titulo, it.t.numero, it.t.companhia, it.t.localizador, it.t.origem, it.t.destino, ...it.passageiros].some((x) => (x || "").toLowerCase().includes(q));
     });
-    const c = { todos: achados.length } as Record<TipoFiltro, number>;
-    for (const t of TIPOS_FILTRO) if (t.id !== "todos") c[t.id] = 0;
+    const c: Record<Grupo, number> = { expedicao: 0, pacote: 0 };
     for (const it of achados) c[tipoDe(it)]++;
-    return { porTipo: c, lista: tipo === "todos" ? achados : achados.filter((it) => tipoDe(it) === tipo) };
+    return { porTipo: c, lista: achados.filter((it) => tipoDe(it) === tipo) };
   }, [base, busca, tipo, dados]);
   const abertos = lista.filter((it) => it.situacao === "aberto").length;
 
@@ -124,9 +133,9 @@ export default function CheckinsViagens({ onAbrirViagem, onAbrirCliente }: { onA
         </label>
       </div>
       <div className="flex gap-1 rel-card p-1 overflow-x-auto mb-3 w-fit max-w-full" role="group" aria-label="Filtrar por tipo de venda">
-        {TIPOS_FILTRO.map((t) => (
+        {GRUPOS.map((t) => (
           <button key={t.id} onClick={() => setTipo(t.id)} aria-pressed={tipo === t.id} title={t.dica}
-            className="rel-linha px-3 py-1.5 rounded-lg text-[12px] font-semibold whitespace-nowrap"
+            className="rel-linha px-4 py-2 rounded-lg text-[13px] font-semibold whitespace-nowrap"
             style={tipo === t.id ? { background: "var(--rel-soft)", color: "var(--rel-ink)" } : { color: "var(--ink2)" }}>
             {t.rotulo}{base && <span className="ml-1 tabular-nums font-normal" style={{ color: "var(--ink3)" }}>{porTipo[t.id]}</span>}
           </button>
