@@ -46,6 +46,7 @@ import ConferirRepetidas from "./ConferirRepetidas";
 import ConferirVoos from "./ConferirVoos";
 import CheckinsViagens from "./CheckinsViagens";
 import ServicosViagens from "./ServicosViagens";
+import FiltrarViagens from "./FiltrarViagens";
 import SeletorServico from "./SeletorServico";
 import { ProximoVooCurto } from "./ProximoVoo";
 import { COR_EXP, MarcaTipo } from "./MapaMundi";
@@ -58,10 +59,12 @@ import FaxinaAtalhos, { type MarcarAoAbrir } from "./FaxinaAtalhos";
 import { podeGerirRelacionamento } from "../equipe/permissao";
 import { SeloCurto } from "@/prioridades/SeloPrioridade";
 
-type Visao = "painel" | "calendario" | "lista" | "checkins" | "servicos" | "repetidas" | "voos";
+type Visao = "painel" | "calendario" | "lista" | "filtrar" | "checkins" | "servicos" | "repetidas" | "voos";
 const VISOES: { id: Visao; rotulo: string }[] = [
   { id: "painel", rotulo: "Painel" },
   { id: "calendario", rotulo: "Calendário" },
+  // 19/11 (Bruno): filtro de tudo — data, serviço, voo interno, hotel, dono…
+  { id: "filtrar", rotulo: "Filtrar" },
   // 16/11 (Bruno): aba Lista saiu (ninguém usava). A visão segue viva pros
   // atalhos que filtram (#rel/faxina, ?tipo=...).
   // 11/11: só aéreo, na ordem dos check-ins · serviços separados por tipo, por data/hora da ação
@@ -72,7 +75,7 @@ const VISOES: { id: Visao; rotulo: string }[] = [
 const CHAVE_VISAO = "rel_viagens_visao";
 function visaoSalva(): Visao {
   // aba salva que saiu (servicos/repetidas/voos) volta pro Painel
-  try { const v = localStorage.getItem(CHAVE_VISAO); return v === "calendario" || v === "checkins" ? v : "painel"; } catch { return "painel"; }
+  try { const v = localStorage.getItem(CHAVE_VISAO); return v === "calendario" || v === "checkins" || v === "filtrar" ? v : "painel"; } catch { return "painel"; }
 }
 
 // 16/11 (Bruno, limpeza): saíram Minhas, Sem dono, Precisa de data, Classificar,
@@ -543,6 +546,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, onAbrirPaco
       {visao === "calendario" && <CalendarioViagens key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "repetidas" && <ConferirRepetidas key={versao} onAbrirViagem={onAbrirViagem} />}
       {visao === "voos" && <ConferirVoos key={versao} onAbrirViagem={onAbrirViagem} />}
+      {visao === "filtrar" && <FiltrarViagens key={versao} onAbrirViagem={onAbrirViagem} onAbrirCliente={onAbrirCliente} />}
       {visao === "checkins" && <CheckinsViagens key={versao} onAbrirViagem={onAbrirViagem} onAbrirCliente={onAbrirCliente} />}
       {visao === "servicos" && <ServicosViagens key={versao} onAbrirViagem={onAbrirViagem} onAbrirCliente={onAbrirCliente} />}
       {visao === "lista" && <>
