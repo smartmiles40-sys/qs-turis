@@ -53,6 +53,8 @@ import { acaoMktOficial, juntarModelosMkt, rodadaMkt } from './_mktDisparoOficia
 import { conferirExtra } from './_mktOficialRegras.js';
 import { acaoRelOficial, estadoRel, juntarModelosRel, lerConfigRel, registrarClique, rodadaRel } from './_relDisparoOficial.js';
 import { conferirRespostas, urlSegura } from './_relDisparoRegras.js';
+import { rodadaFluxosRel, iniciarTesteRel, agendarDisparoFluxo, cancelarDisparoFluxo, modelosParaFluxo } from './_relFluxoMotor.js';
+import { simularFluxo } from './_mktAutoRegras.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SETORES = ['comercial', 'relacionamento', 'marketing'];
@@ -68,7 +70,8 @@ const varsDoCorpo = (corpo) => [...new Set([...String(corpo || '').matchAll(/{{\
 async function quem(req) {
   const id = await getSupabaseUserId(req.headers['authorization']);
   if (!id || !UUID.test(id)) return null;
-  const u = (await rest(`qs_users?select=id,name,role,setores,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
+  const u = (await rest(`qs_users?select=id,name,role,setores,is_active,whatsapp_number&id=eq.${id}&limit=1`).catch(() => null))?.[0]
+    || (await rest(`qs_users?select=id,name,role,setores,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
   return u?.is_active ? u : null;
 }
 
@@ -127,9 +130,11 @@ export default async function handler(req, res) {
     if (!segredo || veio !== segredo) return res.status(401).json({ error: 'Não autorizado' });
     // Relacionamento (0408): cron próprio, só a rodada do Rel.
     if (String(req.query?.rel || '') === '1') {
-      const r = await rodadaRel().catch((e) => ({ erro: e?.message }));
-      console.log('[disparos] cron rel:', JSON.stringify(r).slice(0, 800));
-      return res.status(200).json({ relacionamento: r });
+      // 0409: os fluxos primeiro (começam disparos, acordam esperas), depois os disparos simples.
+      const f = await rodadaFluxosRel({ limiteMs: 25_000 }).catch((e) => ({ erro: e?.message }));
+      const r = await rodadaRel({ limiteMs: 25_000 }).catch((e) => ({ erro: e?.message }));
+      console.log('[disparos] cron rel:', JSON.stringify({ f, r }).slice(0, 800));
+      return res.status(200).json({ fluxos: f, relacionamento: r });
     }
     // Marketing (0341): cron próprio, só a rodada do Marketing.
     if (String(req.query?.mkt || '') === '1') {
@@ -180,6 +185,30 @@ export default async function handler(req, res) {
       cfg.modelos = await juntarModelosRel(cfg.modelos);
       cfg.ritmo = { ...cfg.ritmo, ...(await lerConfigRel()).ritmo };
     }
+
+    // 0409: o criador de fluxos do Relacionamento.
+    if (acao === 'rel_fluxo_simular') {
+      let fluxo = null;
+      if (body.grafo) fluxo = { id: body.fluxoId || '00000000-0000-0000-0000-000000000000', nome: 'rascunho', grafo: body.grafo };
+      else if (body.fluxoId) fluxo = (await rest(`rel_fluxos?select=id,nome,grafo&id=eq.${encodeURIComponent(body.fluxoId)}&limit=1`))?.[0];
+      if (!fluxo) return res.status(404).json({ error: 'Fluxo não encontrado.' });
+      const pessoa = { nome: u.name, telefone: u.whatsapp_number || '', tags: [], campos: { destino: 'Japão' }, ...(body.pessoa || {}) };
+      return res.status(200).json(simularFluxo(fluxo, { pessoa, janela: body.janela !== false, respostas: body.respostas || {} }));
+    }
+    if (acao === 'rel_fluxo_modelos') return res.status(200).json(await modelosParaFluxo());
+    if (acao === 'rel_fluxo_testar') {
+      const telefone = body.telefone || u.whatsapp_number;
+      if (!telefone) return res.status(400).json({ error: 'Informe o número pra testar (ou cadastre seu WhatsApp no perfil do QS).' });
+      const r = await iniciarTesteRel({ fluxoId: String(body.fluxoId || ''), telefone, nome: u.name });
+      if (r.erro) return res.status(422).json({ error: r.erro });
+      return res.status(200).json({ ok: true, ...r });
+    }
+    if (acao === 'rel_fluxo_disparar') {
+      const r = await agendarDisparoFluxo({ fluxoId: String(body.fluxoId || ''), publico: body.publico, agendadoPara: body.agendadoPara || null, userId: u.id });
+      if (r.erro) return res.status(422).json({ error: r.erro });
+      return res.status(200).json(r);
+    }
+    if (acao === 'rel_fluxo_disparo_cancelar') return res.status(200).json(await cancelarDisparoFluxo(String(body.disparoId || '')));
 
     if (acao.startsWith('rel_')) {
       const r = await acaoRelOficial({ acao, body, u });

@@ -8,12 +8,12 @@
 // No celular (< 768 px) o canvas vira LISTA: os blocos na ordem do fluxo, cada
 // saída com um seletor "vai para…". Mesma estrutura, outro desenho.
 // -----------------------------------------------------------------------------
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { escalaTela } from "@/lib/escala";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import {
   ROTULO_TIPO, canalDo, novoId, noPadrao, saidasDoNo, validarGrafo,
-  type Fluxo, type Grafo, type No, type TipoNo, type CampoPersonalizado,
+  type Acao, type Fluxo, type Grafo, type No, type TipoNo, type CampoPersonalizado,
 } from "./tipos";
 import { acao, estatisticas, lerFluxo, listarCampos, listarFluxos, listarModelos, listarUsuarios, salvarFluxo, type ModeloMkt } from "./api";
 import { Aviso, Botao, COR, COR_SUAVE, Carregando, Chip, Modal } from "./ui";
@@ -34,9 +34,45 @@ const TIPOS_NOVOS: TipoNo[] = ["mensagem", "pergunta", "template", "aguardar", "
 // 09/11/2026: Instagram não tem Template (modelo aprovado da Meta é só do WhatsApp).
 const TIPOS_NOVOS_IG: TipoNo[] = TIPOS_NOVOS.filter((t) => t !== "template");
 
+/**
+ * 19/11/2026 (0409): o MESMO editor serve o Relacionamento. O adaptador diz de
+ * onde o fluxo vem e pra onde vai (rel_fluxos + número do Rel); sem adaptador,
+ * é o Marketing de sempre.
+ */
+export interface AdaptadorFluxo {
+  lerFluxo: (id: string) => Promise<Fluxo | null>;
+  listarFluxos: () => Promise<Fluxo[]>;
+  salvarFluxo: (id: string, patch: Partial<Pick<Fluxo, "grafo" | "status">>) => Promise<void>;
+  estatisticas: (id: string) => Promise<Awaited<ReturnType<typeof estatisticas>>>;
+  listarModelos: () => Promise<{ modelos?: ModeloMkt[]; erro?: string; aviso?: string }>;
+  listarUsuarios: () => Promise<{ id: string; name: string }[]>;
+  listarCampos: () => Promise<CampoPersonalizado[]>;
+  simular: (fluxoId: string, grafo: Grafo) => Promise<ResultadoSimulacao>;
+  testar: (fluxoId: string) => Promise<void>;
+  /** Texto do "Testar no meu WhatsApp" (qual número manda). */
+  avisoTeste: string;
+  /** Sem relatório (o do Marketing lê mkt_*). */
+  semRelatorio?: boolean;
+  acoesPermitidas?: Acao["tipo"][];
+  /** O que o bloco Início diz. */
+  resumoInicio?: string;
+  ajuda?: ReactNode;
+  /** Botões a mais na barra (ex.: "Disparar pra um público"). */
+  extraBarra?: (f: Fluxo, sujo: boolean) => ReactNode;
+  voltarRotulo?: string;
+}
+
+const PADRAO: AdaptadorFluxo = {
+  lerFluxo, listarFluxos, salvarFluxo, estatisticas, listarModelos, listarUsuarios, listarCampos,
+  simular: (fluxoId, grafo) => acao<ResultadoSimulacao>({ acao: "simular", fluxoId, grafo }),
+  testar: async (fluxoId) => { await acao({ acao: "testar", fluxoId }); },
+  avisoTeste: "Isto MANDA as mensagens de verdade, pelo número do Marketing, para o WhatsApp cadastrado no seu perfil do QS. A janela de 24 h vale: mande um 'oi' para o número antes, ou comece o fluxo por um Template. Continuar?",
+};
+let resumoInicioAtual = "Quando um gatilho dispara";
+
 export function resumoDoNo(no: No): string {
   switch (no.tipo) {
-    case "inicio": return "Quando um gatilho dispara";
+    case "inicio": return resumoInicioAtual;
     case "mensagem": {
       const t = no.dados.blocos.find((b) => b.tipo === "texto");
       const txt = t && t.tipo === "texto" ? t.texto : `${no.dados.blocos.length} mídia(s)`;
@@ -83,7 +119,9 @@ function ordemDoFluxo(g: Grafo): No[] {
   return [...out, ...g.nos.filter((n) => !vistos.has(n.id))];
 }
 
-export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; onVoltar: () => void }) {
+export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId: string; onVoltar: () => void; adaptador?: AdaptadorFluxo }) {
+  const api = adaptador ?? PADRAO;
+  resumoInicioAtual = api.resumoInicio ?? "Quando um gatilho dispara";
   const celular = useCelular();
   const [fluxo, setFluxo] = useState<Fluxo | null>(null);
   const [grafo, setGrafo] = useState<Grafo>({ nos: [], ligacoes: [] });
@@ -107,7 +145,7 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
     let vivo = true;
     (async () => {
       try {
-        const [f, cs, fs, us, st] = await Promise.all([lerFluxo(fluxoId), listarCampos().catch(() => []), listarFluxos().catch(() => []), listarUsuarios().catch(() => []), estatisticas(fluxoId).catch(() => new Map())]);
+        const [f, cs, fs, us, st] = await Promise.all([api.lerFluxo(fluxoId), api.listarCampos().catch(() => []), api.listarFluxos().catch(() => []), api.listarUsuarios().catch(() => []), api.estatisticas(fluxoId).catch(() => new Map())]);
         if (!vivo) return;
         if (!f) { notifyError("Fluxo não encontrado."); onVoltar(); return; }
         setFluxo(f);
@@ -121,14 +159,15 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
       }
     })();
     return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fluxoId, onVoltar]);
 
   // Os modelos só são buscados quando alguém abre um bloco Template.
   const precisaModelos = useCallback(() => {
     if (modelos !== null) return;
     setModelos([]);
-    listarModelos().then((r) => { setModelos(r.modelos ?? []); if (r.erro || r.aviso) notifyError(r.erro || r.aviso || ""); }).catch(() => setModelos([]));
-  }, [modelos]);
+    api.listarModelos().then((r) => { setModelos(r.modelos ?? []); if (r.erro || r.aviso) notifyError(r.erro || r.aviso || ""); }).catch(() => setModelos([]));
+  }, [modelos, api]);
 
   const mudarGrafo = useCallback((f: (g: Grafo) => Grafo) => { setGrafo((g) => f(g)); setSujo(true); }, []);
   const canal = canalDo(fluxo);
@@ -202,7 +241,7 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
     if (status === "ativo" && graves.length) { notifyError(`Corrija ${graves.length} problema(s) antes de ativar.`); return; }
     setOcupado(true);
     try {
-      await salvarFluxo(fluxo.id, { grafo, ...(status ? { status } : {}) });
+      await api.salvarFluxo(fluxo.id, { grafo, ...(status ? { status } : {}) });
       setFluxo({ ...fluxo, grafo, status: status ?? fluxo.status });
       setSujo(false);
       notifySuccess(status === "ativo" ? "Fluxo ativado." : status === "pausado" ? "Fluxo pausado." : "Fluxo salvo.");
@@ -212,16 +251,16 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
 
   async function simular() {
     setOcupado(true);
-    try { setSimulacao(await acao<ResultadoSimulacao>({ acao: "simular", fluxoId, grafo })); }
+    try { setSimulacao(await api.simular(fluxoId, grafo)); }
     catch (e) { notifyError(e instanceof Error ? e.message : "Não consegui simular."); }
     finally { setOcupado(false); }
   }
 
   async function testarNoMeuWhatsApp() {
     if (sujo) { notifyError("Salve o fluxo antes de testar."); return; }
-    if (!window.confirm("Isto MANDA as mensagens de verdade, pelo número do Marketing, para o WhatsApp cadastrado no seu perfil do QS. A janela de 24 h vale: mande um 'oi' para o número antes, ou comece o fluxo por um Template. Continuar?")) return;
+    if (!window.confirm(api.avisoTeste)) return;
     setOcupado(true);
-    try { await acao({ acao: "testar", fluxoId }); notifySuccess("Teste iniciado — confira seu WhatsApp."); }
+    try { await api.testar(fluxoId); notifySuccess("Teste iniciado — confira seu WhatsApp."); }
     catch (e) { notifyError(e instanceof Error ? e.message : "Não consegui testar."); }
     finally { setOcupado(false); }
   }
@@ -237,19 +276,20 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
 
   const barra = (
     <div className="flex flex-wrap items-center gap-2 mb-3">
-      <Botao variante="fantasma" onClick={() => { if (!sujo || window.confirm("Sair sem salvar?")) onVoltar(); }}>← Fluxos</Botao>
+      <Botao variante="fantasma" onClick={() => { if (!sujo || window.confirm("Sair sem salvar?")) onVoltar(); }}>← {api.voltarRotulo ?? "Fluxos"}</Botao>
       <strong className="text-[15px] mr-1" style={{ color: "var(--ink)" }}>{fluxo.nome}</strong>
       <Chip cor={fluxo.status === "ativo" ? "#059669" : fluxo.status === "pausado" ? "#D97706" : "#6B7280"}>{fluxo.status}</Chip>
       {canal === "instagram" && <Chip cor="#C13584">Instagram</Chip>}
       {sujo && <Chip cor="#D97706">não salvo</Chip>}
       <div className="flex-1" />
       <Botao onClick={() => void simular()} disabled={ocupado} title="Anda pelo fluxo e mostra o que sairia — não manda nada">Simular</Botao>
-      <Botao onClick={() => setRelatorio(true)} title="Quantos começaram, onde param, cliques por botão">Relatório</Botao>
+      {!api.semRelatorio && <Botao onClick={() => setRelatorio(true)} title="Quantos começaram, onde param, cliques por botão">Relatório</Botao>}
       {canal === "whatsapp" && <Botao onClick={() => void testarNoMeuWhatsApp()} disabled={ocupado}>Testar no meu WhatsApp</Botao>}
       <Botao onClick={() => void salvar()} disabled={ocupado || !sujo}>Salvar</Botao>
       {fluxo.status === "ativo"
         ? <Botao onClick={() => void salvar("pausado")} disabled={ocupado}>Pausar</Botao>
         : <Botao variante="primario" onClick={() => void salvar("ativo")} disabled={ocupado}>Salvar e ativar</Botao>}
+      {api.extraBarra?.(fluxo, sujo)}
     </div>
   );
 
@@ -293,7 +333,7 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
   );
 
   const painel = noSel && (
-    <PainelBloco no={noSel} campos={campos} fluxos={fluxos} modelos={modelos} usuarios={usuarios} precisaModelos={precisaModelos}
+    <PainelBloco no={noSel} campos={campos} fluxos={fluxos} modelos={modelos} usuarios={usuarios} precisaModelos={precisaModelos} acoesPermitidas={api.acoesPermitidas}
       onMudar={(novo) => mudarGrafo((g) => {
         // saídas que sumiram (botão apagado) levam junto as setas
         const validas = new Set(saidasDoNo(novo).map((s) => s.id));
@@ -423,9 +463,11 @@ export default function EditorFluxo({ fluxoId, onVoltar }: { fluxoId: string; on
           <aside className="mkt-card w-[280px] shrink-0 p-4 text-[12.5px] space-y-2" style={{ color: "var(--ink2)" }}>
             <strong style={{ color: "var(--ink)" }}>Como usar</strong>
             <p>Arraste o bloco pelo topo. Para ligar, puxe a bolinha da saída até outro bloco. Clique numa seta para apagar.</p>
+            {api.ajuda ?? <>
             <p>Texto, botões e perguntas só saem com a <b>janela de 24 h aberta</b> (a pessoa escreveu nas últimas 24 h). {canal === "instagram" ? "No Instagram não existe Template: o fluxo só começa quando a pessoa comenta, manda DM ou abre o link." : <>Fluxo que começa pela LP deve começar por um <b>Template</b>.</>}</p>
             <Aviso>Os números em cima de cada bloco são quantas pessoas passaram por ele (desde a criação).</Aviso>
             <div style={{ background: COR_SUAVE }} className="rounded-lg p-2">Os gatilhos (palavra-chave, link, anúncio…) ficam nas outras abas e apontam para este fluxo.</div>
+            </>}
           </aside>
         )}
       </div>

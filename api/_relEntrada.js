@@ -207,6 +207,9 @@ export async function processarRelacionamento(ch, numero, nomes) {
         if (r.conversa) await talvezAvisarForaDoHorario({ phoneId, telefone, conversaId: r.conversa });
         // 0408: tocou num botão de um disparo do Rel → registra e faz o que a campanha mandou.
         await tratarCliqueDeDisparo({ m, phoneId, telefone, conversaId: r.conversa });
+        // 0409: clique num botão de FLUXO ou resposta que um fluxo esperava → anda o fluxo.
+        const { receberNoFluxoRel } = await import('./_relFluxoMotor.js');
+        await receberNoFluxoRel({ m, phoneId, telefone, conversaId: r.conversa });
       }
     }
     for (const st of value.statuses || []) {

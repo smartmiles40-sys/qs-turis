@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { MESES, NIVEIS, type PublicoRel } from "@/lib/qs/disparos";
 import { Chips } from "@/components/sdr/disparos/pecas";
-import { Botao, Campo, Entrada } from "@/rel/ui";
+import { Botao, Entrada } from "@/rel/ui";
 import {
   apagarSegmento, buscarClientes, contagemEtiquetas, listarSegmentos, nomesDosClientes, normalizarEtiqueta, salvarSegmento,
   type Segmento,
@@ -95,96 +95,160 @@ function ClientesEscolhidos({ ids, onChange }: { ids: string[]; onChange: (v: st
   );
 }
 
-/** O formulário inteiro do "Para quem". */
+/** Os filtros que dá pra ADICIONAR (começa em "todos os clientes", igual ao ManyChat). */
+type IdFiltro = "etiquetas" | "sem_etiquetas" | "destino" | "embarque" | "sem_viagem_futura" | "viajou" | "expedicao" | "retorno" | "niveis" | "aniversario_mes" | "estados" | "clientes";
+const FILTROS: { id: IdFiltro; rotulo: string; chaves: (keyof PublicoRel)[] }[] = [
+  { id: "etiquetas", rotulo: "Tem a etiqueta", chaves: ["etiquetas", "etiquetas_modo"] },
+  { id: "sem_etiquetas", rotulo: "Não tem a etiqueta", chaves: ["sem_etiquetas"] },
+  { id: "destino", rotulo: "Destino da viagem", chaves: ["destino"] },
+  { id: "embarque", rotulo: "Viagem marcada (embarque entre)", chaves: ["embarque_de", "embarque_ate"] },
+  { id: "sem_viagem_futura", rotulo: "Sem viagem marcada", chaves: ["sem_viagem_futura"] },
+  { id: "viajou", rotulo: "Já viajou com a gente?", chaves: ["viajou"] },
+  { id: "expedicao", rotulo: "Expedição que fez", chaves: ["expedicao"] },
+  { id: "retorno", rotulo: "Voltou de viagem entre", chaves: ["retorno_de", "retorno_ate"] },
+  { id: "niveis", rotulo: "Nível do clube", chaves: ["niveis"] },
+  { id: "aniversario_mes", rotulo: "Aniversário no mês", chaves: ["aniversario_mes"] },
+  { id: "estados", rotulo: "Estado (UF)", chaves: ["estados"] },
+  { id: "clientes", rotulo: "Só clientes escolhidos", chaves: ["clientes"] },
+];
+const preenchido = (v: unknown) => !(v === undefined || v === null || v === "" || v === false || (Array.isArray(v) && !v.length));
+const filtrosAtivos = (p: PublicoRel) => FILTROS.filter((f) => f.chaves.some((k) => k !== "etiquetas_modo" && preenchido(p[k]))).map((f) => f.id);
+
+function EditorFiltro({ id, p, set, etiquetas }: { id: IdFiltro; p: PublicoRel; set: (p: PublicoRel) => void; etiquetas: { etiqueta: string; n: number }[] }) {
+  switch (id) {
+    case "etiquetas": return (
+      <div className="space-y-1.5">
+        <CampoEtiquetas valor={p.etiquetas ?? []} onChange={(v) => set({ ...p, etiquetas: v })} existentes={etiquetas} />
+        {(p.etiquetas ?? []).length > 1 && (
+          <select className="rel-input w-auto" value={p.etiquetas_modo ?? "qualquer"} onChange={(e) => set({ ...p, etiquetas_modo: e.target.value as PublicoRel["etiquetas_modo"] })}>
+            <option value="qualquer">qualquer uma delas</option><option value="todas">todas elas</option>
+          </select>
+        )}
+      </div>
+    );
+    case "sem_etiquetas": return <CampoEtiquetas valor={p.sem_etiquetas ?? []} onChange={(v) => set({ ...p, sem_etiquetas: v })} existentes={etiquetas} />;
+    case "destino": return <Entrada value={p.destino ?? ""} placeholder="Ex.: Japão" onChange={(e) => set({ ...p, destino: e.target.value })} />;
+    case "embarque": return (
+      <div className="grid grid-cols-2 gap-2">
+        <Entrada type="date" aria-label="Embarca a partir de" value={p.embarque_de ?? ""} onChange={(e) => set({ ...p, embarque_de: e.target.value })} />
+        <Entrada type="date" aria-label="Embarca até" value={p.embarque_ate ?? ""} onChange={(e) => set({ ...p, embarque_ate: e.target.value })} />
+      </div>
+    );
+    case "sem_viagem_futura": return <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>Só quem não tem nenhuma viagem marcada.</p>;
+    case "viajou": return (
+      <select className="rel-input" value={p.viajou || "sim"} onChange={(e) => set({ ...p, viajou: e.target.value as PublicoRel["viajou"] })}>
+        <option value="sim">Sim, já viajou</option><option value="nao">Nunca viajou</option>
+      </select>
+    );
+    case "expedicao": return <Entrada value={p.expedicao ?? ""} placeholder="Ex.: Islândia" onChange={(e) => set({ ...p, expedicao: e.target.value })} />;
+    case "retorno": return (
+      <div className="grid grid-cols-2 gap-2">
+        <Entrada type="date" aria-label="Voltou a partir de" value={p.retorno_de ?? ""} onChange={(e) => set({ ...p, retorno_de: e.target.value })} />
+        <Entrada type="date" aria-label="Voltou até" value={p.retorno_ate ?? ""} onChange={(e) => set({ ...p, retorno_ate: e.target.value })} />
+      </div>
+    );
+    case "niveis": return <Chips opcoes={NIVEIS.map((n) => ({ id: n, rotulo: n }))} valor={p.niveis ?? []} onChange={(v) => set({ ...p, niveis: v })} />;
+    case "aniversario_mes": return (
+      <select className="rel-input" value={p.aniversario_mes || ""} onChange={(e) => set({ ...p, aniversario_mes: e.target.value ? Number(e.target.value) : "" })}>
+        <option value="">Escolha o mês</option>
+        {MESES.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+      </select>
+    );
+    case "estados": return <Chips opcoes={UFS.map((u) => ({ id: u, rotulo: u }))} valor={p.estados ?? []} onChange={(v) => set({ ...p, estados: v })} />;
+    case "clientes": return <ClientesEscolhidos ids={p.clientes ?? []} onChange={(v) => set({ ...p, clientes: v })} />;
+  }
+}
+
+/** Valor que o filtro ganha ao ser adicionado (o de sim/não já entra marcado). */
+function valorInicial(id: IdFiltro): Partial<PublicoRel> {
+  if (id === "sem_viagem_futura") return { sem_viagem_futura: true };
+  if (id === "viajou") return { viajou: "sim" };
+  return {};
+}
+
+/**
+ * O "PARA QUEM", igual ao ManyChat: começa em TODOS os clientes com WhatsApp e
+ * você adiciona só o filtro que precisa ("+ Filtro"). Nenhum campo obrigatório.
+ */
 export function PublicoRelForm({ p, set, etiquetas }: { p: PublicoRel; set: (p: PublicoRel) => void; etiquetas: { etiqueta: string; n: number }[] }) {
   const [segmentos, setSegmentos] = useState<Segmento[]>([]);
   const [nomeSeg, setNomeSeg] = useState("");
-  const [mais, setMais] = useState(Boolean(p.expedicao || p.retorno_de || p.retorno_ate || p.niveis?.length || p.viajou || p.estados?.length || p.clientes?.length));
+  const [abertos, setAbertos] = useState<IdFiltro[]>(() => filtrosAtivos(p));
+  const [menu, setMenu] = useState(false);
   const lerSeg = () => void listarSegmentos().then(setSegmentos).catch(() => setSegmentos([]));
   useEffect(lerSeg, []);
 
+  function adicionar(id: IdFiltro) {
+    setAbertos((a) => (a.includes(id) ? a : [...a, id]));
+    set({ ...p, ...valorInicial(id) });
+    setMenu(false);
+  }
+  function tirar(id: IdFiltro) {
+    const f = FILTROS.find((x) => x.id === id);
+    const novo = { ...p };
+    for (const k of f?.chaves ?? []) delete novo[k];
+    setAbertos((a) => a.filter((x) => x !== id));
+    set(novo);
+  }
   async function salvar() {
     if (nomeSeg.trim().length < 2) return notifyError("Dê um nome ao público.");
     try { await salvarSegmento(nomeSeg, p); setNomeSeg(""); lerSeg(); notifySuccess("Público salvo."); } catch (e) { notifyError(erroDe(e, "Não salvou.")); }
   }
+  const livres = FILTROS.filter((f) => !abertos.includes(f.id));
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {segmentos.length > 0 && (
-        <Campo rotulo="Públicos salvos">
-          <div className="flex flex-wrap gap-1.5">
-            {segmentos.map((s) => (
-              <span key={s.id} className="inline-flex items-center overflow-hidden rounded-full border text-[12.5px]" style={{ borderColor: "var(--line)" }}>
-                <button type="button" className="px-2.5 py-1" style={{ color: "var(--ink)" }} onClick={() => set({ ...s.publico })}>{s.nome}</button>
-                <button type="button" className="px-1.5 py-1" style={{ color: "var(--ink3)" }} aria-label={`Apagar ${s.nome}`}
-                  onClick={() => void apagarSegmento(s.id).then(lerSeg).catch((e) => notifyError(erroDe(e, "Não apagou.")))}>×</button>
-              </span>
-            ))}
-          </div>
-        </Campo>
-      )}
-
-      <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-        <Campo rotulo="Com as etiquetas">
-          <CampoEtiquetas valor={p.etiquetas ?? []} onChange={(v) => set({ ...p, etiquetas: v })} existentes={etiquetas} />
-        </Campo>
-        <Campo rotulo="Precisa ter">
-          <select className="rel-input" value={p.etiquetas_modo ?? "qualquer"} onChange={(e) => set({ ...p, etiquetas_modo: e.target.value as PublicoRel["etiquetas_modo"] })}>
-            <option value="qualquer">qualquer uma</option><option value="todas">todas</option>
-          </select>
-        </Campo>
-      </div>
-      <Campo rotulo="Sem as etiquetas" dica="Quem tiver qualquer uma destas fica de fora.">
-        <CampoEtiquetas valor={p.sem_etiquetas ?? []} onChange={(v) => set({ ...p, sem_etiquetas: v })} existentes={etiquetas} />
-      </Campo>
-
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Campo rotulo="Destino (contém)"><Entrada value={p.destino ?? ""} placeholder="Ex.: Japão" onChange={(e) => set({ ...p, destino: e.target.value })} /></Campo>
-        <Campo rotulo="Embarca a partir de" dica="Viagem marcada"><Entrada type="date" value={p.embarque_de ?? ""} onChange={(e) => set({ ...p, embarque_de: e.target.value })} /></Campo>
-        <Campo rotulo="Embarca até"><Entrada type="date" value={p.embarque_ate ?? ""} onChange={(e) => set({ ...p, embarque_ate: e.target.value })} /></Campo>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Campo rotulo="Aniversário no mês">
-          <select className="rel-input" value={p.aniversario_mes ?? ""} onChange={(e) => set({ ...p, aniversario_mes: e.target.value ? Number(e.target.value) : "" })}>
-            <option value="">Tanto faz</option>
-            {MESES.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-          </select>
-        </Campo>
-        <label className="flex items-end gap-2 pb-2 text-[13px]" style={{ color: "var(--ink)" }}>
-          <input type="checkbox" checked={!!p.sem_viagem_futura} onChange={(e) => set({ ...p, sem_viagem_futura: e.target.checked })} />
-          Só quem não tem viagem marcada
-        </label>
-      </div>
-
-      <button type="button" className="text-[12.5px] font-semibold underline" style={{ color: "var(--ink2)" }} onClick={() => setMais(!mais)}>
-        {mais ? "Menos filtros" : "Mais filtros (viagem feita, nível, UF, escolher a dedo)"}
-      </button>
-      {mais && (
-        <div className="space-y-3 rounded-xl border p-3" style={{ borderColor: "var(--line)" }}>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Campo rotulo="Expedição que fez (contém)"><Entrada value={p.expedicao ?? ""} placeholder="Ex.: Islândia" onChange={(e) => set({ ...p, expedicao: e.target.value })} /></Campo>
-            <Campo rotulo="Voltou a partir de"><Entrada type="date" value={p.retorno_de ?? ""} onChange={(e) => set({ ...p, retorno_de: e.target.value })} /></Campo>
-            <Campo rotulo="Voltou até"><Entrada type="date" value={p.retorno_ate ?? ""} onChange={(e) => set({ ...p, retorno_ate: e.target.value })} /></Campo>
-          </div>
-          <Campo rotulo="Nível do clube"><Chips opcoes={NIVEIS.map((n) => ({ id: n, rotulo: n }))} valor={p.niveis ?? []} onChange={(v) => set({ ...p, niveis: v })} /></Campo>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Campo rotulo="Já viajou com a gente?">
-              <select className="rel-input" value={p.viajou ?? ""} onChange={(e) => set({ ...p, viajou: e.target.value as PublicoRel["viajou"] })}>
-                <option value="">Tanto faz</option><option value="sim">Sim</option><option value="nao">Nunca</option>
-              </select>
-            </Campo>
-            <Campo rotulo="Estado (UF)"><Chips opcoes={UFS.map((u) => ({ id: u, rotulo: u }))} valor={p.estados ?? []} onChange={(v) => set({ ...p, estados: v })} /></Campo>
-          </div>
-          <Campo rotulo="Só estes clientes (escolher a dedo)" dica="Bom pra teste: escolha você mesmo.">
-            <ClientesEscolhidos ids={p.clientes ?? []} onChange={(v) => set({ ...p, clientes: v })} />
-          </Campo>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[12px] font-semibold" style={{ color: "var(--ink3)" }}>Públicos salvos:</span>
+          {segmentos.map((s) => (
+            <span key={s.id} className="inline-flex items-center overflow-hidden rounded-full border text-[12.5px]" style={{ borderColor: "var(--line)" }}>
+              <button type="button" className="px-2.5 py-1" style={{ color: "var(--ink)" }} onClick={() => { setAbertos(filtrosAtivos(s.publico)); set({ ...s.publico }); }}>{s.nome}</button>
+              <button type="button" className="px-1.5 py-1" style={{ color: "var(--ink3)" }} aria-label={`Apagar ${s.nome}`}
+                onClick={() => void apagarSegmento(s.id).then(lerSeg).catch((e) => notifyError(erroDe(e, "Não apagou.")))}>×</button>
+            </span>
+          ))}
         </div>
       )}
 
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="min-w-[200px] flex-1"><Entrada value={nomeSeg} placeholder="Nome pra salvar este público (opcional)" onChange={(e) => setNomeSeg(e.target.value)} /></div>
-        <Botao type="button" onClick={() => void salvar()} disabled={nomeSeg.trim().length < 2}>Salvar público</Botao>
+      <div className="rounded-xl border p-3" style={{ borderColor: "var(--line)" }}>
+        <p className="text-[13.5px] font-semibold" style={{ color: "var(--ink)" }}>
+          {abertos.length ? "Clientes com WhatsApp que batem com TODOS os filtros:" : "Todos os clientes com WhatsApp"}
+        </p>
+        {!abertos.length && <p className="text-[12px]" style={{ color: "var(--ink3)" }}>Quem pediu pra não receber já sai sozinho. Adicione um filtro só se quiser afunilar.</p>}
+        <ul className="mt-2 space-y-2">
+          {abertos.map((id) => {
+            const f = FILTROS.find((x) => x.id === id);
+            if (!f) return null;
+            return (
+              <li key={id} className="rounded-lg p-2.5" style={{ background: "var(--card2)" }}>
+                <div className="mb-1.5 flex items-center">
+                  <span className="text-[12.5px] font-semibold" style={{ color: "var(--ink2)" }}>{f.rotulo}</span>
+                  <button type="button" className="ml-auto px-1.5 text-[16px] leading-none" style={{ color: "var(--ink3)" }} aria-label={`Tirar o filtro ${f.rotulo}`} onClick={() => tirar(id)}>×</button>
+                </div>
+                <EditorFiltro id={id} p={p} set={set} etiquetas={etiquetas} />
+              </li>
+            );
+          })}
+        </ul>
+        <div className="relative mt-2">
+          <Botao type="button" variante="fantasma" onClick={() => setMenu(!menu)} aria-expanded={menu}>+ Filtro</Botao>
+          {menu && (
+            <ul className="absolute z-20 mt-1 max-h-[260px] w-[260px] overflow-y-auto rounded-xl border p-1 shadow-lg" style={{ background: "var(--card)", borderColor: "var(--line)" }}>
+              {livres.map((f) => (
+                <li key={f.id}><button type="button" className="rel-linha w-full rounded-lg px-2.5 py-1.5 text-left text-[13px]" style={{ color: "var(--ink)" }} onClick={() => adicionar(f.id)}>{f.rotulo}</button></li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
+
+      {abertos.length > 0 && (
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-[200px] flex-1"><Entrada value={nomeSeg} placeholder="Salvar este público com o nome… (opcional)" onChange={(e) => setNomeSeg(e.target.value)} /></div>
+          <Botao type="button" onClick={() => void salvar()} disabled={nomeSeg.trim().length < 2}>Salvar público</Botao>
+        </div>
+      )}
     </div>
   );
 }

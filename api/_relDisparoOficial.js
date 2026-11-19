@@ -251,19 +251,19 @@ async function enviarUmRel({ envio, c, modelo, modo, cr, cache }) {
 
 // ── A rodada ────────────────────────────────────────────────────────────────
 
-const inicioDoDiaBRT = (agora) => {
+export const inicioDoDiaBRT = (agora) => {
   const w = new Date(agora.getTime() - BRT); w.setUTCHours(0, 0, 0, 0);
   return new Date(w.getTime() + BRT);
 };
 
-async function contar(phone, desde, simulado) {
+export async function contar(phone, desde, simulado) {
   if (!phone) return 0;
   const n = await rest('rpc/mkt_disparo_contar', { method: 'POST', body: { p_phone: phone, p_desde: desde.toISOString(), p_simulado: simulado } }).catch(() => null);
   return typeof n === 'number' ? n : Infinity;
 }
 
 /** Decide o modo (real/simulação) e as credenciais. { modo, cr, numero, tier } ou { parado }. */
-async function prepararModo(cfg) {
+export async function prepararModo(cfg) {
   const numero = await lerNumeroRel();
   if (cfg.simulacao) return { modo: 'simulacao', cr: numero?.phone_number_id ? { phoneId: numero.phone_number_id } : null, numero, tier: cfg.ritmo.tier_padrao };
   const cr = numero?.phone_number_id ? await credenciaisDaMeta(numero.phone_number_id).catch(() => null) : null;

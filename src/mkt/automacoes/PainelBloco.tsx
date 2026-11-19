@@ -13,6 +13,8 @@ import { AreaTexto, Aviso, Botao, Campo, Entrada, Selecao } from "./ui";
 type Props = {
   no: No; campos: CampoPersonalizado[]; fluxos: Fluxo[]; modelos: ModeloMkt[] | null; usuarios: { id: string; name: string }[];
   precisaModelos: () => void; onMudar: (no: No) => void; onApagar: () => void; onDuplicar: () => void; onFechar: () => void;
+  /** 19/11 (Relacionamento, 0409): só as ações que existem lá. Sem = todas. */
+  acoesPermitidas?: Acao["tipo"][];
 };
 
 const Conta = ({ n, max }: { n: number; max: number }) => <span style={{ color: n > max ? "var(--err-ink, #B91C1C)" : "var(--ink3)" }}>{n}/{max}</span>;
@@ -49,7 +51,7 @@ export default function PainelBloco(p: Props) {
       {no.tipo === "pergunta" && <EditorPergunta no={no} dados={dados} campos={p.campos} />}
       {no.tipo === "aguardar" && <EditorAguardar no={no} dados={dados} />}
       {no.tipo === "condicao" && <EditorCondicao no={no} dados={dados} campos={p.campos} />}
-      {no.tipo === "acao" && <EditorAcoes no={no} dados={dados} campos={p.campos} usuarios={p.usuarios} />}
+      {no.tipo === "acao" && <EditorAcoes no={no} dados={dados} campos={p.campos} usuarios={p.usuarios} permitidas={p.acoesPermitidas} />}
       {no.tipo === "randomizador" && <EditorAB no={no} dados={dados} />}
       {no.tipo === "ir_para" && (
         <Grupo titulo="Destino">
@@ -336,7 +338,8 @@ function acaoNova(t: Acao["tipo"]): Acao {
   }
 }
 
-function EditorAcoes({ no, dados, campos, usuarios }: Ed<"acao"> & { campos: CampoPersonalizado[]; usuarios: { id: string; name: string }[] }) {
+function EditorAcoes({ no, dados, campos, usuarios, permitidas }: Ed<"acao"> & { campos: CampoPersonalizado[]; usuarios: { id: string; name: string }[]; permitidas?: Acao["tipo"][] }) {
+  const tipos = permitidas ? TIPOS_ACAO.filter((t) => permitidas.includes(t.id)) : TIPOS_ACAO;
   const acoes = no.dados.acoes;
   const set = (i: number, a: Acao) => dados({ acoes: acoes.map((x, j) => (j === i ? a : x)) });
   const seletorCampo = (valor: string, on: (v: string) => void) => (
@@ -352,7 +355,7 @@ function EditorAcoes({ no, dados, campos, usuarios }: Ed<"acao"> & { campos: Cam
         <div key={i} className="rounded-lg p-2 space-y-1.5" style={{ background: "var(--card2)" }}>
           <div className="flex gap-1.5">
             <Selecao value={a.tipo} onChange={(e) => set(i, acaoNova(e.target.value as Acao["tipo"]))}>
-              {TIPOS_ACAO.map((t) => <option key={t.id} value={t.id}>{t.rotulo}</option>)}
+              {tipos.map((t) => <option key={t.id} value={t.id}>{t.rotulo}</option>)}
             </Selecao>
             <Remover onClick={() => dados({ acoes: acoes.filter((_, j) => j !== i) })} />
           </div>

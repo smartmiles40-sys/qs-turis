@@ -9,7 +9,7 @@ import { supabase } from "@/lib/supabase";
 import type { Campanha, MapaVariaveis, PublicoRel } from "@/lib/qs/disparos";
 import type { EnvioExtra, KpisMkt, ModeloMkt, PrecosMkt } from "@/mkt/disparos/oficial";
 
-async function chamar<T>(corpo: Record<string, unknown>): Promise<T> {
+export async function chamar<T>(corpo: Record<string, unknown>): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.access_token) throw new Error("Sessão expirada. Entre de novo.");
   const r = await fetch("/api/disparos", {

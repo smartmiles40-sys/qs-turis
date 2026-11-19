@@ -29,6 +29,7 @@ import {
 } from "./oficialRel";
 import NovoDisparoRel from "./NovoDisparoRel";
 import ContatosRel from "./ContatosRel";
+import FluxosRel from "./FluxosRel";
 
 const STATUS: Record<StatusCampanha, { rotulo: string; tom: "neutro" | "rel" | "aviso" | "erro" }> = {
   rascunho: { rotulo: "rascunho", tom: "neutro" }, agendada: { rotulo: "agendado", tom: "rel" }, enviando: { rotulo: "enviando", tom: "rel" },
@@ -322,13 +323,13 @@ function AbaNumero({ est, ehAdmin, onMudou }: { est: EstadoRel | null; ehAdmin: 
 
 // ── Página ──────────────────────────────────────────────────────────────────
 
-type Aba = "disparos" | "contatos" | "numero";
+type Aba = "fluxos" | "disparos" | "contatos" | "numero";
 
 export default function DisparosRelPage() {
   const { currentUser } = useQsAuth();
   const ehAdmin = currentUser?.role === "admin";
   const ehGestor = ehAdmin || currentUser?.role === "gestor";
-  const [aba, setAba] = useState<Aba>(() => { try { return (localStorage.getItem("rel_disparos_aba") as Aba) || "disparos"; } catch { return "disparos"; } });
+  const [aba, setAba] = useState<Aba>(() => { try { return (localStorage.getItem("rel_disparos_aba") as Aba) || "fluxos"; } catch { return "fluxos"; } });
   const [est, setEst] = useState<EstadoRel | null>(null);
   const [modelos, setModelos] = useState<ModeloRel[]>([]);
   const ler = useCallback(async () => {
@@ -340,10 +341,10 @@ export default function DisparosRelPage() {
   }, []);
   useEffect(() => { void ler(); }, [ler]);
   const ir = (a: Aba) => { setAba(a); try { localStorage.setItem("rel_disparos_aba", a); } catch { /* sem storage */ } };
-  const ABAS: { id: Aba; rotulo: string }[] = [{ id: "disparos", rotulo: "Disparos" }, { id: "contatos", rotulo: "Contatos e etiquetas" }, { id: "numero", rotulo: "Número e ritmo" }];
+  const ABAS: { id: Aba; rotulo: string }[] = [{ id: "fluxos", rotulo: "Fluxos" }, { id: "disparos", rotulo: "Disparo simples" }, { id: "contatos", rotulo: "Contatos e etiquetas" }, { id: "numero", rotulo: "Número e ritmo" }];
 
   return (
-    <div className="mx-auto max-w-[1100px] space-y-4 p-4">
+    <div className={`mx-auto space-y-4 p-4 ${aba === "fluxos" ? "max-w-none" : "max-w-[1100px]"}`}>
       <header className="flex flex-wrap items-center gap-3">
         <div className="mr-auto">
           <h1 className="text-[20px] font-bold" style={{ color: "var(--ink)" }}>Disparos</h1>
@@ -358,6 +359,7 @@ export default function DisparosRelPage() {
             style={aba === a.id ? { borderColor: "var(--rel)", color: "var(--rel-ink)" } : { borderColor: "transparent", color: "var(--ink3)" }}>{a.rotulo}</button>
         ))}
       </nav>
+      {aba === "fluxos" && <FluxosRel est={est} />}
       {aba === "disparos" && <AbaDisparos est={est} modelos={modelos} onIrNumero={() => ir("numero")} />}
       {aba === "contatos" && <ContatosRel ehGestor={ehGestor} />}
       {aba === "numero" && <AbaNumero est={est} ehAdmin={ehAdmin} onMudou={() => void ler()} />}
