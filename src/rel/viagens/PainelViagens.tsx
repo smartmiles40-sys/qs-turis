@@ -424,12 +424,13 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
     return m;
   }, [analises]);
   const filtrando = quantosAtivos(fp) > 0;
+  const ctxFiltro = useMemo(() => ({ hoje: hojeISO(), userId: currentUser?.id ?? "", tiposDoRoteiro }), [currentUser?.id, tiposDoRoteiro]);
   const vf = useMemo(() => {
     const todas = viagens ?? [];
-    if (!filtrando) return todas;
-    const ctx = { hoje: hojeISO(), userId: currentUser?.id ?? "", tiposDoRoteiro };
-    return todas.filter((v) => passaNoFiltro(v, fp, ctx));
-  }, [viagens, fp, filtrando, tiposDoRoteiro, currentUser?.id]);
+    return filtrando ? todas.filter((v) => passaNoFiltro(v, fp, ctxFiltro)) : todas;
+  }, [viagens, fp, filtrando, ctxFiltro]);
+  // pros números e as barras do filtro: respeitam o Todos/Pacotes/Expedições
+  const doTipo = useMemo(() => (viagens ?? []).filter((v) => filtro === "todos" || grupoDe(v) === filtro), [viagens, filtro]);
   const idsVf = useMemo(() => new Set(vf.map((v) => v.id)), [vf]);
 
   const { pontos, semLugar, semDestino } = useMemo(() => {
@@ -524,7 +525,7 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
         </p>
       </div>
 
-      <FiltrosPainel f={fp} onMudar={setFp} equipe={equipe} />
+      <FiltrosPainel f={fp} onMudar={setFp} equipe={equipe} viagens={doTipo} ctx={ctxFiltro} />
 
       {/* 16/11 (Bruno, limpeza): as pendências "sem dono / para classificar / sem data"
           só aparecem se a tela pedir a fila (onVerFila) — o Painel do Rel não pede mais:

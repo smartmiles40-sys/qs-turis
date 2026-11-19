@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  FILTRO_PADRAO, alternarTem, intervaloDoPeriodo, lerFiltro, passaNaBusca, passaNaData, passaNoFiltro, quantosAtivos,
+  FILTRO_PADRAO, alternarTem, contarOpcoes, contarPorSemana, semanasDaLinha, intervaloDoPeriodo, lerFiltro, passaNaBusca, passaNaData, passaNoFiltro, quantosAtivos,
   type FiltroPainel, type ViagemFiltravel,
 } from "../../src/rel/lib/filtroViagens.ts";
 
@@ -85,4 +85,27 @@ test("filtro guardado: lixo volta pro padrão e a busca não fica; padrão = nad
   assert.equal(f.campo, "volta"); assert.equal(f.de, "2026-12-01"); assert.equal(f.ate, "");
   assert.deepEqual(f.servicos, ["aereo"]); assert.deepEqual(f.tem, ["voo_interno"]); assert.equal(f.busca, "");
   assert.equal(quantosAtivos(f), 4);
+});
+
+test("linha do tempo: semanas de segunda a domingo; venda olha pra trás", () => {
+  const s = semanasDaLinha("2026-11-19", 3); // quinta
+  assert.deepEqual(s.map((x) => [x.de, x.ate]), [["2026-11-16", "2026-11-22"], ["2026-11-23", "2026-11-29"], ["2026-11-30", "2026-12-06"]]);
+  assert.deepEqual(s.map((x) => x.mes), ["nov", null, null]); // o mês só aparece quando muda
+  const t = semanasDaLinha("2026-11-19", 2, true);
+  assert.deepEqual(t.map((x) => x.de), ["2026-11-09", "2026-11-16"]);
+});
+
+test("barras por semana separam pacote e expedição e ignoram o período escolhido", () => {
+  const vs = [V({ id: "a" }), V({ id: "b", servico: "expedicao", data_embarque: "2026-11-20", data_retorno: "2026-11-21" })];
+  const sem = semanasDaLinha("2026-11-19", 3);
+  const c = contarPorSemana(vs, F({ campo: "embarque", periodo: "hoje" }), ctx, sem, (v) => (v.servico === "expedicao" ? "expedicao" : "pacote"));
+  assert.deepEqual(c, [{ expedicao: 1, pacote: 0 }, { expedicao: 0, pacote: 0 }, { expedicao: 0, pacote: 1 }]);
+});
+
+test("números dos botões: o próprio grupo não zera as outras opções", () => {
+  const vs = [V({ id: "v1" }), V({ id: "b", servico: "aereo", voos_internos: 1 })];
+  const n = contarOpcoes(vs, F({ servicos: ["aereo"] }), ctx, "servicos");
+  assert.equal(n.get("pacote"), 1); assert.equal(n.get("aereo"), 1);
+  const t = contarOpcoes(vs, F({ servicos: ["aereo"] }), ctx, "tem");
+  assert.equal(t.get("voo_interno"), 1); assert.equal(t.get("hospedagem"), undefined); // o b não tem hotel
 });

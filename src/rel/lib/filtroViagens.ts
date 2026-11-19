@@ -188,6 +188,61 @@ export function alternarTem(tem: TemNoRoteiro[], t: TemNoRoteiro): TemNoRoteiro[
   return [...sem, t];
 }
 
+// ── Contagens (pros números nos botões e as barras da linha do tempo) ──────
+
+/**
+ * Quantas viagens cada opção de um grupo teria, com TODOS os outros filtros
+ * valendo (o próprio grupo fica de fora — senão, marcado "Aéreo", o "Pacote"
+ * mostraria 0).
+ */
+export function contarOpcoes<K extends "servicos" | "tem">(vs: ViagemFiltravel[], f: FiltroPainel, ctx: ContextoFiltro, grupo: K): Map<string, number> {
+  const semGrupo = { ...f, [grupo]: [] } as FiltroPainel;
+  const out = new Map<string, number>();
+  const opcoes = grupo === "servicos" ? SERVICOS_FILTRO.map((s) => s.id) : TEM_NO_ROTEIRO.map((t) => t.id);
+  for (const v of vs) {
+    if (!passaNoFiltro(v, semGrupo, ctx)) continue;
+    for (const o of opcoes) {
+      const ok = grupo === "servicos" ? v.servico === o : passaNoFiltro(v, { ...semGrupo, tem: [o as TemNoRoteiro] }, ctx);
+      if (ok) out.set(o, (out.get(o) ?? 0) + 1);
+    }
+  }
+  return out;
+}
+
+export interface Semana { de: string; ate: string; rotulo: string; mes: string | null }
+
+const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+
+/**
+ * As semanas (seg→dom) da linha do tempo. Pra frente a partir da semana de
+ * hoje; na "Venda" (que é passado), as últimas semanas até hoje.
+ */
+export function semanasDaLinha(hoje: string, n: number, paraTras = false): Semana[] {
+  const dow = (new Date(`${hoje}T12:00:00Z`).getUTCDay() + 6) % 7; // 0 = segunda
+  const seg = somaDias(hoje, -dow);
+  const inicio = paraTras ? somaDias(seg, -7 * (n - 1)) : seg;
+  const out: Semana[] = [];
+  let mesAnterior = "";
+  for (let i = 0; i < n; i++) {
+    const de = somaDias(inicio, 7 * i), ate = somaDias(de, 6);
+    const mes = MESES[Number(de.slice(5, 7)) - 1];
+    out.push({ de, ate, rotulo: `${de.slice(8, 10)}/${de.slice(5, 7)}`, mes: mes !== mesAnterior ? mes : null });
+    mesAnterior = mes;
+  }
+  return out;
+}
+
+/** Quantas viagens caem em cada semana (pela data escolhida), com os outros filtros valendo. */
+export function contarPorSemana<T extends ViagemFiltravel>(vs: T[], f: FiltroPainel, ctx: ContextoFiltro, semanas: Semana[], tipoDe: (v: T) => "expedicao" | "pacote"): { expedicao: number; pacote: number }[] {
+  const semData = { ...f, periodo: "tudo" as const };
+  const passam = vs.filter((v) => passaNoFiltro(v, semData, ctx));
+  return semanas.map((s) => {
+    const c = { expedicao: 0, pacote: 0 };
+    for (const v of passam) if (passaNaData(v, f.campo, s.de, s.ate)) c[tipoDe(v)] += 1;
+    return c;
+  });
+}
+
 // ── Guardar no navegador ────────────────────────────────────────────────────
 
 const valido = <T extends string>(v: unknown, ok: { id: T }[], padrao: T): T => (ok.some((o) => o.id === v) ? (v as T) : padrao);
