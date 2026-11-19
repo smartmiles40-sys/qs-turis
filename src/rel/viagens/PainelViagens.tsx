@@ -19,11 +19,8 @@
 // duas fontes conta uma vez só.
 // -----------------------------------------------------------------------------
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { useQsAuth } from "@/contexts/QsAuthContext";
-import { FILTRO_PADRAO, lerFiltro, passaNoFiltro, quantosAtivos, type FiltroPainel } from "../lib/filtroViagens";
-import FiltrosPainel, { baixarCsv } from "./FiltrosPainel";
 import {
-  SERVICOS, grupoDe, listarEquipeRel, grupoTipo, horaDoLugar, hojeSP, momentoDoProximo, proximoVoo, pendenciasViagens, proximosTrechos, revisoesDe, viagensEmAndamento, TIPOS_TRECHO,
+  SERVICOS, grupoDe, grupoTipo, horaDoLugar, hojeSP, momentoDoProximo, proximoVoo, pendenciasViagens, proximosTrechos, revisoesDe, viagensEmAndamento, TIPOS_TRECHO,
   type FiltroViagens, type PendenciasViagens, type Revisao, type Trecho, type Viagem,
 } from "../lib/viagens";
 import { Aviso } from "../ui";
@@ -32,11 +29,11 @@ import { lugaresDe } from "./destinos";
 import { conferirViagens, contar, type Analise } from "../lib/problemas";
 import { resumirVoos } from "../lib/statusViagem";
 import { ehVooQueVale } from "../lib/agendaServicos";
+import { FILTRO_QUADRO_VAZIO, PERIODOS_VOO, lerFiltroQuadro, passaNoQuadro, quantosAtivosQuadro, somaDias, type FiltroQuadro, type LinhaFiltravel, type PeriodoVoo } from "../lib/filtroQuadro";
 // 0359: check-in só de voo de verdade (a data do Bitrix de venda de hotel não é voo); trem segue
 const pedeCheckin = (t: Trecho) => t.tipo === "trem" || ehVooQueVale(t);
 
 type Filtro = "todos" | "expedicao" | "pacote";
-const CHAVE_FILTRO = "rel_painel_filtro";
 const SEM_DESTINO = "\u0000sem-destino";
 type Situacao = "em_viagem" | "embarcando" | "checkin" | "revisada" | "pendente";
 
@@ -256,39 +253,146 @@ function situacaoPac(v: Viagem, revisada: boolean, voosErrados: boolean): Situac
   return revisada ? "revisado" : "pendente";
 }
 
+// 19/11 (Bruno): um filtro embaixo de cada coluna (src/rel/lib/filtroQuadro.ts),
+// guardado no navegador. Somam entre si; o título mostra "X de Y vendas".
+const CHAVE_FILTRO_QUADRO = "rel_quadro_pacotes_filtro";
+const ESTILO_CAMPO: React.CSSProperties = {
+  width: "100%", background: "#0F1519", border: "1px solid #24313A", borderRadius: 6, color: "#E6EEF1",
+  fontSize: 11, padding: "4px 6px", fontFamily: "inherit", letterSpacing: 0, textTransform: "none", fontWeight: 500, outline: "none",
+};
+const ESTILO_ATIVO: React.CSSProperties = { borderColor: "#FFD54F", background: "rgba(255,213,79,.08)" };
+
+function linhaFiltravel({ v, voo, situacao, alertas, interno }: LinhaPac): LinhaFiltravel {
+  return {
+    cliente: v.cliente_nome || v.titulo,
+    servico: v.servico,
+    de: voo ? [voo.origem_codigo, voo.origem].filter(Boolean).join(" ") : "",
+    para: voo ? [voo.destino_codigo, voo.destino, v.destino].filter(Boolean).join(" ") : [v.destino, v.titulo].filter(Boolean).join(" "),
+    dia: voo ? hojeDe(voo.partida_em) : v.data_embarque,
+    temLocalizador: !!voo?.localizador,
+    interno, pax: pax(v), alertas, situacao,
+  };
+}
+
 function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirViagem: (id: string) => void }) {
   const [todas, setTodas] = useState(false);
-  const lista = todas ? linhas : linhas.slice(0, 12);
+  const [f, setFState] = useState<FiltroQuadro>(() => { try { return lerFiltroQuadro(localStorage.getItem(CHAVE_FILTRO_QUADRO)); } catch { return FILTRO_QUADRO_VAZIO; } });
+  const guardar = (n: FiltroQuadro) => { try { localStorage.setItem(CHAVE_FILTRO_QUADRO, JSON.stringify(n)); } catch { /* sem localStorage */ } return n; };
+  const setF = (p: Partial<FiltroQuadro>) => setFState((x) => guardar({ ...x, ...p }));
+  const ativos = quantosAtivosQuadro(f);
+  const hoje = hojeISO();
+  const filtradas = useMemo(() => (ativos ? linhas.filter((l) => passaNoQuadro(linhaFiltravel(l), f, hoje)) : linhas), [linhas, f, ativos, hoje]);
+  const lista = todas ? filtradas : filtradas.slice(0, 12);
+  // opções e sugestões: o que existe no quadro
+  const servicos = useMemo(() => [...new Set(linhas.map((l) => l.v.servico).filter((s): s is NonNullable<typeof s> => !!s))], [linhas]);
+  const sugestoes = useMemo(() => {
+    const de = new Set<string>(), para = new Set<string>();
+    for (const { v, voo } of linhas) {
+      const o = voo?.origem_codigo || voo?.origem, d = voo?.destino_codigo || voo?.destino || v.destino;
+      if (o) de.add(o.trim());
+      if (d) para.add(d.trim());
+    }
+    return { de: [...de].sort(), para: [...para].sort() };
+  }, [linhas]);
+  const ativo = (on: boolean) => (on ? { ...ESTILO_CAMPO, ...ESTILO_ATIVO } : ESTILO_CAMPO);
   const mono = { fontFamily: "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace" };
   return (
     <section className="rel-quadro rounded-2xl overflow-hidden" aria-label="Quadro de partidas — Pacotes e serviços" style={{ background: "#0B0F12", border: "1px solid #1C2328", boxShadow: "inset 0 1px 0 rgba(255,255,255,.04)" }}>
-      <div className="flex items-center justify-between px-4 py-2.5" style={{ background: "#11171B", borderBottom: "1px solid #1C2328" }}>
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5" style={{ background: "#11171B", borderBottom: "1px solid #1C2328" }}>
         <h3 className="text-[13px] font-bold tracking-[.18em] uppercase flex items-center gap-2" style={{ color: COR_PAC, ...mono }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z" /></svg>
           Partidas · Pacotes e serviços
         </h3>
-        <span className="text-[11px]" style={{ color: "#8A979E", ...mono }}>{linhas.length} venda{linhas.length === 1 ? "" : "s"}</span>
+        <span className="flex items-center gap-3 text-[11px]" style={{ color: "#8A979E", ...mono }} aria-live="polite">
+          {ativos > 0 && (
+            <button onClick={() => setFState(guardar(FILTRO_QUADRO_VAZIO))} className="underline hover:brightness-125" style={{ color: "#FFD54F" }}>
+              LIMPAR FILTROS ({ativos})
+            </button>
+          )}
+          {ativos > 0 ? `${filtradas.length} de ${linhas.length} vendas` : `${linhas.length} venda${linhas.length === 1 ? "" : "s"}`}
+        </span>
       </div>
       {linhas.length === 0 ? (
         <p className="px-4 py-6 text-[13px]" style={{ color: "#8A979E", ...mono }}>NENHUMA SAÍDA PROGRAMADA</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px]" style={{ ...mono, color: "#F2F2F2", minWidth: 980 }}>
+          <table className="w-full text-[12.5px]" style={{ ...mono, color: "#F2F2F2", minWidth: 1080 }}>
             <thead>
               <tr className="text-left text-[10.5px] tracking-[.14em]" style={{ color: "#7D8A91" }}>
-                <th className="px-4 py-2 font-semibold">RESPONSÁVEL DA COMPRA</th>
-                <th className="px-2 py-2 font-semibold">SERVIÇO</th>
-                <th className="px-2 py-2 font-semibold">DE</th>
-                <th className="px-2 py-2 font-semibold">PARA</th>
-                <th className="px-2 py-2 font-semibold">PRÓXIMO VOO</th>
-                <th className="px-2 py-2 font-semibold">LOCALIZADOR</th>
-                <th className="px-2 py-2 font-semibold text-center" title="Voo interno: os voos que não são a ida nem a volta internacional">INTERNO</th>
-                <th className="px-2 py-2 font-semibold text-right">PAX</th>
-                <th className="px-2 py-2 font-semibold text-center">ALERTAS</th>
-                <th className="px-4 py-2 font-semibold text-right">SITUAÇÃO</th>
+                <th className="px-4 pt-2 pb-1 font-semibold">RESPONSÁVEL DA COMPRA</th>
+                <th className="px-2 pt-2 pb-1 font-semibold">SERVIÇO</th>
+                <th className="px-2 pt-2 pb-1 font-semibold">DE</th>
+                <th className="px-2 pt-2 pb-1 font-semibold">PARA</th>
+                <th className="px-2 pt-2 pb-1 font-semibold">PRÓXIMO VOO</th>
+                <th className="px-2 pt-2 pb-1 font-semibold">LOCALIZADOR</th>
+                <th className="px-2 pt-2 pb-1 font-semibold text-center" title="Voo interno: os voos que não são a ida nem a volta internacional">INTERNO</th>
+                <th className="px-2 pt-2 pb-1 font-semibold text-right">PAX</th>
+                <th className="px-2 pt-2 pb-1 font-semibold text-center">ALERTAS</th>
+                <th className="px-4 pt-2 pb-1 font-semibold text-right">SITUAÇÃO</th>
+              </tr>
+              {/* a linha dos filtros: um embaixo de cada coluna */}
+              <tr className="align-top" style={{ borderBottom: "1px solid #182026" }}>
+                <th className="px-4 pb-2 font-normal" style={{ minWidth: 170 }}>
+                  <input style={ativo(!!f.responsavel.trim())} value={f.responsavel} onChange={(e) => setF({ responsavel: e.target.value })} placeholder="Buscar nome…" aria-label="Filtrar responsável da compra" />
+                </th>
+                <th className="px-2 pb-2 font-normal" style={{ minWidth: 92 }}>
+                  <select style={ativo(!!f.servico)} value={f.servico} onChange={(e) => setF({ servico: e.target.value })} aria-label="Filtrar serviço">
+                    <option value="">Todos</option>
+                    {servicos.map((s) => <option key={s} value={s}>{SERVICOS[s]}</option>)}
+                  </select>
+                </th>
+                <th className="px-2 pb-2 font-normal" style={{ minWidth: 80 }}>
+                  <input style={ativo(!!f.de.trim())} value={f.de} onChange={(e) => setF({ de: e.target.value })} placeholder="GRU…" list="rel-quadro-de" aria-label="Filtrar de onde sai" />
+                  <datalist id="rel-quadro-de">{sugestoes.de.map((x) => <option key={x} value={x} />)}</datalist>
+                </th>
+                <th className="px-2 pb-2 font-normal" style={{ minWidth: 90 }}>
+                  <input style={ativo(!!f.para.trim())} value={f.para} onChange={(e) => setF({ para: e.target.value })} placeholder="Destino…" list="rel-quadro-para" aria-label="Filtrar para onde vai" />
+                  <datalist id="rel-quadro-para">{sugestoes.para.map((x) => <option key={x} value={x} />)}</datalist>
+                </th>
+                <th className="px-2 pb-2 font-normal" style={{ minWidth: 150 }}>
+                  <select style={ativo(f.voo !== "tudo")} value={f.voo} aria-label="Filtrar data do próximo voo"
+                    onChange={(e) => { const voo = e.target.value as PeriodoVoo; setF(voo === "livre" && !f.vooDe ? { voo, vooDe: hoje, vooAte: somaDias(hoje, 6) } : { voo }); }}>
+                    {PERIODOS_VOO.map((p) => <option key={p.id} value={p.id}>{p.rotulo}</option>)}
+                  </select>
+                  {f.voo === "livre" && (
+                    <span className="flex flex-col gap-1 mt-1">
+                      <input type="date" style={{ ...ESTILO_CAMPO, colorScheme: "dark" }} value={f.vooDe} onChange={(e) => setF({ vooDe: e.target.value })} aria-label="Próximo voo de" />
+                      <input type="date" style={{ ...ESTILO_CAMPO, colorScheme: "dark" }} value={f.vooAte} onChange={(e) => setF({ vooAte: e.target.value })} aria-label="Próximo voo até" />
+                    </span>
+                  )}
+                </th>
+                <th className="px-2 pb-2 font-normal" style={{ minWidth: 92 }}>
+                  <select style={ativo(!!f.localizador)} value={f.localizador} onChange={(e) => setF({ localizador: e.target.value as FiltroQuadro["localizador"] })} aria-label="Filtrar localizador">
+                    <option value="">Todos</option><option value="com">Com</option><option value="sem">Sem</option>
+                  </select>
+                </th>
+                <th className="px-2 pb-2 font-normal" style={{ minWidth: 84 }}>
+                  <select style={ativo(!!f.interno)} value={f.interno} onChange={(e) => setF({ interno: e.target.value as FiltroQuadro["interno"] })} aria-label="Filtrar voo interno">
+                    <option value="">Todos</option><option value="sim">Sim</option><option value="nao">Não</option><option value="sem_voo">Sem voos</option>
+                  </select>
+                </th>
+                <th className="px-2 pb-2 font-normal" style={{ minWidth: 62 }}>
+                  <select style={ativo(!!f.pax)} value={f.pax} onChange={(e) => setF({ pax: e.target.value as FiltroQuadro["pax"] })} aria-label="Filtrar passageiros">
+                    <option value="">Todos</option><option value="1">1</option><option value="2">2</option><option value="3+">3+</option>
+                  </select>
+                </th>
+                <th className="px-2 pb-2 font-normal" style={{ minWidth: 96 }}>
+                  <select style={ativo(!!f.alertas)} value={f.alertas} onChange={(e) => setF({ alertas: e.target.value as FiltroQuadro["alertas"] })} aria-label="Filtrar alertas">
+                    <option value="">Todos</option><option value="urgente">Urgentes ⚠</option><option value="algum">Com alerta</option><option value="nenhum">Sem alerta ✓</option>
+                  </select>
+                </th>
+                <th className="px-4 pb-2 font-normal" style={{ minWidth: 140 }}>
+                  <select style={ativo(!!f.situacao)} value={f.situacao} onChange={(e) => setF({ situacao: e.target.value })} aria-label="Filtrar situação">
+                    <option value="">Todas</option>
+                    {(Object.keys(SITUACAO_PAC) as SituacaoPac[]).map((s) => <option key={s} value={s}>{SITUACAO_PAC[s].texto.replace(" ✓", "")}</option>)}
+                  </select>
+                </th>
               </tr>
             </thead>
             <tbody>
+              {lista.length === 0 && (
+                <tr><td colSpan={10} className="px-4 py-6 text-[13px]" style={{ color: "#8A979E" }}>NENHUMA VENDA COM ESSES FILTROS</td></tr>
+              )}
               {lista.map(({ v, voo, situacao, alertas, interno }, i) => {
                 const s = SITUACAO_PAC[situacao];
                 const atraso = Math.min(i, 12) * 0.06;
@@ -324,9 +428,9 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
           </table>
         </div>
       )}
-      {linhas.length > 12 && (
+      {filtradas.length > 12 && (
         <button onClick={() => setTodas((x) => !x)} className="rel-quadro-linha w-full py-3 text-[11.5px] tracking-[.12em] font-semibold" style={{ color: "#B9C4C9", borderTop: "1px solid #182026", ...mono }}>
-          {todas ? "MOSTRAR MENOS" : `VER TODAS AS ${linhas.length} VENDAS`}
+          {todas ? "MOSTRAR MENOS" : `VER TODAS AS ${filtradas.length} VENDAS`}
         </button>
       )}
     </section>
@@ -374,12 +478,6 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
   // "nenhum voo" ou "tudo PENDENTE" pareceria verdade.
   const [aviso, setAviso] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<Filtro>("todos");
-  // 19/11 (Bruno): filtro de data/serviço/voo interno/dono DENTRO do painel — guardado no navegador
-  const { currentUser } = useQsAuth();
-  const [fp, setFpState] = useState<FiltroPainel>(() => { try { return lerFiltro(localStorage.getItem(CHAVE_FILTRO)); } catch { return FILTRO_PADRAO; } });
-  const setFp = (f: FiltroPainel) => { setFpState(f); try { localStorage.setItem(CHAVE_FILTRO, JSON.stringify({ ...f, busca: "" })); } catch { /* sem localStorage */ } };
-  const [equipe, setEquipe] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => { listarEquipeRel().then(setEquipe).catch(() => setEquipe([])); }, []);
 
   useEffect(() => {
     let vivo = true;
@@ -417,26 +515,10 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
 
   const vale = (t: "expedicao" | "pacote") => filtro === "todos" || filtro === t;
 
-  // o que o filtro do topo deixa passar — tudo abaixo (mapa, cards, quadros) usa só essas
-  const tiposDoRoteiro = useMemo(() => {
-    const m = new Map<string, Set<string>>();
-    for (const [id, a] of analises ?? []) m.set(id, new Set(a.trechos.filter((t) => t.status_manual !== "cancelado").map((t) => t.tipo)));
-    return m;
-  }, [analises]);
-  const filtrando = quantosAtivos(fp) > 0;
-  const ctxFiltro = useMemo(() => ({ hoje: hojeISO(), userId: currentUser?.id ?? "", tiposDoRoteiro }), [currentUser?.id, tiposDoRoteiro]);
-  const vf = useMemo(() => {
-    const todas = viagens ?? [];
-    return filtrando ? todas.filter((v) => passaNoFiltro(v, fp, ctxFiltro)) : todas;
-  }, [viagens, fp, filtrando, ctxFiltro]);
-  // pros números e as barras do filtro: respeitam o Todos/Pacotes/Expedições
-  const doTipo = useMemo(() => (viagens ?? []).filter((v) => filtro === "todos" || grupoDe(v) === filtro), [viagens, filtro]);
-  const idsVf = useMemo(() => new Set(vf.map((v) => v.id)), [vf]);
-
   const { pontos, semLugar, semDestino } = useMemo(() => {
     const m = new Map<string, PontoMapa>();
     const sem = new Map<string, number>();
-    for (const v of vf) {
+    for (const v of viagens ?? []) {
       const tipo = grupoDe(v);
       if (!vale(tipo)) continue;
       // destino → expedição → título ("Antonia Exp Tailandia" só tem o lugar no título)
@@ -457,11 +539,11 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
     const semDestino = sem.get(SEM_DESTINO) ?? 0;
     sem.delete(SEM_DESTINO);
     return { pontos: [...m.values()], semLugar: [...sem.entries()].sort((a, b) => b[1] - a[1]), semDestino };
-  }, [vf, filtro]);
+  }, [viagens, filtro]);
 
-  const partidas = useMemo(() => montarPartidas(vf, rev, trechos), [vf, rev, trechos]);
+  const partidas = useMemo(() => montarPartidas(viagens ?? [], rev, trechos), [viagens, rev, trechos]);
   const partidasExp = partidas.filter((p) => p.tipo === "expedicao");
-  const linhasPac = useMemo<LinhaPac[]>(() => vf
+  const linhasPac = useMemo<LinhaPac[]>(() => (viagens ?? [])
     .filter((v) => grupoDe(v) === "pacote")
     .map((v) => {
       const c = contar(analises?.get(v.id)?.problemas ?? []);
@@ -471,23 +553,23 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
         interno: r && r.voos.some((x) => x.valido) ? r.internos : null };
     })
     .sort((a, b) => (a.voo?.partida_em ?? a.v.data_embarque ?? "9999").localeCompare(b.voo?.partida_em ?? b.v.data_embarque ?? "9999")),
-  [vf, voosPac, rev, analises, resumos]);
+  [viagens, voosPac, rev, analises, resumos]);
 
   const hoje = hojeISO();
   const proxEmbarque = (t: "expedicao" | "pacote") => partidas.find((p) => p.tipo === t && p.data && p.data >= hoje && p.situacao !== "em_viagem");
   const agora = Date.now();
-  const trechosVale = trechos.filter((t) => idsVf.has(t.viagem_id) && vale(grupoTipo(t.viagem_tipo)));
+  const trechosVale = trechos.filter((t) => vale(grupoTipo(t.viagem_tipo)));
   const proxVooInterno = trechosVale.find((t) => t.tipo === "voo_interno" && new Date(t.partida_em).getTime() >= agora);
   const proxCheckin = trechosVale
     .filter((t) => pedeCheckin(t) && t.checkin_em && !t.checkin_feito_em && !t.status_manual && new Date(t.partida_em).getTime() > agora)
     .sort((a, b) => a.checkin_em!.localeCompare(b.checkin_em!))[0];
   const contaRev = (t: "expedicao" | "pacote") => {
-    const vs = vf.filter((v) => grupoDe(v) === t);
+    const vs = (viagens ?? []).filter((v) => grupoDe(v) === t);
     return { feitas: vs.filter((v) => rev.get(v.id)?.revisado_em).length, total: vs.length };
   };
   const revExp = contaRev("expedicao"), revPac = contaRev("pacote");
-  const emViagem = vf.filter((v) => v.fase === "em_viagem" && vale(grupoDe(v))).reduce((s, v) => s + pax(v), 0);
-  const totalPax = vf.filter((v) => vale(grupoDe(v))).reduce((s, v) => s + pax(v), 0);
+  const emViagem = (viagens ?? []).filter((v) => v.fase === "em_viagem" && vale(grupoDe(v))).reduce((s, v) => s + pax(v), 0);
+  const totalPax = (viagens ?? []).filter((v) => vale(grupoDe(v))).reduce((s, v) => s + pax(v), 0);
 
   if (viagens === null) return (
     <div className="space-y-4" aria-busy="true">
@@ -517,15 +599,11 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
           ))}
         </div>
         <p className="text-[12.5px]" style={{ color: "var(--ink2)" }}>
-          {filtrando && <><b style={{ color: "var(--rel-ink)" }}>Filtrado:</b> {vf.filter((v) => vale(grupoDe(v))).length} de {(viagens ?? []).filter((v) => vale(grupoDe(v))).length} vendas · </>}
           <b style={{ color: "var(--ink)" }}>{totalPax}</b> viajante{totalPax === 1 ? "" : "s"} com viagem marcada
           {emViagem > 0 && <> · <b style={{ color: "var(--ink)" }}>{emViagem}</b> viajando agora</>}
           {" "}· {pontos.length} destino{pontos.length === 1 ? "" : "s"}
-          {" "}· <button className="underline" onClick={() => baixarCsv(vf.filter((v) => vale(grupoDe(v))))}>baixar planilha</button>
         </p>
       </div>
-
-      <FiltrosPainel f={fp} onMudar={setFp} equipe={equipe} viagens={doTipo} ctx={ctxFiltro} />
 
       {/* 16/11 (Bruno, limpeza): as pendências "sem dono / para classificar / sem data"
           só aparecem se a tela pedir a fila (onVerFila) — o Painel do Rel não pede mais:
