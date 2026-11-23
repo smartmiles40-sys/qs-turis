@@ -4,7 +4,7 @@
 // os contadores mostram quanto falta; validarGrafo barra na hora de ativar.
 import { useEffect, type ReactNode } from "react";
 import {
-  LIMITES, ROTULO_TIPO, novoId,
+  COR_NOTA, LIMITES, ROTULO_TIPO, novoId,
   type Acao, type Bloco, type CampoPersonalizado, type Fluxo, type Interacao, type No, type Regra,
 } from "./tipos";
 import type { ModeloMkt } from "./api";
@@ -42,7 +42,19 @@ export default function PainelBloco(p: Props) {
         {no.tipo !== "inicio" && <Botao variante="perigo" onClick={() => { if (window.confirm("Apagar este bloco e as setas dele?")) p.onApagar(); }}>Apagar</Botao>}
         <button type="button" onClick={p.onFechar} aria-label="Fechar" className="text-lg px-1" style={{ color: "var(--ink3)" }}>×</button>
       </div>
-      {no.tipo !== "inicio" && (
+      {no.tipo === "nota" && (
+        <Grupo titulo="Nota (só o time vê)">
+          <AreaTexto rows={6} value={no.dados.texto} onChange={(e) => dados({ texto: e.target.value })} placeholder="Ex.: este caminho é pra quem já comprou; revisar o texto em dezembro." />
+          <div className="flex gap-1.5">
+            {(["amarelo", "azul", "verde", "rosa"] as const).map((c) => (
+              <button key={c} type="button" aria-label={`Cor ${c}`} onClick={() => dados({ cor: c })} className="w-7 h-7 rounded-full"
+                style={{ background: COR_NOTA[c], outline: (no.dados.cor ?? "amarelo") === c ? "2px solid var(--ink)" : "1px solid var(--line)", outlineOffset: 1 }} />
+            ))}
+          </div>
+          <Aviso>A nota não manda nada e não entra no caminho do fluxo.</Aviso>
+        </Grupo>
+      )}
+      {no.tipo !== "inicio" && no.tipo !== "nota" && (
         <Campo rotulo="Nome do bloco (só para você)"><Entrada value={no.titulo ?? ""} onChange={(e) => onMudar({ ...no, titulo: e.target.value } as No)} placeholder="ex.: Boas-vindas" /></Campo>
       )}
       {no.tipo === "inicio" && <Aviso>O fluxo começa aqui. Quem faz ele começar são os gatilhos (palavra-chave, link, anúncio, LP…), nas outras abas.</Aviso>}

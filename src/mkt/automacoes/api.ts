@@ -38,7 +38,7 @@ export const lerFluxo = async (id: string) => ok(await supabase.from("mkt_fluxos
 // O canal só vai no insert quando é Instagram (banco sem a 0343 continua aceitando o WhatsApp).
 export const criarFluxo = async (nome: string, grafo: Grafo, canal: Canal = "whatsapp") =>
   ok(await supabase.from("mkt_fluxos").insert({ nome, grafo, ...(canal === "instagram" ? { canal } : {}) }).select().single()) as Fluxo;
-export const salvarFluxo = async (id: string, patch: Partial<Pick<Fluxo, "nome" | "descricao" | "status" | "grafo" | "pasta">>) => {
+export const salvarFluxo = async (id: string, patch: Partial<Pick<Fluxo, "nome" | "descricao" | "status" | "grafo" | "pasta" | "grafo_rascunho">>) => {
   ok(await supabase.from("mkt_fluxos").update(patch).eq("id", id).select("id"));
 };
 export const apagarFluxo = async (id: string) => { ok(await supabase.from("mkt_fluxos").delete().eq("id", id).select("id")); };

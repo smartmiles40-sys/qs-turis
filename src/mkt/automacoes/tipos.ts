@@ -13,7 +13,7 @@
 // o mesmo resultado — mexeu numa, mexa na outra.
 // -----------------------------------------------------------------------------
 
-export type TipoNo = "inicio" | "mensagem" | "template" | "pergunta" | "aguardar" | "condicao" | "acao" | "randomizador" | "ir_para" | "fim";
+export type TipoNo = "inicio" | "mensagem" | "template" | "pergunta" | "aguardar" | "condicao" | "acao" | "randomizador" | "ir_para" | "fim" | "nota";
 
 export type Bloco =
   | { tipo: "texto"; texto: string }
@@ -81,6 +81,10 @@ export interface DadosAcao { acoes: Acao[] }
 export interface Variante { id: string; nome: string; peso: number }
 export interface DadosRandomizador { variantes: Variante[] }
 export interface DadosIrPara { fluxoId: string | null }
+/** 23/11/2026: nota no quadro (igual ManyChat) — só o time vê; o motor ignora. */
+export type CorNota = "amarelo" | "azul" | "verde" | "rosa";
+export interface DadosNota { texto: string; cor?: CorNota }
+export const COR_NOTA: Record<CorNota, string> = { amarelo: "#FDE68A", azul: "#BFDBFE", verde: "#BBF7D0", rosa: "#FBCFE8" };
 
 interface NoBase<T extends TipoNo, D> { id: string; tipo: T; x: number; y: number; titulo?: string; dados: D }
 export type No =
@@ -93,7 +97,8 @@ export type No =
   | NoBase<"acao", DadosAcao>
   | NoBase<"randomizador", DadosRandomizador>
   | NoBase<"ir_para", DadosIrPara>
-  | NoBase<"fim", Record<string, never>>;
+  | NoBase<"fim", Record<string, never>>
+  | NoBase<"nota", DadosNota>;
 
 export interface Ligacao { id: string; de: string; saida: string; para: string }
 export interface Grafo { nos: No[]; ligacoes: Ligacao[] }
@@ -153,7 +158,7 @@ const bytes = (s: string) => new TextEncoder().encode(s).length;
 
 export const ROTULO_TIPO: Record<TipoNo, string> = {
   inicio: "Início", mensagem: "Mensagem", template: "Template (fora das 24 h)", pergunta: "Pergunta", aguardar: "Aguardar",
-  condicao: "Condição", acao: "Ações", randomizador: "Teste A/B", ir_para: "Ir para outro fluxo", fim: "Fim",
+  condicao: "Condição", acao: "Ações", randomizador: "Teste A/B", ir_para: "Ir para outro fluxo", fim: "Fim", nota: "Nota",
 };
 
 const nomeDo = (no: No) => no.titulo || ROTULO_TIPO[no.tipo];
@@ -255,7 +260,7 @@ export function validarGrafo(g: Grafo, canal: Canal = "whatsapp"): ProblemaGrafo
     alc.add(a);
     for (const l of g.ligacoes) if (l.de === a) fila.push(l.para);
   }
-  for (const no of g.nos) if (!alc.has(no.id)) p.push({ noId: no.id, mensagem: `"${nomeDo(no)}" está solto — nenhuma seta chega nele.`, grave: false });
+  for (const no of g.nos) if (!alc.has(no.id) && no.tipo !== "nota") p.push({ noId: no.id, mensagem: `"${nomeDo(no)}" está solto — nenhuma seta chega nele.`, grave: false });
   return p;
 }
 
@@ -306,7 +311,9 @@ export interface GatilhoConfig {
   nome?: string;
 }
 export interface Gatilho { id: string; fluxo_id: string; tipo: TipoGatilho; config: GatilhoConfig; ativo: boolean; prioridade: number; disparos: number; cliques?: number; criado_em: string }
-export interface Fluxo { id: string; nome: string; descricao: string | null; status: "rascunho" | "ativo" | "pausado"; grafo: Grafo; pasta: string | null; execucoes_total: number; concluidas_total: number; criado_em: string; atualizado_em: string; canal?: Canal }
+export interface Fluxo { id: string; nome: string; descricao: string | null; status: "rascunho" | "ativo" | "pausado"; grafo: Grafo; pasta: string | null; execucoes_total: number; concluidas_total: number; criado_em: string; atualizado_em: string; canal?: Canal;
+  /** 23/11/2026: edição guardada de um fluxo já publicado — o motor segue no `grafo` até "Publicar". */
+  grafo_rascunho?: Grafo | null }
 export interface CampoPersonalizado { id: string; chave: string; rotulo: string; tipo: "texto" | "numero" | "data" | "sim_nao" | "email" | "telefone"; descricao: string | null }
 
 export const JANELA_MS = 24 * 3_600_000;
@@ -333,6 +340,7 @@ export function noPadrao(tipo: TipoNo, x: number, y: number): No {
     case "randomizador": return { id, tipo, x, y, dados: { variantes: [{ id: novoId("v"), nome: "A", peso: 50 }, { id: novoId("v"), nome: "B", peso: 50 }] } };
     case "ir_para": return { id, tipo, x, y, dados: { fluxoId: null } };
     case "fim": return { id, tipo, x, y, dados: {} };
+    case "nota": return { id, tipo, x, y, dados: { texto: "", cor: "amarelo" } };
   }
 }
 

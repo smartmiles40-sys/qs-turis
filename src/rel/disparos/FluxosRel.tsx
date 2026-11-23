@@ -160,6 +160,7 @@ export default function FluxosRel({ est }: { est: EstadoRel | null }) {
                 onClick={() => {
                   if (sujo) return notifyError("Salve o fluxo antes de disparar.");
                   if (f.status !== "ativo") return notifyError("Ative o fluxo antes de disparar (Salvar e ativar).");
+                  if (f.grafo_rascunho && !window.confirm("Este fluxo tem um RASCUNHO não publicado. O disparo usa a versão publicada. Disparar mesmo assim? (Para usar as mudanças, clique em Publicar antes.)")) return;
                   setDisparar(f);
                 }}>Disparar…</Botao>
             ),

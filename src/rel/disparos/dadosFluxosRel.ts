@@ -23,7 +23,7 @@ export const lerFluxoRel = async (id: string) => ok(await supabase.from("rel_flu
 export async function criarFluxoRel(nome: string, grafo: Grafo, criadoPor?: string | null) {
   return ok(await supabase.from("rel_fluxos").insert({ nome, grafo, criado_por: criadoPor ?? null }).select().single()) as Fluxo;
 }
-export async function salvarFluxoRel(id: string, patch: Partial<Pick<Fluxo, "nome" | "grafo" | "status">>) {
+export async function salvarFluxoRel(id: string, patch: Partial<Pick<Fluxo, "nome" | "grafo" | "status" | "grafo_rascunho">>) {
   ok(await supabase.from("rel_fluxos").update(patch).eq("id", id).select("id"));
 }
 export async function apagarFluxoRel(id: string) { ok(await supabase.from("rel_fluxos").delete().eq("id", id).select("id")); }
