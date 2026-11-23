@@ -64,9 +64,13 @@ export async function salvarConfig(chave: "robo" | "instagram", valor: Record<st
   ok(await supabase.from("mkt_auto_config").upsert({ chave, valor }).select("chave"));
 }
 
-export async function estatisticas(fluxoId: string): Promise<Map<string, { entrou: number; saidas: Record<string, number>; erros: number }>> {
+/** 0414: funil das mensagens do bloco (hoje só os fluxos do Rel trazem). */
+export interface EnvioDoBloco { enviadas: number; entregues: number; lidas: number; falharam: number; cliques: number }
+export interface EstatBloco { entrou: number; saidas: Record<string, number>; erros: number; envio?: EnvioDoBloco }
+
+export async function estatisticas(fluxoId: string): Promise<Map<string, EstatBloco>> {
   const { data } = await supabase.rpc("mkt_auto_estatisticas", { p_fluxo: fluxoId });
-  const m = new Map<string, { entrou: number; saidas: Record<string, number>; erros: number }>();
+  const m = new Map<string, EstatBloco>();
   for (const l of (data ?? []) as { no_id: string; tipo: string; saida: string; total: number }[]) {
     const e = m.get(l.no_id) ?? { entrou: 0, saidas: {}, erros: 0 };
     if (l.tipo === "entrou") e.entrou += Number(l.total);

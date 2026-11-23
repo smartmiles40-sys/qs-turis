@@ -10,7 +10,7 @@ import type { PublicoRel } from "@/lib/qs/disparos";
 import type { AdaptadorFluxo } from "@/mkt/automacoes/EditorFluxo";
 import type { ResultadoSimulacao } from "@/mkt/automacoes/Simulacao";
 import { novoId, noPadrao, type Acao, type Fluxo, type Grafo, type No } from "@/mkt/automacoes/tipos";
-import type { ModeloMkt } from "@/mkt/automacoes/api";
+import type { EstatBloco, ModeloMkt } from "@/mkt/automacoes/api";
 import { chamar, type NumeroTeste } from "./oficialRel";
 
 function ok<T>(r: { data: T | null; error: { message: string } | null }): T {
@@ -29,13 +29,22 @@ export async function salvarFluxoRel(id: string, patch: Partial<Pick<Fluxo, "nom
 export async function apagarFluxoRel(id: string) { ok(await supabase.from("rel_fluxos").delete().eq("id", id).select("id")); }
 
 async function estatisticasRel(fluxoId: string) {
-  const { data } = await supabase.rpc("rel_fluxo_estatisticas", { p_fluxo: fluxoId });
-  const m = new Map<string, { entrou: number; saidas: Record<string, number>; erros: number }>();
+  const [{ data }, funil] = await Promise.all([
+    supabase.rpc("rel_fluxo_estatisticas", { p_fluxo: fluxoId }),
+    // 0414: enviadas → entregues → lidas → clicaram no link, por bloco.
+    supabase.rpc("rel_fluxo_funil_blocos", { p_fluxo: fluxoId }).then((r) => r.data ?? [], () => []),
+  ]);
+  const m = new Map<string, EstatBloco>();
   for (const l of (data ?? []) as { no_id: string; tipo: string; saida: string; total: number }[]) {
     const e = m.get(l.no_id) ?? { entrou: 0, saidas: {}, erros: 0 };
     if (l.tipo === "entrou") e.entrou += Number(l.total);
     if (l.tipo === "erro") e.erros += Number(l.total);
     if (l.tipo === "saida") e.saidas[l.saida] = (e.saidas[l.saida] ?? 0) + Number(l.total);
+    m.set(l.no_id, e);
+  }
+  for (const l of funil as { no_id: string; enviadas: number; entregues: number; lidas: number; falharam: number; clicaram_link: number }[]) {
+    const e = m.get(l.no_id) ?? { entrou: 0, saidas: {}, erros: 0 };
+    e.envio = { enviadas: Number(l.enviadas), entregues: Number(l.entregues), lidas: Number(l.lidas), falharam: Number(l.falharam), cliques: Number(l.clicaram_link) };
     m.set(l.no_id, e);
   }
   return m;
@@ -98,18 +107,26 @@ export const dispararFluxo = (fluxoId: string, publico: PublicoRel, agendadoPara
   chamar<{ disparo: DisparoFluxo }>({ acao: "rel_fluxo_disparar", fluxoId, publico, agendadoPara });
 export const cancelarDisparo = (disparoId: string) => chamar<{ ok: true }>({ acao: "rel_fluxo_disparo_cancelar", disparoId });
 
-export async function disparosDoFluxo(fluxoId: string): Promise<{ disparos: DisparoFluxo[]; andamento: Map<string, Record<string, number>> }> {
-  const [d, r] = await Promise.all([
+/** 0414: o funil de cada disparo, igual ManyChat. */
+export interface FunilDisparo { pessoas: number; enviadas: number; entregues: number; lidas: number; falharam: number; clicaram: number; terminaram: number }
+
+export async function disparosDoFluxo(fluxoId: string): Promise<{ disparos: DisparoFluxo[]; andamento: Map<string, Record<string, number>>; funil: Map<string, FunilDisparo> }> {
+  const [d, r, f] = await Promise.all([
     supabase.from("rel_fluxo_disparos").select("*").eq("fluxo_id", fluxoId).order("criado_em", { ascending: false }).limit(20),
     supabase.rpc("rel_fluxo_disparo_resumo", { p_fluxo: fluxoId }),
+    supabase.rpc("rel_fluxo_disparo_funil", { p_fluxo: fluxoId }).then((x) => x.data ?? [], () => []),
   ]);
+  const funil = new Map<string, FunilDisparo>();
+  for (const l of f as (Record<keyof FunilDisparo, number> & { disparo_id: string })[]) {
+    funil.set(l.disparo_id, { pessoas: Number(l.pessoas), enviadas: Number(l.enviadas), entregues: Number(l.entregues), lidas: Number(l.lidas), falharam: Number(l.falharam), clicaram: Number(l.clicaram), terminaram: Number(l.terminaram) });
+  }
   const andamento = new Map<string, Record<string, number>>();
   for (const l of (r.data ?? []) as { disparo_id: string; estado: string; total: number }[]) {
     const x = andamento.get(l.disparo_id) ?? {};
     x[l.estado] = Number(l.total);
     andamento.set(l.disparo_id, x);
   }
-  return { disparos: ok(d) as DisparoFluxo[], andamento };
+  return { disparos: ok(d) as DisparoFluxo[], andamento, funil };
 }
 
 // ── Fluxo pronto pra começar ────────────────────────────────────────────────

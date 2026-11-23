@@ -30,9 +30,9 @@
 import { rest } from './_supabaseAdmin.js';
 import { graph } from './_meta.js';
 import { foneDestino, naJanela } from './_disparo.js';
-import { lerConfigRel, prepararModo, contar, inicioDoDiaBRT } from './_relDisparoOficial.js';
+import { lerConfigRel, prepararModo, contar, inicioDoDiaBRT, BASE_PUBLICA } from './_relDisparoOficial.js';
 import { calcularFolga, pausaEntreEnvios, montarComponentes } from './_mktOficialRegras.js';
-import { normalizarEtiqueta } from './_relDisparoRegras.js';
+import { normalizarEtiqueta, linkDoFluxo, lerCliqueFluxo, rastrearLinkDoCorpo, urlSegura } from './_relDisparoRegras.js';
 import { ehPedidoDeParada } from './_waOptout.js';
 import {
   MAX_PASSOS_RODADA, MAX_PASSOS_TOTAL, MAX_PROFUNDIDADE,
@@ -119,10 +119,11 @@ async function carregarFluxo(ctx, id) {
   return f;
 }
 
-async function evento(ctx, fluxoId, execId, noId, tipo, saida = null, detalhe = null) {
+async function evento(ctx, fluxoId, execId, noId, tipo, saida = null, detalhe = null, wamid = null) {
   await quieto(rest('rel_fluxo_eventos', {
     method: 'POST', prefer: 'return=minimal',
-    body: { fluxo_id: fluxoId, execucao_id: execId, no_id: noId, tipo, saida, detalhe: detalhe ? String(detalhe).slice(0, 500) : null, simulado: ctx.modo === 'simulacao' },
+    // 0414: wamid = a mensagem que saiu (o recibo da Meta dá entregue/lida no funil).
+    body: { fluxo_id: fluxoId, execucao_id: execId, no_id: noId, tipo, saida, detalhe: detalhe ? String(detalhe).slice(0, 500) : null, simulado: ctx.modo === 'simulacao', ...(wamid ? { wamid } : {}) },
   }));
 }
 
@@ -162,6 +163,7 @@ async function mandar(ctx, corpo, fluxo) {
   if (ctx.modo === 'simulacao') return null;
   const r = await postar(ctx, corpo);
   if (r.erro || !r.wamid) return r.erro || 'a Meta não devolveu o id da mensagem';
+  ctx.ultimoWamid = r.wamid;
   await bolha(ctx, r.wamid, previaDoCorpo(corpo).slice(0, 4000), fluxo);
   return null;
 }
@@ -187,6 +189,7 @@ async function executarTemplate(ctx, fluxo, exec, no, d) {
   const texto = String(modelo?.corpo || '').replace(/\{\{(\d+)\}\}/g, (_, n) => t.params[n] ?? '') || `[modelo ${d.nome}]`;
 
   let erro = null;
+  let wamid = null;
   if (ctx.modo === 'real') {
     const comp = montarComponentes({ modelo, corpo: t.params, midia: t.cabecalhoUrl ? { link: t.cabecalhoUrl } : null });
     if (comp.erro) erro = comp.erro;
@@ -204,6 +207,7 @@ async function executarTemplate(ctx, fluxo, exec, no, d) {
           await quieto(mudar(`rel_clientes?id=eq.${ctx.cliente.id}&optout_em=is.null`, { optout_em: agoraIso() }));
         }
       } else {
+        wamid = r.wamid;
         await bolha(ctx, r.wamid, texto.slice(0, 4000), fluxo);
       }
     }
@@ -213,7 +217,7 @@ async function executarTemplate(ctx, fluxo, exec, no, d) {
     return saidaLigada(fluxo.grafo, no.id, 'falha') ? { tipo: 'seguir', saida: 'falha' } : { tipo: 'fim', erro };
   }
   ctx.modelosEnviados++;
-  await evento(ctx, fluxo.id, exec.id, no.id, 'enviou_modelo', null, ctx.modo === 'simulacao' ? 'simulação' : null);
+  await evento(ctx, fluxo.id, exec.id, no.id, 'enviou_modelo', null, ctx.modo === 'simulacao' ? 'simulação' : null, wamid);
   await evento(ctx, fluxo.id, exec.id, no.id, 'enviou');
   if (ctx.pausa) await dormir(ctx.pausa);
   return esperaDoTemplate(fluxo, no, d);
@@ -313,14 +317,19 @@ async function executarNo(ctx, fluxo, exec, no) {
     return plano;
   }
   if (plano.enviar?.length) {
-    for (const corpo of plano.enviar) {
+    ctx.ultimoWamid = null;
+    // 0414: o botão "link" passa pelo QS pra contar o clique.
+    const urlLink = no.tipo === 'mensagem' && no.dados?.interacao?.tipo === 'link' ? String(no.dados.interacao.url || '') : '';
+    const rastreado = urlLink ? linkDoFluxo(BASE_PUBLICA(), exec.id, no.id) : '';
+    for (const corpoOriginal of plano.enviar) {
+      const corpo = rastreado ? rastrearLinkDoCorpo(corpoOriginal, urlLink, rastreado) : corpoOriginal;
       const erro = await mandar(ctx, corpo, fluxo);
       if (erro) {
         await evento(ctx, fluxo.id, exec.id, no.id, 'erro', null, erro);
         return { tipo: 'fim', erro };
       }
     }
-    await evento(ctx, fluxo.id, exec.id, no.id, 'enviou');
+    await evento(ctx, fluxo.id, exec.id, no.id, 'enviou', null, null, ctx.ultimoWamid);
   }
   await aplicarAcoes(ctx, fluxo, exec, no, plano.acoes || []);
   return plano;
@@ -491,12 +500,17 @@ export async function receberNoFluxoRel({ phoneId, telefone, m, conversaId }) {
     const alvo = lido && noAlvo && saidasDoNo(noAlvo).some((s) => s.id === lido.saida) ? lido : null;
     const esperando = alvo ? null : await um(`rel_fluxo_execucoes?select=*&telefone=in.(${vars.join(',')})&estado=eq.aguardando_resposta&order=atualizada_em.desc&limit=1`).catch(() => null);
     if (!alvo && !esperando) return null;
+    // 23/11: no CLIQUE de botão a execução que espera também decide o modo — antes
+    // só a resposta digitada olhava `teste`, e o clique de um teste caía na
+    // simulação geral (a 2ª mensagem "andava" no fluxo mas não saía).
+    const doClique = alvo ? await um(`rel_fluxo_execucoes?select=*&telefone=in.(${vars.join(',')})&fluxo_id=eq.${enc(alvo.fluxoId)}&no_atual=eq.${enc(alvo.noId)}&estado=eq.aguardando_resposta&order=iniciada_em.desc&limit=1`).catch(() => null) : null;
+    const base = esperando || doClique;
 
     // Teste do editor sai de verdade (env ligada); o resto segue a simulação geral.
-    const forcarReal = Boolean(esperando?.teste);
+    const forcarReal = Boolean(base?.teste);
     const md = await modoAtual({ forcarReal });
     if (md.parado) return { motivo: md.parado };
-    const ctx = await montarContexto({ phoneId, telefone, conversaId, clienteId: esperando?.cliente_id, nome: esperando?.nome, viagemId: esperando?.viagem_id, modo: md.modo, cr: md.cr });
+    const ctx = await montarContexto({ phoneId, telefone, conversaId, clienteId: base?.cliente_id, nome: base?.nome, viagemId: base?.viagem_id, modo: md.modo, cr: md.cr });
 
     if (alvo) return (await rotearClique(ctx, alvo)) ? { motivo: 'clique' } : null;
     const tomada = (await rest(`rel_fluxo_execucoes?id=eq.${esperando.id}&estado=eq.aguardando_resposta`, {
@@ -696,4 +710,26 @@ export async function modelosParaFluxo() {
     botoes: (m.botoes || []).filter((b) => String(b.tipo).toUpperCase() === 'QUICK_REPLY').map((b) => b.texto),
   }));
   return { modelos, ...(modelos.length ? {} : { aviso: 'Nenhum modelo APROVADO no número do Relacionamento. Aprove na Meta e clique em "Sincronizar modelos" (Disparos › Número e ritmo).' }) };
+}
+
+// ── 0414: clique no link de um bloco Mensagem (/l/f/<execução>/<bloco>) ─────
+
+/** Registra o 1º clique daquela pessoa naquele bloco e devolve o destino (ou null). */
+export async function registrarCliqueFluxo(execId, noId) {
+  const ok = lerCliqueFluxo(execId, noId);
+  if (!ok) return null;
+  const exec = await um(`rel_fluxo_execucoes?select=id,fluxo_id,teste&id=eq.${ok.execId}&limit=1`).catch(() => null);
+  if (!exec) return null;
+  const fluxo = await um(`rel_fluxos?select=grafo&id=eq.${exec.fluxo_id}&limit=1`).catch(() => null);
+  const no = fluxo ? normalizarGrafo(fluxo.grafo).nos.find((n) => n.id === ok.noId) : null;
+  const destino = no?.tipo === 'mensagem' && no.dados?.interacao?.tipo === 'link' ? String(no.dados.interacao.url || '').trim() : '';
+  if (!urlSegura(destino)) return null;
+  const ja = await um(`rel_fluxo_eventos?select=id&execucao_id=eq.${exec.id}&no_id=eq.${enc(ok.noId)}&tipo=eq.clicou_link&limit=1`).catch(() => null);
+  if (!ja) {
+    await quieto(rest('rel_fluxo_eventos', {
+      method: 'POST', prefer: 'return=minimal',
+      body: { fluxo_id: exec.fluxo_id, execucao_id: exec.id, no_id: ok.noId, tipo: 'clicou_link', simulado: false },
+    }));
+  }
+  return destino;
 }

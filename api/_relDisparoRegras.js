@@ -165,6 +165,32 @@ export function lerClique(envioId, variavel) {
   return { envioId: id, variavel: k };
 }
 
+/** 0414: link do bloco Mensagem de um FLUXO → https://qs…/l/f/<execução>/<bloco>. */
+export function linkDoFluxo(base, execId, noId) {
+  const b = String(base || '').replace(/\/+$/, '');
+  return `${b}/l/f/${execId}/${encodeURIComponent(String(noId))}`;
+}
+
+/** Confere o pedaço da URL do clique de fluxo. null = inválido. */
+export function lerCliqueFluxo(execId, noId) {
+  const id = String(execId || '');
+  const no = String(noId || '').slice(0, 60);
+  if (!UUID.test(id) || !/^[\w-]{1,60}$/.test(no)) return null;
+  return { execId: id, noId: no };
+}
+
+/**
+ * 0414: troca a URL do botão "link" (cta_url) pelo link rastreado. Só quando a
+ * URL é fixa (sem {{variável}}): no clique o QS precisa achar o destino no grafo.
+ */
+export function rastrearLinkDoCorpo(corpo, urlOriginal, rastreado) {
+  const it = corpo?.interactive;
+  if (corpo?.type !== 'interactive' || it?.type !== 'cta_url') return corpo;
+  const p = it.action?.parameters;
+  if (!p?.url || /\{\{/.test(String(urlOriginal || '')) || p.url !== urlOriginal) return corpo;
+  return { ...corpo, interactive: { ...it, action: { ...it.action, parameters: { ...p, url: rastreado } } } };
+}
+
 /** Só segue pra http(s) — nada de javascript: ou data:. */
 export const urlSegura = (u) => /^https?:\/\/[^\s]+$/i.test(String(u || '').trim());
 

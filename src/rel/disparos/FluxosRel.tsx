@@ -101,7 +101,7 @@ function Disparar({ fluxo, simulacao, onFechar, onFeito }: { fluxo: Fluxo; simul
 
 function Historico({ fluxo, versao }: { fluxo: Fluxo; versao: number }) {
   const [d, setD] = useState<Awaited<ReturnType<typeof disparosDoFluxo>> | null>(null);
-  const ler = useCallback(() => void disparosDoFluxo(fluxo.id).then(setD).catch(() => setD({ disparos: [], andamento: new Map() })), [fluxo.id]);
+  const ler = useCallback(() => void disparosDoFluxo(fluxo.id).then(setD).catch(() => setD({ disparos: [], andamento: new Map(), funil: new Map() })), [fluxo.id]);
   useEffect(() => { ler(); const t = setInterval(ler, 20_000); return () => clearInterval(t); }, [ler, versao]);
   if (!d?.disparos.length) return null;
   return (
@@ -109,11 +109,23 @@ function Historico({ fluxo, versao }: { fluxo: Fluxo; versao: number }) {
       {d.disparos.slice(0, 3).map((x) => {
         const a = d.andamento.get(x.id) ?? {};
         const naFila = (a.aguardando_tempo ?? 0) + (a.rodando ?? 0);
+        const f = d.funil.get(x.id);
+        const pct = (n: number, de: number) => (de ? ` (${Math.round((n / de) * 100)}%)` : "");
         return (
           <li key={x.id} className="flex flex-wrap items-center gap-2">
             <Etiqueta tom={x.status === "cancelado" ? "erro" : x.status === "concluido" ? "neutro" : "rel"}>{ROTULO_DISPARO[x.status]}</Etiqueta>
             <span>{dataHora(x.agendado_para)} · {x.total} cliente(s)</span>
             {x.status !== "agendado" && <span style={{ color: "var(--ink3)" }}>{naFila ? `${naFila} na fila · ` : ""}{a.aguardando_resposta ?? 0} aguardando clique · {a.concluida ?? 0} terminaram{a.erro ? ` · ${a.erro} erro` : ""}</span>}
+            {f && f.enviadas > 0 && (
+              <span className="basis-full flex flex-wrap gap-x-3 gap-y-0.5 font-semibold" style={{ color: "var(--ink2)" }}
+                title="Do modelo (1ª mensagem): enviadas → entregues → lidas. Clicaram = tocaram em algum botão ou abriram algum link do fluxo.">
+                <span>📤 {f.enviadas} enviadas</span>
+                <span>✓✓ {f.entregues} entregues{pct(f.entregues, f.enviadas)}</span>
+                <span>👁 {f.lidas} lidas{pct(f.lidas, f.enviadas)}</span>
+                <span>👆 {f.clicaram} clicaram{pct(f.clicaram, f.enviadas)}</span>
+                {f.falharam > 0 && <span style={{ color: "var(--err-ink)" }}>✕ {f.falharam} falharam</span>}
+              </span>
+            )}
             {["agendado", "rodando"].includes(x.status) && (
               <button type="button" className="underline" style={{ color: "var(--err-ink)" }}
                 onClick={() => { if (window.confirm("Cancelar este disparo? Quem ainda não recebeu não recebe mais.")) void cancelarDisparo(x.id).then(ler).catch((e) => notifyError(erroDe(e, "Não cancelou."))); }}>cancelar</button>
@@ -169,7 +181,7 @@ export default function FluxosRel({ est }: { est: EstadoRel | null }) {
                 <p>Arraste o bloco pelo topo. Pra ligar, puxe a bolinha da saída até outro bloco. Clique numa seta pra apagar.</p>
                 <p>O disparo começa SEMPRE por um <b>Template</b> (modelo aprovado pela Meta). Cada botão de resposta rápida do modelo vira uma saída: ligue no que acontece quando tocarem.</p>
                 <p>Depois que a pessoa toca ou responde, a <b>janela de 24 h</b> abre: aí valem Mensagem (texto, foto, botões), Pergunta etc.</p>
-                <Aviso>Os números em cima de cada bloco são quantas pessoas passaram por ele.</Aviso>
+                <Aviso>Os números em cima de cada bloco: quantas pessoas passaram por ele e, nos blocos que mandam mensagem, ✓✓ entregues · 👁 lidas · 🔗 clicaram no link (passe o mouse pra ver os %).</Aviso>
                 <p style={{ color: "var(--ink3)" }}>Ações: pôr/tirar etiqueta, avisar alguém do time no sino, parar outros fluxos, descadastrar.</p>
               </>
             ),

@@ -265,6 +265,10 @@
   ],
   "rewrites": [
     {
+      "source": "/l/f/:exec/:no",
+      "destination": "/api/disparos?lf=:exec&n=:no"
+    },
+    {
       "source": "/l/:envio/:k",
       "destination": "/api/disparos?l=:envio&k=:k"
     },

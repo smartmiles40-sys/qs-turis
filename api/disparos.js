@@ -115,6 +115,18 @@ function pacoteDaMeta(m) {
 export default async function handler(req, res) {
   // ── Cron ──
   if (req.method === 'GET') {
+    // 0414: link do bloco Mensagem de um fluxo do Rel (/l/f/<execução>/<bloco>).
+    if (req.query?.lf) {
+      const { registrarCliqueFluxo } = await import('./_relFluxoMotor.js');
+      const destino = await registrarCliqueFluxo(String(req.query.lf), String(req.query.n || '')).catch(() => null);
+      if (destino && urlSegura(destino)) {
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Location', destino);
+        return res.status(302).end();
+      }
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.status(404).send('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><p style="font-family:sans-serif;padding:24px">Este link não está mais disponível.</p>');
+    }
     // Link rastreado do Rel (0408): público, sem login — só registra o 1º clique e segue.
     if (req.query?.l) {
       const destino = await registrarClique(String(req.query.l), String(req.query.k || '')).catch(() => null);

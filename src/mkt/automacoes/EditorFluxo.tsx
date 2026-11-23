@@ -732,7 +732,7 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
                   <div className="px-3 pt-2 cursor-grab active:cursor-grabbing" style={{ height: topo }} onPointerDown={(e) => pegarBloco(e, no)}>
                     <div className="flex items-center gap-1.5">
                       <span className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: COR_TIPO[no.tipo] }}>{ROTULO_TIPO[no.tipo]}</span>
-                      {st && <span className="ml-auto text-[10.5px] font-semibold" style={{ color: "var(--ink3)" }} title="Pessoas que entraram neste bloco">{st.entrou} ▸{st.erros ? ` · ${st.erros} erro` : ""}</span>}
+                      {st && <span className="ml-auto text-[10.5px] font-semibold whitespace-nowrap" style={{ color: "var(--ink3)" }} title={tituloEstat(st)}>{st.entrou} ▸{st.envio?.enviadas ? ` · ✓✓${st.envio.entregues} · 👁${st.envio.lidas}${st.envio.cliques ? ` · 🔗${st.envio.cliques}` : ""}` : ""}{st.erros ? ` · ${st.erros} erro` : ""}</span>}
                     </div>
                     {COM_PREVIA.includes(no.tipo) ? (
                       <>
@@ -808,4 +808,18 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
       {relatorioModal}
     </div>
   );
+}
+
+/** 0414: o funil do bloco por extenso (dica ao passar o mouse). */
+function tituloEstat(st: { entrou: number; erros: number; envio?: { enviadas: number; entregues: number; lidas: number; falharam: number; cliques: number } }) {
+  const pct = (n: number, de: number) => (de ? ` (${Math.round((n / de) * 100)}%)` : "");
+  const linhas = [`${st.entrou} pessoa(s) entraram neste bloco`];
+  const e = st.envio;
+  if (e?.enviadas) {
+    linhas.push(`${e.enviadas} mensagem(ns) enviada(s)`, `${e.entregues} entregue(s)${pct(e.entregues, e.enviadas)}`, `${e.lidas} lida(s)${pct(e.lidas, e.enviadas)}`);
+    if (e.cliques) linhas.push(`${e.cliques} clicaram no link${pct(e.cliques, e.enviadas)}`);
+    if (e.falharam) linhas.push(`${e.falharam} falharam`);
+  }
+  if (st.erros) linhas.push(`${st.erros} erro(s)`);
+  return linhas.join("\n");
 }
