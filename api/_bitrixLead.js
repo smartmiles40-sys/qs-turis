@@ -390,6 +390,39 @@ export async function comentarNoNegocio(dealId, texto, timeoutMs = 8_000) {
 }
 
 /**
+ * "Novo Lead - Aguardando resposta" -> "Follow-up 1" (o 1º contato).
+ *
+ * Só anda quem AINDA está na primeira coluna: da 2ª vez em diante olha e não
+ * faz nada, e nunca puxa pra trás um card que já avançou (Reunião, Ganho,
+ * Perdido). Mora aqui (23/11) porque agora são dois a chamar: a atividade
+ * concluída no QS (`/api/bitrix-sync`, evento primeiro-contato) e a ligação
+ * marcada pelo cliente (`_ligacaoSdr.js`). Nunca lança.
+ */
+export const ETAPA_FOLLOW_UP_1 = 'C25:UC_271QUB';
+export async function moverNovoLeadParaFollowUp(dealId, timeoutMs = 6_000) {
+  if (!bitrixConfigurado() || !dealId) return { ok: false, code: 'not_configured' };
+  let deal = null;
+  try {
+    deal = await bx('crm.deal.get', { id: Number(dealId) }, timeoutMs);
+  } catch (e) {
+    console.error('[bitrix-lead] crm.deal.get', dealId, ':', e?.message);
+  }
+  if (!deal) return { ok: false, code: 'bitrix-inacessivel' };
+  if (String(deal.STAGE_ID || '') !== ETAPA_NOVO_LEAD) return { ok: true, code: 'ja_saiu_de_novo_lead' };
+  try {
+    await bx('crm.deal.update', {
+      id: Number(dealId),
+      fields: { STAGE_ID: ETAPA_FOLLOW_UP_1 },
+      params: { REGISTER_SONET_EVENT: 'Y' },
+    }, timeoutMs);
+  } catch (e) {
+    console.error('[bitrix-lead] mover pra Follow-up 1:', e?.message);
+    return { ok: false, code: 'bitrix-recusou' };
+  }
+  return { ok: true, code: 'movido' };
+}
+
+/**
  * Cria o negócio e já grava o vínculo no lead. Usada logo depois que o QS cria
  * um lead sem `bitrix_id`. Devolve o id, ou null se não rolou.
  */

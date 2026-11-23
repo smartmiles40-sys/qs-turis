@@ -26,7 +26,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
-import { bx, comentarNoNegocio, bitrixConfigurado, moverNegocioParaReuniao } from './_bitrixLead.js';
+import { bx, comentarNoNegocio, bitrixConfigurado, moverNegocioParaReuniao, moverNovoLeadParaFollowUp } from './_bitrixLead.js';
 import { gravarGanhoNoBitrix, enviarReuniaoDireto } from './_bitrixSaida.js';
 import { deveLevarParaReuniao } from './_bitrixSaidaRegras.js';
 import { garantirCardDoLead, marcarFalha } from './_leadCardBitrix.js';
@@ -266,25 +266,11 @@ async function lerNegocio(bitrixId) {
  * primeira coluna. Não existe contador nem flag — da 2ª atividade em diante o
  * evento chega, olha e não faz nada. É isso que torna o disparo idempotente e
  * impede o robô de puxar PRA TRÁS um negócio que já avançou (Reunião, Ganho,
- * Perdido).
+ * Perdido). A regra mora em `_bitrixLead.js` desde 23/11 (a ligação marcada
+ * pelo cliente também move).
  */
-async function moverPrimeiroContato(bitrixId) {
-  const deal = await lerNegocio(bitrixId);
-  if (!deal) return { ok: false, code: 'bitrix-inacessivel' };
-  if (String(deal.STAGE_ID || '') !== PRE_VENDAS.novo_lead) {
-    return { ok: true, code: 'ja_saiu_de_novo_lead' };
-  }
-  try {
-    await bx('crm.deal.update', {
-      id: Number(bitrixId),
-      fields: { STAGE_ID: PRE_VENDAS.follow_up1 },
-      params: { REGISTER_SONET_EVENT: 'Y' },
-    }, 6_000);
-  } catch (err) {
-    console.error('[bitrix-sync] mover pra Follow-up 1:', err?.message);
-    return { ok: false, code: 'bitrix-recusou' };
-  }
-  return { ok: true, code: 'movido' };
+function moverPrimeiroContato(bitrixId) {
+  return moverNovoLeadParaFollowUp(bitrixId);
 }
 
 /**

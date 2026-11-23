@@ -25,6 +25,11 @@
 import { rest, insert } from './_supabaseAdmin.js';
 import { ultimoDiaPermitido, depoisDoLimite, RECADO_LIMITE, recadoDoLimite } from './_limiteAgendamento.js';
 import { emSP, instanteEmSP, comoOTimeFala, porExtenso } from './_agenda.js';
+import { enviarTemplate } from './_meta.js';
+import { numeroDoEnvio, resolverModeloMeta, registrarSaida } from './_waSaida.js';
+import { pediuParaParar } from './_waOptout.js';
+import { normalizarCelular } from './_primeiroContato.js';
+import { moverNovoLeadParaFollowUp, comentarNoNegocio } from './_bitrixLead.js';
 
 const DIAS_SEMANA = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
 const UUID_LIKE = /^[0-9a-f-]{36}$/i;
@@ -446,6 +451,13 @@ export async function marcarLigacao({ lead, sdr, inicio, expedicao = null, orige
     tags: ['autoagendamento', 'ligacao-agendada'],
   }, { returning: false }).catch((e) => console.warn('[ligacao-sdr] nota não gravada:', e?.message));
 
+  // 5) O cliente fica sabendo, e o card sai de "Novo Lead" (23/11). Sem isto a
+  //    única atividade do lead era a ligação lá na frente: ninguém falava com
+  //    ele até o horário e o card ficava parado em "Aguardando resposta".
+  //    Best-effort: a ligação já está marcada, nada aqui pode desfazê-la.
+  await confirmarLigacaoMarcada({ lead, sdr, inicio, telefone })
+    .catch((e) => console.warn('[ligacao-sdr] confirmação não rodou:', e?.message));
+
   return {
     ok: true,
     ligacao_id: ligacao.id,
@@ -454,4 +466,116 @@ export async function marcarLigacao({ lead, sdr, inicio, expedicao = null, orige
     quando_iso: inicio.toISOString(),
     sdr: sdr.name,
   };
+}
+
+// ─── Confirmação pro cliente + card fora de "Novo Lead" (23/11) ─────────────
+
+/**
+ * O modelo da Meta que confirma a ligação. Tem que existir APROVADO na conta
+ * de cada número de SDR (cada um é uma WABA própria). Trocar sem deploy:
+ * `qs_settings.ligacao_marcada_aviso` = { ativo, modelo, idioma }.
+ *
+ *   {{1}} primeiro nome do cliente · {{2}} nome do SDR · {{3}} "quinta-feira, 26/11 às 13:30"
+ */
+const AVISO_PADRAO = { ativo: true, modelo: 'ligacao_marcada', idioma: 'pt_BR' };
+
+/** Como o SDR se apresenta: o rótulo do número dele ("Hugo"), senão o 1º nome. */
+async function nomeDeApresentacao(sdr, phoneId) {
+  if (phoneId) {
+    try {
+      const r = await rest(`qs_wa_numeros_meta?select=rotulo,user_id&phone_number_id=eq.${encodeURIComponent(phoneId)}&limit=1`);
+      const n = r?.[0];
+      if (n?.user_id === sdr.id && n.rotulo && !/oficial/i.test(n.rotulo)) return String(n.rotulo).trim();
+    } catch { /* cai no primeiro nome */ }
+  }
+  return String(sdr.name || '').trim().split(/\s+/)[0] || 'nosso time';
+}
+
+/**
+ * Manda o "sua ligação está marcada" pelo número do SDR (cai na conversa dele
+ * no QS) e tira o card do Bitrix de "Novo Lead". As duas pontas são
+ * independentes: modelo ainda em análise na Meta não segura o card, e Bitrix
+ * fora não segura a mensagem. Tudo que acontece vira nota no lead. Nunca lança.
+ */
+export async function confirmarLigacaoMarcada({ lead, sdr, inicio, telefone = null }) {
+  const resultado = { mensagem: null, bitrix: null };
+  const cfg = { ...AVISO_PADRAO, ...(await lerChave('ligacao_marcada_aviso')) };
+  const quando = porExtenso(inicio);
+
+  // ── A mensagem ──────────────────────────────────────────────────────────
+  if (cfg.ativo === false) {
+    resultado.mensagem = 'desligado';
+  } else {
+    try {
+      const fone = normalizarCelular(telefone || lead.phone);
+      if (!fone) resultado.mensagem = 'telefone_invalido';
+      else if (await pediuParaParar(lead.id).catch(() => false)) resultado.mensagem = 'optout';
+      else {
+        const phoneId = await numeroDoEnvio({ leadId: lead.id, ownerId: sdr.id, papel: 'sdr' });
+        const primeiro = String(lead.first_name || lead.full_name || '').trim().split(/\s+/)[0] || 'tudo bem';
+        const m = await resolverModeloMeta({
+          nome: cfg.modelo, idioma: cfg.idioma,
+          params: { 1: primeiro, 2: await nomeDeApresentacao(sdr, phoneId), 3: quando },
+        }, phoneId);
+        if (m.error) {
+          resultado.mensagem = m.error;   // ex.: modelo-nao-encontrado (ainda em análise na Meta)
+        } else {
+          const r = await enviarTemplate({ para: fone, nome: m.nome, idioma: m.idioma, params: m.params, phoneId });
+          if (r.erro) {
+            resultado.mensagem = `falhou: ${r.detalhe || r.erro}`;
+          } else {
+            resultado.mensagem = 'enviada';
+            await registrarSaida({ leadId: lead.id, wamid: r.wamid, texto: m.texto, remetente: 'Automático (ligação marcada)', phoneId });
+          }
+        }
+      }
+    } catch (e) {
+      resultado.mensagem = `erro: ${e?.message || e}`;
+    }
+  }
+
+  // ── O card ──────────────────────────────────────────────────────────────
+  // Relê o lead: o card do Bitrix pode ter sido criado no meio do caminho.
+  // Sem número ainda (formulário que cria o card do lado de lá), quem move é
+  // `alcancarLigacaoSdr` em _agenda.js, quando o card for adotado.
+  resultado.bitrix = await moverCardDaLigacao(lead.id, quando, resultado.mensagem);
+
+  const textoMsg = resultado.mensagem === 'enviada'
+    ? `✅ Mensagem de confirmação enviada ao cliente (modelo ${cfg.modelo}).`
+    : `⚠️ Mensagem de confirmação NÃO enviada: ${resultado.mensagem}.`;
+  await insert('qs_notes', {
+    lead_id: lead.id, author_id: null,
+    body: `📞 Ligação marcada para ${quando}\n${textoMsg}` +
+      (resultado.bitrix === 'movido' ? '\n🤖 Bitrix: card movido de "Novo Lead" para "Follow-up 1".' : ''),
+    tags: ['ligacao-agendada', 'confirmacao'],
+  }, { returning: false }).catch(() => {});
+  return resultado;
+}
+
+/**
+ * Card do lead: "Novo Lead" -> "Follow-up 1", com comentário na timeline.
+ * Exportada pro `_agenda.js` (card que chega depois da ligação marcada).
+ */
+export async function moverCardDaLigacao(leadId, quando, mensagem = null) {
+  try {
+    const r = await rest(`qs_leads?select=bitrix_id&id=eq.${encodeURIComponent(leadId)}&limit=1`);
+    const bitrixId = r?.[0]?.bitrix_id;
+    if (!bitrixId) return 'sem_bitrix_id';
+    const mv = await moverNovoLeadParaFollowUp(bitrixId);
+    if (!mv.ok) return mv.code;
+    if (mv.code === 'movido') {
+      await comentarNoNegocio(bitrixId,
+        `🤖 LIGAÇÃO MARCADA PELO CLIENTE (QS Turis) — ${quando}.\n` +
+        'Negócio movido de "Novo Lead" para "Follow-up 1".' +
+        (mensagem === 'enviada' ? '\nO cliente recebeu a confirmação no WhatsApp.' : ''),
+        6_000);
+    }
+    await rest(`qs_leads?id=eq.${encodeURIComponent(leadId)}`, {
+      method: 'PATCH', prefer: 'return=minimal', body: { bitrix_status_synced: 'primeiro-contato' },
+    }).catch(() => {});
+    return mv.code;
+  } catch (e) {
+    console.warn('[ligacao-sdr] card não movido:', e?.message);
+    return 'erro';
+  }
 }

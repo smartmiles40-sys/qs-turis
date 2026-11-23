@@ -42,6 +42,8 @@
 import { rest, insert } from './_supabaseAdmin.js';
 import { getSupabaseUserId, assertCanAccessLead } from './_wa.js';
 import { vincularLeadAoBitrix, bitrixConfigurado } from './_bitrixLead.js';
+import { moverCardDaLigacao } from './_ligacaoSdr.js';
+import { porExtenso } from './_agenda.js';
 import { verificarVinculo } from './_vinculo.js';
 
 export default async function handler(req, res) {
@@ -203,6 +205,17 @@ export default async function handler(req, res) {
       } catch (e) {
         console.warn('[lead-bitrix] notas não criadas:', e?.message);
       }
+    }
+
+    // 23/11: o card chegou depois de uma ligação marcada pelo cliente? Então ele
+    // sai de "Novo Lead" agora — na hora da marcação ainda não havia número.
+    try {
+      const lig = await rest(
+        `qs_ligacoes_sdr?select=inicio&lead_id=eq.${encodeURIComponent(leadId)}&status=eq.marcada&order=inicio&limit=1`
+      );
+      if (lig?.[0]) await moverCardDaLigacao(leadId, porExtenso(new Date(lig[0].inicio)));
+    } catch (e) {
+      console.warn('[lead-bitrix] card da ligação marcada não movido:', e?.message);
     }
 
     return res.status(200).json({

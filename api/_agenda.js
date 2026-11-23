@@ -27,7 +27,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest, insert } from './_supabaseAdmin.js';
-import { moverNegocioParaReuniao, passarNegocioPara, comentarNoNegocio } from './_bitrixLead.js';
+import { moverNegocioParaReuniao, passarNegocioPara, comentarNoNegocio, moverNovoLeadParaFollowUp } from './_bitrixLead.js';
 import { googleConfigurado, motivoNaoConfigurado } from './_google.js';
 import { executarAcaoAgenda } from './_googleAgenda.js';
 import { enviarReuniaoDireto } from './_bitrixSaida.js';
@@ -900,7 +900,15 @@ async function alcancarLigacaoSdr(lead) {
     lead.bitrix_id,
     `📞 O cliente marcou uma ligação com o SDR pelo formulário da LP: ${porExtenso(new Date(lig.inicio))}.`
   );
-  return { ok: true, ligacao_id: lig.id, passado: passou.passado, motivo: passou.motivo };
+  // 23/11: ligação marcada = 1º contato. O card não fica em "Novo Lead"
+  // esperando o horário (só anda se ainda estiver lá).
+  const mv = await moverNovoLeadParaFollowUp(lead.bitrix_id);
+  if (mv.ok) {
+    await rest(`qs_leads?id=eq.${encodeURIComponent(lead.id)}`, {
+      method: 'PATCH', prefer: 'return=minimal', body: { bitrix_status_synced: 'primeiro-contato' },
+    }).catch(() => {});
+  }
+  return { ok: true, ligacao_id: lig.id, passado: passou.passado, motivo: passou.motivo, movido: mv.code };
 }
 
 /**
