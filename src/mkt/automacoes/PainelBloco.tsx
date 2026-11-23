@@ -5,7 +5,7 @@
 import { useEffect, type ReactNode } from "react";
 import {
   COR_NOTA, LIMITES, ROTULO_TIPO, novoId,
-  type Acao, type Bloco, type CampoPersonalizado, type Fluxo, type Interacao, type No, type Regra,
+  type Acao, type AcoesSaida, type Bloco, type CampoPersonalizado, type Fluxo, type Interacao, type No, type Regra,
 } from "./tipos";
 import type { ModeloMkt } from "./api";
 import { AreaTexto, Aviso, Botao, Campo, Entrada, Selecao } from "./ui";
@@ -32,6 +32,7 @@ export default function PainelBloco(p: Props) {
   const { no, onMudar } = p;
   // patch tipado frouxo: cada editor sabe o formato dos seus dados
   const dados = (patch: Record<string, unknown>) => onMudar({ ...no, dados: { ...(no.dados as object), ...patch } } as No);
+  const ca: CtxAcoes = { campos: p.campos, usuarios: p.usuarios, permitidas: p.acoesPermitidas };
 
   return (
     <div className="text-[13px]">
@@ -58,9 +59,9 @@ export default function PainelBloco(p: Props) {
         <Campo rotulo="Nome do bloco (só para você)"><Entrada value={no.titulo ?? ""} onChange={(e) => onMudar({ ...no, titulo: e.target.value } as No)} placeholder="ex.: Boas-vindas" /></Campo>
       )}
       {no.tipo === "inicio" && <Aviso>O fluxo começa aqui. Quem faz ele começar são os gatilhos (palavra-chave, link, anúncio, LP…), nas outras abas.</Aviso>}
-      {no.tipo === "mensagem" && <EditorMensagem no={no} dados={dados} />}
-      {no.tipo === "template" && <EditorTemplate no={no} dados={dados} modelos={p.modelos} precisaModelos={p.precisaModelos} />}
-      {no.tipo === "pergunta" && <EditorPergunta no={no} dados={dados} campos={p.campos} />}
+      {no.tipo === "mensagem" && <EditorMensagem no={no} dados={dados} ca={ca} />}
+      {no.tipo === "template" && <EditorTemplate no={no} dados={dados} modelos={p.modelos} precisaModelos={p.precisaModelos} ca={ca} />}
+      {no.tipo === "pergunta" && <EditorPergunta no={no} dados={dados} campos={p.campos} ca={ca} />}
       {no.tipo === "aguardar" && <EditorAguardar no={no} dados={dados} />}
       {no.tipo === "condicao" && <EditorCondicao no={no} dados={dados} campos={p.campos} />}
       {no.tipo === "acao" && <EditorAcoes no={no} dados={dados} campos={p.campos} usuarios={p.usuarios} permitidas={p.acoesPermitidas} />}
@@ -80,8 +81,42 @@ export default function PainelBloco(p: Props) {
 }
 
 type Ed<T extends No["tipo"]> = { no: Extract<No, { tipo: T }>; dados: (patch: Record<string, unknown>) => void };
+type CtxAcoes = { campos: CampoPersonalizado[]; usuarios: { id: string; name: string }[]; permitidas?: Acao["tipo"][] };
+const COR_ACAO = "#B45309";
 
-function EditorMensagem({ no, dados }: Ed<"mensagem">) {
+/** "⚡ Ao tocar": ações que rodam quando a pessoa sai por esta saída (igual ManyChat). */
+function AcoesNoClique({ no, dados, saida, rotulo, ca }: { no: No; dados: (patch: Record<string, unknown>) => void; saida: string; rotulo: string; ca: CtxAcoes }) {
+  const todas: AcoesSaida = (no.dados as { acoesSaida?: AcoesSaida }).acoesSaida ?? {};
+  const acoes = todas[saida] ?? [];
+  const mudar = (novas: Acao[]) => {
+    const resto = { ...todas };
+    if (novas.length) resto[saida] = novas; else delete resto[saida];
+    dados({ acoesSaida: resto });
+  };
+  return (
+    <details className="rounded-lg px-2 py-1" style={{ background: "var(--card2)" }}>
+      <summary className="cursor-pointer text-[12px] font-semibold" style={{ color: acoes.length ? COR_ACAO : "var(--ink3)" }}>
+        ⚡ Ao tocar em “{rotulo || "…"}”{acoes.length ? `: ${acoes.length} ação(ões)` : ": nenhuma ação"}
+      </summary>
+      <div className="pt-1.5"><ListaAcoes acoes={acoes} onChange={mudar} ca={ca} /></div>
+    </details>
+  );
+}
+
+/** Tempo em minutos, digitado em minutos, horas ou dias. */
+function TempoEspera({ minutos, on }: { minutos: number; on: (m: number) => void }) {
+  const unidade = minutos > 0 && minutos % 1440 === 0 ? 1440 : minutos > 0 && minutos % 60 === 0 ? 60 : 1;
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      <Entrada type="number" min={0} value={minutos / unidade} onChange={(e) => on(Math.max(0, Math.round((Number(e.target.value) || 0) * unidade)))} />
+      <Selecao value={unidade} onChange={(e) => on(Math.round((minutos / unidade) * Number(e.target.value)))}>
+        <option value={1}>minutos</option><option value={60}>horas</option><option value={1440}>dias</option>
+      </Selecao>
+    </div>
+  );
+}
+
+function EditorMensagem({ no, dados, ca }: Ed<"mensagem"> & { ca: CtxAcoes }) {
   const d = no.dados;
   const blocos = d.blocos;
   const it = d.interacao ?? { tipo: "nenhuma" };
@@ -131,10 +166,13 @@ function EditorMensagem({ no, dados }: Ed<"mensagem">) {
         {it.tipo === "botoes" && (
           <>
             {it.botoes.map((b, i) => (
-              <div key={b.id} className="flex items-center gap-1.5">
-                <Entrada value={b.titulo} maxLength={LIMITES.tituloBotao + 5} onChange={(e) => setIt({ ...it, botoes: it.botoes.map((x, j) => (j === i ? { ...x, titulo: e.target.value } : x)) })} placeholder={`Botão ${i + 1}`} />
-                <span className="text-[11px] w-10"><Conta n={b.titulo.length} max={LIMITES.tituloBotao} /></span>
-                <Remover onClick={() => setIt({ ...it, botoes: it.botoes.filter((_, j) => j !== i) })} />
+              <div key={b.id} className="space-y-1">
+                <div className="flex items-center gap-1.5">
+                  <Entrada value={b.titulo} maxLength={LIMITES.tituloBotao + 5} onChange={(e) => setIt({ ...it, botoes: it.botoes.map((x, j) => (j === i ? { ...x, titulo: e.target.value } : x)) })} placeholder={`Botão ${i + 1}`} />
+                  <span className="text-[11px] w-10"><Conta n={b.titulo.length} max={LIMITES.tituloBotao} /></span>
+                  <Remover onClick={() => setIt({ ...it, botoes: it.botoes.filter((_, j) => j !== i) })} />
+                </div>
+                <AcoesNoClique no={no} dados={dados} saida={b.id} rotulo={b.titulo} ca={ca} />
               </div>
             ))}
             {it.botoes.length < LIMITES.botoes && <Botao variante="fantasma" onClick={() => setIt({ ...it, botoes: [...it.botoes, { id: novoId("b"), titulo: "" }] })}>+ botão</Botao>}
@@ -160,6 +198,7 @@ function EditorMensagem({ no, dados }: Ed<"mensagem">) {
               </div>
             ))}
             <Botao variante="fantasma" onClick={() => setIt({ ...it, secoes: [...it.secoes, { titulo: "", itens: [{ id: novoId("i"), titulo: "" }] }] })}>+ seção</Botao>
+            {it.secoes.flatMap((s) => s.itens).map((item) => <AcoesNoClique key={item.id} no={no} dados={dados} saida={item.id} rotulo={item.titulo} ca={ca} />)}
           </>
         )}
         {it.tipo === "link" && (
@@ -169,8 +208,8 @@ function EditorMensagem({ no, dados }: Ed<"mensagem">) {
           </>
         )}
         {(it.tipo === "botoes" || it.tipo === "lista") && (
-          <Campo rotulo="Se não clicar em (minutos)" dica="0 = espera para sempre. Com prazo, aparece a saída “Não respondeu”.">
-            <Entrada type="number" min={0} value={d.esperarMinutos ?? 0} onChange={(e) => dados({ esperarMinutos: Math.max(0, Number(e.target.value) || 0) })} />
+          <Campo rotulo="Se não clicar em" dica="0 = espera para sempre. Com prazo, aparece a saída “Não respondeu”.">
+            <TempoEspera minutos={d.esperarMinutos ?? 0} on={(m) => dados({ esperarMinutos: m })} />
           </Campo>
         )}
         {it.tipo !== "nenhuma" && (
@@ -188,7 +227,7 @@ function EditorMensagem({ no, dados }: Ed<"mensagem">) {
   );
 }
 
-function EditorTemplate({ no, dados, modelos, precisaModelos }: Ed<"template"> & { modelos: ModeloMkt[] | null; precisaModelos: () => void }) {
+function EditorTemplate({ no, dados, modelos, precisaModelos, ca }: Ed<"template"> & { modelos: ModeloMkt[] | null; precisaModelos: () => void; ca: CtxAcoes }) {
   useEffect(() => { precisaModelos(); }, [precisaModelos]);
   const d = no.dados;
   const m = modelos?.find((x) => x.nome === d.nome && x.idioma === d.idioma) ?? modelos?.find((x) => x.nome === d.nome);
@@ -216,12 +255,20 @@ function EditorTemplate({ no, dados, modelos, precisaModelos }: Ed<"template"> &
       {m?.cabecalho && m.cabecalho !== "TEXT" && (
         <Campo rotulo={`Mídia do cabeçalho (${m.cabecalho.toLowerCase()})`}><Entrada value={d.cabecalhoUrl ?? ""} onChange={(e) => dados({ cabecalhoUrl: e.target.value || null })} placeholder="https://…" /></Campo>
       )}
+      {(d.botoes ?? []).length > 0 && (
+        <>
+          {(d.botoes ?? []).map((b, i) => <AcoesNoClique key={i} no={no} dados={dados} saida={`botao_${i}`} rotulo={b} ca={ca} />)}
+          <Campo rotulo="Se não tocar em nenhum botão em" dica="0 = espera para sempre. Com prazo, aparece a saída “Não respondeu” (ex.: mandar um lembrete).">
+            <TempoEspera minutos={d.esperarMinutos ?? 0} on={(m) => dados({ esperarMinutos: m })} />
+          </Campo>
+        </>
+      )}
       <Aviso>Template sai mesmo com a janela fechada (é pago por conversa). Cada botão de resposta rápida do modelo vira uma saída.</Aviso>
     </Grupo>
   );
 }
 
-function EditorPergunta({ no, dados, campos }: Ed<"pergunta"> & { campos: CampoPersonalizado[] }) {
+function EditorPergunta({ no, dados, campos, ca }: Ed<"pergunta"> & { campos: CampoPersonalizado[]; ca: CtxAcoes }) {
   const d = no.dados;
   return (
     <>
@@ -243,13 +290,17 @@ function EditorPergunta({ no, dados, campos }: Ed<"pergunta"> & { campos: CampoP
         <Campo rotulo="Sugestões (viram botões, até 3)" dica="Separe por vírgula.">
           <Entrada value={(d.sugestoes ?? []).join(", ")} onChange={(e) => dados({ sugestoes: e.target.value.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 5) })} />
         </Campo>
+        <Campo rotulo="Botão “pular” (opcional)" dica="Ex.: Prefiro não dizer. Vira um botão e a saída “Pulou”. Conta nos 3 botões.">
+          <Entrada value={d.pular ?? ""} maxLength={LIMITES.tituloBotao + 5} onChange={(e) => dados({ pular: e.target.value })} />
+        </Campo>
+        {(d.pular ?? "").trim() && <AcoesNoClique no={no} dados={dados} saida="pulou" rotulo={d.pular ?? ""} ca={ca} />}
       </Grupo>
       <Grupo titulo="Se a resposta não servir">
         <Campo rotulo="Mensagem de erro"><Entrada value={d.mensagemErro ?? ""} onChange={(e) => dados({ mensagemErro: e.target.value })} /></Campo>
         <div className="grid grid-cols-2 gap-2">
           <Campo rotulo="Tentativas"><Entrada type="number" min={1} max={5} value={d.tentativas ?? 2} onChange={(e) => dados({ tentativas: Math.min(5, Math.max(1, Number(e.target.value) || 1)) })} /></Campo>
-          <Campo rotulo="Prazo (min, 0 = sem)"><Entrada type="number" min={0} value={d.esperarMinutos ?? 0} onChange={(e) => dados({ esperarMinutos: Math.max(0, Number(e.target.value) || 0) })} /></Campo>
         </div>
+        <Campo rotulo="Se não responder em" dica="0 = espera para sempre."><TempoEspera minutos={d.esperarMinutos ?? 0} on={(m) => dados({ esperarMinutos: m })} /></Campo>
       </Grupo>
     </>
   );
@@ -351,8 +402,17 @@ function acaoNova(t: Acao["tipo"]): Acao {
 }
 
 function EditorAcoes({ no, dados, campos, usuarios, permitidas }: Ed<"acao"> & { campos: CampoPersonalizado[]; usuarios: { id: string; name: string }[]; permitidas?: Acao["tipo"][] }) {
+  return (
+    <Grupo titulo="Fazer, na ordem">
+      <ListaAcoes acoes={no.dados.acoes} onChange={(acoes) => dados({ acoes })} ca={{ campos, usuarios, permitidas }} />
+    </Grupo>
+  );
+}
+
+function ListaAcoes({ acoes, onChange, ca }: { acoes: Acao[]; onChange: (a: Acao[]) => void; ca: CtxAcoes }) {
+  const { campos, usuarios, permitidas } = ca;
   const tipos = permitidas ? TIPOS_ACAO.filter((t) => permitidas.includes(t.id)) : TIPOS_ACAO;
-  const acoes = no.dados.acoes;
+  const dados = (p: { acoes: Acao[] }) => onChange(p.acoes);
   const set = (i: number, a: Acao) => dados({ acoes: acoes.map((x, j) => (j === i ? a : x)) });
   const seletorCampo = (valor: string, on: (v: string) => void) => (
     <Selecao value={valor} onChange={(e) => on(e.target.value)}>
@@ -362,7 +422,7 @@ function EditorAcoes({ no, dados, campos, usuarios, permitidas }: Ed<"acao"> & {
     </Selecao>
   );
   return (
-    <Grupo titulo="Fazer, na ordem">
+    <div className="space-y-2">
       {acoes.map((a, i) => (
         <div key={i} className="rounded-lg p-2 space-y-1.5" style={{ background: "var(--card2)" }}>
           <div className="flex gap-1.5">
@@ -393,8 +453,8 @@ function EditorAcoes({ no, dados, campos, usuarios, permitidas }: Ed<"acao"> & {
           )}
         </div>
       ))}
-      <Botao variante="fantasma" onClick={() => dados({ acoes: [...acoes, acaoNova("adicionar_tag")] })}>+ ação</Botao>
-    </Grupo>
+      <Botao variante="fantasma" onClick={() => dados({ acoes: [...acoes, acaoNova(tipos[0]?.id ?? "adicionar_tag")] })}>+ ação</Botao>
+    </div>
   );
 }
 

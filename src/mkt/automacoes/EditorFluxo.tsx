@@ -748,11 +748,12 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
                   {saidas.map((s) => {
                     const botao = !s.secundaria && (no.tipo === "template" ? s.id.startsWith("botao_") : no.tipo === "mensagem" && (no.dados.interacao?.tipo === "botoes" || no.dados.interacao?.tipo === "lista"));
                     const pct = st?.entrou && st.saidas[s.id] ? Math.round((st.saidas[s.id] / st.entrou) * 100) : null;
+                    const raio = ((no.dados as { acoesSaida?: Record<string, unknown[]> }).acoesSaida?.[s.id]?.length ?? 0) > 0 ? "⚡ " : "";
                     return (
                       <div key={s.id} className="relative flex items-center justify-end pr-4 text-[11.5px] border-t" style={{ height: LINHA, borderColor: "var(--line)", color: s.secundaria ? "var(--ink3)" : "var(--ink2)" }}>
                         {botao
-                          ? <span className="mx-2 flex-1 truncate rounded-md text-center font-semibold" style={{ color: "#0284C7", background: "color-mix(in srgb, #0284C7 8%, var(--card))" }}>{s.rotulo}{st?.saidas[s.id] ? ` · ${st.saidas[s.id]}${pct !== null ? ` (${pct}%)` : ""}` : ""}</span>
-                          : <span className="truncate">{s.rotulo}{st?.saidas[s.id] ? ` · ${st.saidas[s.id]}` : ""}</span>}
+                          ? <span className="mx-2 flex-1 truncate rounded-md text-center font-semibold" style={{ color: "#0284C7", background: "color-mix(in srgb, #0284C7 8%, var(--card))" }}>{raio}{s.rotulo}{st?.saidas[s.id] ? ` · ${st.saidas[s.id]}${pct !== null ? ` (${pct}%)` : ""}` : ""}</span>
+                          : <span className="truncate">{raio}{s.rotulo}{st?.saidas[s.id] ? ` · ${st.saidas[s.id]}` : ""}</span>}
                         <span role="button" tabIndex={0} aria-label={`Ligar a saída ${s.rotulo}`}
                           className="absolute rounded-full cursor-crosshair" style={{ right: -7, top: LINHA / 2 - 7, width: 14, height: 14, background: s.secundaria ? "var(--card)" : COR, border: `2px solid ${COR}` }}
                           onPointerDown={(e) => {

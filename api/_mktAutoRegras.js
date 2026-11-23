@@ -153,11 +153,14 @@ export function saidasDoNo(no) {
       return [
         { id: 'proximo', rotulo: 'Depois de enviar' },
         ...(d.botoes || []).map((b, i) => ({ id: `botao_${i}`, rotulo: b })),
+        // 23/11/2026: "se não clicar em X" também no template (igual ManyChat).
+        ...((d.esperarMinutos ?? 0) > 0 && (d.botoes || []).length ? [{ id: 'sem_resposta', rotulo: 'Não respondeu', secundaria: true }] : []),
         { id: 'falha', rotulo: 'Não enviou', secundaria: true },
       ];
     case 'pergunta':
       return [
         { id: 'respondeu', rotulo: 'Respondeu' },
+        ...(String(d.pular ?? '').trim() ? [{ id: 'pulou', rotulo: 'Pulou' }] : []),
         { id: 'nao_respondeu', rotulo: 'Não respondeu / inválido', secundaria: true },
         { id: 'janela_fechada', rotulo: 'Janela de 24 h fechada', secundaria: true },
       ];
@@ -274,14 +277,21 @@ function montarInterativa(d, texto, p, prefixoId) {
 /** A pergunta: texto puro, ou com as sugestões como botões. */
 export function montarPergunta(d, p, prefixoId) {
   const texto = personalizar(d?.pergunta, p);
-  const sugestoes = (d?.sugestoes ?? []).filter((s) => String(s).trim()).slice(0, LIMITES.botoes);
-  if (!sugestoes.length) return { type: 'text', text: { body: corta(texto, LIMITES.texto) } };
+  const pular = String(d?.pular ?? '').trim();
+  const sugestoes = (d?.sugestoes ?? []).filter((s) => String(s).trim()).slice(0, pular ? LIMITES.botoes - 1 : LIMITES.botoes);
+  if (!sugestoes.length && !pular) return { type: 'text', text: { body: corta(texto, LIMITES.texto) } };
   return {
     type: 'interactive',
     interactive: {
       type: 'button',
       body: { text: corta(texto, LIMITES.textoInterativo) },
-      action: { buttons: sugestoes.map((s, i) => ({ type: 'reply', reply: { id: `${prefixoId}_s${i}`, title: corta(s, LIMITES.tituloBotao) } })) },
+      action: {
+        buttons: [
+          ...sugestoes.map((s, i) => ({ type: 'reply', reply: { id: `${prefixoId}_s${i}`, title: corta(s, LIMITES.tituloBotao) } })),
+          // O "pular" é SAÍDA do bloco (f:<fluxo>:<bloco>:pulou): o clique segue a seta "Pulou".
+          ...(pular ? [{ type: 'reply', reply: { id: `${prefixoId}pulou`, title: corta(pular, LIMITES.tituloBotao) } }] : []),
+        ],
+      },
     },
   };
 }
@@ -330,6 +340,22 @@ export function saidaPorTexto(no, texto) {
   const opcoes = it.tipo === 'botoes' ? (it.botoes || []) : it.tipo === 'lista' ? (it.secoes || []).flatMap((s) => s.itens || []) : [];
   const achou = opcoes.find((o) => normalizarTexto(o.titulo) === alvo);
   return achou ? achou.id : null;
+}
+
+/** Digitou o texto do botão "pular" da pergunta? */
+export function pulouPorTexto(no, texto) {
+  const pular = normalizarTexto(no?.dados?.pular);
+  return Boolean(pular) && no?.tipo === 'pergunta' && normalizarTexto(texto) === pular;
+}
+
+/**
+ * 23/11/2026 — AÇÃO NO CLIQUE (igual ManyChat): o bloco guarda, por saída, ações
+ * que rodam quando a pessoa sai por ali (tag ao tocar no botão, aviso pro time…).
+ * `dados.acoesSaida = { [saidaId]: Acao[] }`. Vale pra qualquer saída.
+ */
+export function acoesDaSaida(no, saida) {
+  const a = no?.dados?.acoesSaida?.[saida];
+  return Array.isArray(a) ? a : [];
 }
 
 // ── Id do clique ────────────────────────────────────────────────────────────
@@ -783,7 +809,8 @@ export function simularFluxo(fluxo, { pessoa = {}, janela = true, respostas = {}
     if (plano.tipo === 'template') {
       const t = montarTemplate(plano.dados, p);
       passo.enviar = [{ type: 'template', template: { name: t.nome, language: { code: t.idioma } }, params: t.params }];
-      passo.saida = 'proximo';
+      // 23/11/2026: dá pra simular o clique num botão do template (respostas[bloco]).
+      passo.saida = respostas[no.id] || 'proximo';
     } else if (plano.tipo === 'esperar') {
       if (plano.estado === 'aguardando_tempo') {
         passo.nota = `esperaria até ${plano.acordarEm}`;
@@ -797,6 +824,7 @@ export function simularFluxo(fluxo, { pessoa = {}, janela = true, respostas = {}
       for (const a of plano.acoes || []) p = aplicarAcaoNaPessoa(p, a);
       passo.saida = plano.saida;
     }
+    for (const a of acoesDaSaida(no, passo.saida)) p = aplicarAcaoNaPessoa(p, a);
     atual = proximoNo(grafo, no.id, passo.saida);
     if (!atual) return { passos, fim: 'concluído', pessoa: p };
   }

@@ -38,7 +38,7 @@ import {
   MAX_PASSOS_RODADA, MAX_PASSOS_TOTAL, MAX_PROFUNDIDADE,
   janelaAberta, lerEntrada, lerIdDeResposta, montarTemplate, normalizarGrafo, personalizar, planoDoNo,
   prefixoDeResposta, previaDoCorpo, proximoNo, saidaLigada, saidasDoNo, validarResposta, variantesTelefone,
-  podeSairForaDaJanela, saidaPorTexto,
+  podeSairForaDaJanela, saidaPorTexto, acoesDaSaida, pulouPorTexto,
 } from './_mktAutoRegras.js';
 
 const enc = encodeURIComponent;
@@ -216,8 +216,17 @@ async function executarTemplate(ctx, fluxo, exec, no, d) {
   await evento(ctx, fluxo.id, exec.id, no.id, 'enviou_modelo', null, ctx.modo === 'simulacao' ? 'simulação' : null);
   await evento(ctx, fluxo.id, exec.id, no.id, 'enviou');
   if (ctx.pausa) await dormir(ctx.pausa);
+  return esperaDoTemplate(fluxo, no, d);
+}
+
+/** Depois do template: espera o clique (com prazo "não respondeu", se tiver) ou segue. */
+export function esperaDoTemplate(fluxo, no, d, agora = Date.now()) {
   const botoesLigados = (d.botoes ?? []).some((_, i) => saidaLigada(fluxo.grafo, no.id, `botao_${i}`));
-  if (botoesLigados) return { tipo: 'esperar', estado: 'aguardando_resposta', acordarEm: null, aguardando: { tipo: 'template' } };
+  const min = Number(d.esperarMinutos ?? 0);
+  const prazo = min > 0 && (d.botoes ?? []).length > 0 && saidaLigada(fluxo.grafo, no.id, 'sem_resposta');
+  if (botoesLigados || prazo) {
+    return { tipo: 'esperar', estado: 'aguardando_resposta', acordarEm: prazo ? new Date(agora + min * 60_000).toISOString() : null, aguardando: { tipo: 'template' } };
+  }
   return { tipo: 'seguir', saida: 'proximo' };
 }
 
@@ -313,12 +322,23 @@ async function executarNo(ctx, fluxo, exec, no) {
     }
     await evento(ctx, fluxo.id, exec.id, no.id, 'enviou');
   }
-  for (const a of plano.acoes || []) {
+  await aplicarAcoes(ctx, fluxo, exec, no, plano.acoes || []);
+  return plano;
+}
+
+async function aplicarAcoes(ctx, fluxo, exec, no, acoes) {
+  for (const a of acoes) {
     const erro = await executarAcao(ctx, a, fluxo, exec).catch((e) => String(e?.message || e));
     if (erro) await evento(ctx, fluxo.id, exec.id, no.id, 'erro', null, `${a.tipo}: ${erro}`);
     else if (a.tipo === 'adicionar_tag') await evento(ctx, fluxo.id, exec.id, no.id, 'acao', null, `tag:${normalizarEtiqueta(personalizar(a.tag, pessoaDe(ctx)))}`);
   }
-  return plano;
+}
+
+/** Sai do bloco por `saida`: conta, roda as ações do clique (igual ManyChat) e anda. */
+async function seguir(ctx, fluxo, exec, no, saida) {
+  await evento(ctx, fluxo.id, exec.id, no.id, 'saida', saida);
+  await aplicarAcoes(ctx, fluxo, exec, no, acoesDaSaida(no, saida));
+  await avancar(ctx, exec, proximoNo(fluxo.grafo, no.id, saida));
 }
 
 async function avancar(ctx, exec, noId) {
@@ -349,6 +369,7 @@ async function avancar(ctx, exec, noId) {
       return concluir(exec, r.erro ? 'erro' : 'concluida', r.erro || null);
     }
     await evento(ctx, fluxo.id, exec.id, no.id, 'saida', r.saida);
+    await aplicarAcoes(ctx, fluxo, exec, no, acoesDaSaida(no, r.saida));
     atual = proximoNo(fluxo.grafo, no.id, r.saida);
   }
   await quieto(atualizarExecucao(exec.id, { no_atual: atual, estado: 'aguardando_tempo', acordar_em: agoraIso(), aguardando: { tipo: 'continuar' }, passos: exec.passos, travada_ate: null }));
@@ -381,11 +402,11 @@ async function retomarComResposta(ctx, exec, entrada) {
   const tipoEspera = String(exec.aguardando?.tipo ?? '');
 
   if (no.tipo === 'pergunta') {
+    if (pulouPorTexto(no, entrada.texto)) { await seguir(ctx, fluxo, exec, no, 'pulou'); return true; }
     const valor = validarResposta(no.dados.tipoResposta, entrada.texto);
     if (valor !== null) {
       await evento(ctx, fluxo.id, exec.id, no.id, 'acao', null, `resposta:${String(valor).slice(0, 200)}`);
-      await evento(ctx, fluxo.id, exec.id, no.id, 'saida', 'respondeu');
-      await avancar(ctx, exec, proximoNo(fluxo.grafo, no.id, 'respondeu'));
+      await seguir(ctx, fluxo, exec, no, 'respondeu');
       return true;
     }
     const tentativas = Number(exec.aguardando?.tentativas ?? 0) + 1;
@@ -394,22 +415,13 @@ async function retomarComResposta(ctx, exec, entrada) {
       await quieto(atualizarExecucao(exec.id, { aguardando: { tipo: 'pergunta', tentativas }, travada_ate: null }));
       return true;
     }
-    await evento(ctx, fluxo.id, exec.id, no.id, 'saida', 'nao_respondeu');
-    await avancar(ctx, exec, proximoNo(fluxo.grafo, no.id, 'nao_respondeu'));
+    await seguir(ctx, fluxo, exec, no, 'nao_respondeu');
     return true;
   }
   if (tipoEspera === 'botoes' || tipoEspera === 'template') {
     const porTexto = tipoEspera === 'botoes' ? saidaPorTexto(no, entrada.texto) : null;
-    if (porTexto) {
-      await evento(ctx, fluxo.id, exec.id, no.id, 'saida', porTexto);
-      await avancar(ctx, exec, proximoNo(fluxo.grafo, no.id, porTexto));
-      return true;
-    }
-    if (saidaLigada(fluxo.grafo, no.id, 'texto_livre')) {
-      await evento(ctx, fluxo.id, exec.id, no.id, 'saida', 'texto_livre');
-      await avancar(ctx, exec, proximoNo(fluxo.grafo, no.id, 'texto_livre'));
-      return true;
-    }
+    if (porTexto) { await seguir(ctx, fluxo, exec, no, porTexto); return true; }
+    if (saidaLigada(fluxo.grafo, no.id, 'texto_livre')) { await seguir(ctx, fluxo, exec, no, 'texto_livre'); return true; }
     // Sem caminho pra texto livre: a conversa segue com o atendente; a espera acaba.
     await concluir(exec, 'concluida');
     return false;
@@ -442,8 +454,7 @@ async function rotearClique(ctx, alvo) {
     }).catch(() => null))?.[0];
     if (!exec) return false;
   }
-  await evento(ctx, fluxo.id, exec.id, no.id, 'saida', alvo.saida);
-  await avancar(ctx, exec, proximoNo(fluxo.grafo, no.id, alvo.saida));
+  await seguir(ctx, fluxo, exec, no, alvo.saida);
   return true;
 }
 
@@ -473,7 +484,11 @@ export async function receberNoFluxoRel({ phoneId, telefone, m, conversaId }) {
         { estado: 'cancelada', acordar_em: null, concluida_em: agoraIso(), erro: 'O cliente pediu para não receber.' }));
       return { motivo: 'optout' };
     }
-    const alvo = lerIdDeResposta(entrada.idResposta);
+    // Clique que não é saída (sugestão de pergunta `_s0`) vale como resposta digitada.
+    const lido = lerIdDeResposta(entrada.idResposta);
+    const alvoFluxo = lido ? await um(`rel_fluxos?select=grafo&id=eq.${enc(lido.fluxoId)}&limit=1`).catch(() => null) : null;
+    const noAlvo = alvoFluxo ? normalizarGrafo(alvoFluxo.grafo).nos.find((n) => n.id === lido.noId) : null;
+    const alvo = lido && noAlvo && saidasDoNo(noAlvo).some((s) => s.id === lido.saida) ? lido : null;
     const esperando = alvo ? null : await um(`rel_fluxo_execucoes?select=*&telefone=in.(${vars.join(',')})&estado=eq.aguardando_resposta&order=atualizada_em.desc&limit=1`).catch(() => null);
     if (!alvo && !esperando) return null;
 
@@ -567,8 +582,7 @@ async function acordar(ctx, exec) {
   const no = fluxo.grafo.nos.find((n) => n.id === noId);
   const saida = no?.tipo === 'pergunta' ? 'nao_respondeu' : 'sem_resposta';
   if (!saidaLigada(fluxo.grafo, noId, saida)) return concluir(exec, 'concluida');
-  await evento(ctx, fluxo.id, exec.id, noId, 'saida', saida);
-  return avancar(ctx, exec, proximoNo(fluxo.grafo, noId, saida));
+  return seguir(ctx, fluxo, exec, no, saida);
 }
 
 /**

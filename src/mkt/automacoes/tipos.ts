@@ -37,7 +37,11 @@ export interface DadosMensagem {
   /** Prazo do clique antes da saída "Não respondeu". 0 = espera para sempre. */
   esperarMinutos?: number;
   digitando?: boolean;
+  /** Ações que rodam quando a pessoa sai por uma saída (ex.: tag ao tocar num botão). */
+  acoesSaida?: AcoesSaida;
 }
+/** 23/11/2026 (igual ManyChat): { [id da saída]: ações } — rodam quando a pessoa sai por ali. */
+export type AcoesSaida = Record<string, Acao[]>;
 export interface DadosTemplate {
   nome: string;
   idioma: string;
@@ -46,6 +50,9 @@ export interface DadosTemplate {
   cabecalhoUrl?: string | null;
   /** Textos dos botões de resposta rápida do modelo — cada um vira uma saída. */
   botoes?: string[];
+  /** Prazo pro clique antes da saída "Não respondeu" (só com botões). 0 = espera pra sempre. */
+  esperarMinutos?: number;
+  acoesSaida?: AcoesSaida;
 }
 export type TipoResposta = "texto" | "numero" | "email" | "telefone" | "data" | "qualquer";
 export interface DadosPergunta {
@@ -56,6 +63,9 @@ export interface DadosPergunta {
   mensagemErro?: string;
   tentativas?: number;
   esperarMinutos?: number;
+  /** Texto do botão "pular" (vira a saída "Pulou"). Vazio = sem botão. */
+  pular?: string;
+  acoesSaida?: AcoesSaida;
 }
 export type UnidadeTempo = "minutos" | "horas" | "dias";
 export interface DadosAguardar { quantidade: number; unidade: UnidadeTempo; janelaInicio?: string | null; janelaFim?: string | null }
@@ -121,10 +131,16 @@ export function saidasDoNo(no: No): Saida[] {
       return [{ id: "proximo", rotulo: "Depois de enviar" }, ...extras];
     }
     case "template":
-      return [{ id: "proximo", rotulo: "Depois de enviar" }, ...(no.dados.botoes ?? []).map((b, i) => ({ id: `botao_${i}`, rotulo: b })), { id: "falha", rotulo: "Não enviou", secundaria: true }];
+      return [
+        { id: "proximo", rotulo: "Depois de enviar" },
+        ...(no.dados.botoes ?? []).map((b, i) => ({ id: `botao_${i}`, rotulo: b })),
+        ...((no.dados.esperarMinutos ?? 0) > 0 && (no.dados.botoes ?? []).length ? [{ id: "sem_resposta", rotulo: "Não respondeu", secundaria: true }] : []),
+        { id: "falha", rotulo: "Não enviou", secundaria: true },
+      ];
     case "pergunta":
       return [
         { id: "respondeu", rotulo: "Respondeu" },
+        ...((no.dados.pular ?? "").trim() ? [{ id: "pulou", rotulo: "Pulou" }] : []),
         { id: "nao_respondeu", rotulo: "Não respondeu / inválido", secundaria: true },
         { id: "janela_fechada", rotulo: "Janela de 24 h fechada", secundaria: true },
       ];
@@ -177,6 +193,10 @@ export function validarGrafo(g: Grafo, canal: Canal = "whatsapp"): ProblemaGrafo
   for (const no of g.nos) {
     const nome = nomeDo(no);
     const erro = (mensagem: string, grave = true) => p.push({ noId: no.id, mensagem: `"${nome}": ${mensagem}`, grave });
+    for (const [saida, acoes] of Object.entries((no.dados as { acoesSaida?: AcoesSaida }).acoesSaida ?? {})) {
+      if (!saidasDoNo(no).some((s) => s.id === saida)) continue;
+      for (const a of acoes) p.push(...problemasDaAcao(a).map((m) => ({ noId: no.id, mensagem: `"${nome}": ao clicar — ${m}`, grave: true })));
+    }
     switch (no.tipo) {
       case "mensagem": {
         const d = no.dados;
@@ -224,7 +244,8 @@ export function validarGrafo(g: Grafo, canal: Canal = "whatsapp"): ProblemaGrafo
         break;
       case "pergunta":
         if (!no.dados.pergunta.trim()) erro("escreva a pergunta.");
-        if ((no.dados.sugestoes ?? []).length > LIMITES.botoes) erro(`no máximo ${LIMITES.botoes} sugestões.`);
+        if ((no.dados.sugestoes ?? []).length + ((no.dados.pular ?? "").trim() ? 1 : 0) > LIMITES.botoes) erro(`no máximo ${LIMITES.botoes} botões (sugestões + pular).`);
+        if ((no.dados.pular ?? "").length > LIMITES.tituloBotao) erro(`o botão "pular" passa de ${LIMITES.tituloBotao} caracteres.`);
         break;
       case "aguardar":
         if (!(no.dados.quantidade > 0)) erro("o tempo de espera precisa ser maior que zero.");
@@ -235,10 +256,7 @@ export function validarGrafo(g: Grafo, canal: Canal = "whatsapp"): ProblemaGrafo
       case "acao":
         if (!no.dados.acoes.length) erro("adicione pelo menos uma ação.", false);
         for (const a of no.dados.acoes) {
-          if ((a.tipo === "adicionar_tag" || a.tipo === "remover_tag") && !a.tag.trim()) erro("ação de tag sem tag.");
-          if ((a.tipo === "definir_campo" || a.tipo === "limpar_campo") && !a.chave) erro("escolha o campo.");
-          if ((a.tipo === "adicionar_lista" || a.tipo === "remover_lista") && !a.lista.trim()) erro("escreva o nome da lista.");
-          if (a.tipo === "webhook" && !/^https:\/\//i.test(a.url)) erro("o webhook precisa de endereço https.");
+          for (const m of problemasDaAcao(a)) erro(m);
           if (a.tipo === "avisar_humano" && !a.usuarios.length) erro("escolha quem será avisado.", false);
         }
         break;
@@ -262,6 +280,16 @@ export function validarGrafo(g: Grafo, canal: Canal = "whatsapp"): ProblemaGrafo
   }
   for (const no of g.nos) if (!alc.has(no.id) && no.tipo !== "nota") p.push({ noId: no.id, mensagem: `"${nomeDo(no)}" está solto — nenhuma seta chega nele.`, grave: false });
   return p;
+}
+
+/** Os erros graves de uma ação (bloco Ações e ações no clique). */
+export function problemasDaAcao(a: Acao): string[] {
+  const e: string[] = [];
+  if ((a.tipo === "adicionar_tag" || a.tipo === "remover_tag") && !a.tag.trim()) e.push("ação de tag sem tag.");
+  if ((a.tipo === "definir_campo" || a.tipo === "limpar_campo") && !a.chave) e.push("escolha o campo.");
+  if ((a.tipo === "adicionar_lista" || a.tipo === "remover_lista") && !a.lista.trim()) e.push("escreva o nome da lista.");
+  if (a.tipo === "webhook" && !/^https:\/\//i.test(a.url)) e.push("o webhook precisa de endereço https.");
+  return e;
 }
 
 /** Instagram: o que o editor avisa antes de ativar (o motor recusaria). */
