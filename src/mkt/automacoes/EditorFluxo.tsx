@@ -140,6 +140,12 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
   const [relatorio, setRelatorio] = useState(false);
   const papelRef = useRef<HTMLDivElement>(null);
   const arrasto = useRef<{ id: string; dx: number; dy: number } | null>(null);
+  // 23/11/2026: onVoltar chega como arrow nova a cada render do pai. Estava nas
+  // deps do carregamento → qualquer re-render da tela (ex.: bolinhas do menu do
+  // Rel se atualizando) relia o fluxo do banco e APAGAVA o que não foi salvo
+  // (o template escolhido "sumia" depois de uns segundos). Recarrega só ao trocar de fluxo.
+  const onVoltarRef = useRef(onVoltar);
+  onVoltarRef.current = onVoltar;
 
   useEffect(() => {
     let vivo = true;
@@ -147,7 +153,7 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
       try {
         const [f, cs, fs, us, st] = await Promise.all([api.lerFluxo(fluxoId), api.listarCampos().catch(() => []), api.listarFluxos().catch(() => []), api.listarUsuarios().catch(() => []), api.estatisticas(fluxoId).catch(() => new Map())]);
         if (!vivo) return;
-        if (!f) { notifyError("Fluxo não encontrado."); onVoltar(); return; }
+        if (!f) { notifyError("Fluxo não encontrado."); onVoltarRef.current(); return; }
         setFluxo(f);
         setGrafo({ nos: f.grafo?.nos ?? [], ligacoes: f.grafo?.ligacoes ?? [] });
         // ir_para só entre fluxos do MESMO canal (a conversa é de um canal só).
@@ -155,12 +161,12 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
       } catch (e) {
         notifyError(e instanceof Error ? e.message : "Não consegui abrir o fluxo.");
         // 04/11/2026: sem isso o editor ficava em "Carregando…" pra sempre; volta pra lista.
-        if (vivo) onVoltar();
+        if (vivo) onVoltarRef.current();
       }
     })();
     return () => { vivo = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fluxoId, onVoltar]);
+  }, [fluxoId]);
 
   // Os modelos só são buscados quando alguém abre um bloco Template.
   const precisaModelos = useCallback(() => {
