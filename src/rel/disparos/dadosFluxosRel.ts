@@ -28,11 +28,13 @@ export async function salvarFluxoRel(id: string, patch: Partial<Pick<Fluxo, "nom
 }
 export async function apagarFluxoRel(id: string) { ok(await supabase.from("rel_fluxos").delete().eq("id", id).select("id")); }
 
-async function estatisticasRel(fluxoId: string) {
+/** filtro: null = tudo · "testes" = só os testes · uuid = um disparo (0415). */
+async function estatisticasRel(fluxoId: string, filtro?: string | null) {
+  const recorte = { p_fluxo: fluxoId, p_disparo: filtro && filtro !== "testes" ? filtro : null, p_testes: filtro === "testes" };
   const [{ data }, funil] = await Promise.all([
-    supabase.rpc("rel_fluxo_estatisticas", { p_fluxo: fluxoId }),
+    filtro ? supabase.rpc("rel_fluxo_estatisticas_recorte", recorte) : supabase.rpc("rel_fluxo_estatisticas", { p_fluxo: fluxoId }),
     // 0414: enviadas → entregues → lidas → clicaram no link, por bloco.
-    supabase.rpc("rel_fluxo_funil_blocos", { p_fluxo: fluxoId }).then((r) => r.data ?? [], () => []),
+    supabase.rpc("rel_fluxo_funil_blocos", recorte).then((r) => r.data ?? [], () => []),
   ]);
   const m = new Map<string, EstatBloco>();
   for (const l of (data ?? []) as { no_id: string; tipo: string; saida: string; total: number }[]) {
@@ -67,6 +69,7 @@ export function adaptadorRel(extra: Partial<AdaptadorFluxo> = {}, numerosTeste: 
     listarFluxos: listarFluxosRel,
     salvarFluxo: salvarFluxoRel,
     estatisticas: estatisticasRel,
+    filtrosEstat: filtrosDoFluxo,
     listarModelos: () => chamar<{ modelos?: ModeloMkt[]; aviso?: string }>({ acao: "rel_fluxo_modelos" }),
     listarUsuarios: usuariosRel,
     // "Destino" vem da viagem do cliente — dá pra usar {{destino}} e testar na Condição.
@@ -95,6 +98,28 @@ export function adaptadorRel(extra: Partial<AdaptadorFluxo> = {}, numerosTeste: 
     voltarRotulo: "Fluxos",
     ...extra,
   };
+}
+
+/** "Números de:" no editor — cada disparo do fluxo + só os testes. */
+async function filtrosDoFluxo(fluxoId: string) {
+  const { data } = await supabase.from("rel_fluxo_disparos").select("id,agendado_para,iniciado_em,total").eq("fluxo_id", fluxoId).order("criado_em", { ascending: false }).limit(30);
+  const quando = (iso: string) => new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  return [
+    ...((data ?? []) as { id: string; agendado_para: string; iniciado_em: string | null; total: number }[]).map((d) => ({ id: d.id, rotulo: `Disparo de ${quando(d.iniciado_em ?? d.agendado_para)} (${d.total})` })),
+    { id: "testes", rotulo: "Só os testes" },
+  ];
+}
+
+// ── Histórico (0415) ────────────────────────────────────────────────────────
+
+export interface LinhaHistorico {
+  tipo: "fluxo" | "teste" | "simples"; id: string | null; nome: string; fluxo_id: string | null; inicio: string | null; status: string;
+  pessoas: number; enviadas: number; entregues: number; lidas: number; clicaram: number;
+}
+export async function historicoDisparos(limite = 30): Promise<LinhaHistorico[]> {
+  const { data, error } = await supabase.rpc("rel_disparos_historico", { p_limite: limite });
+  if (error) throw new Error(/rel_disparos_historico|schema cache/i.test(error.message) ? "O histórico precisa da migration 0415 aplicada no banco." : error.message);
+  return ((data ?? []) as LinhaHistorico[]).map((l) => ({ ...l, pessoas: Number(l.pessoas), enviadas: Number(l.enviadas), entregues: Number(l.entregues), lidas: Number(l.lidas), clicaram: Number(l.clicaram) }));
 }
 
 // ── Disparar o fluxo ────────────────────────────────────────────────────────

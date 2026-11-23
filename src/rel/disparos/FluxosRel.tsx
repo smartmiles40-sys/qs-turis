@@ -143,6 +143,8 @@ export default function FluxosRel({ est }: { est: EstadoRel | null }) {
   const { currentUser } = useQsAuth();
   const [lista, setLista] = useState<Fluxo[] | null>(null);
   const [aberto, setAberto] = useState<string | null>(() => { try { return sessionStorage.getItem("rel_fluxo_aberto"); } catch { return null; } });
+  // 0415: veio do Histórico → abre com os números daquele disparo.
+  const [filtroAbrir, setFiltroAbrir] = useState<string | null>(() => { try { return sessionStorage.getItem("rel_fluxo_filtro"); } catch { return null; } });
   const [disparar, setDisparar] = useState<Fluxo | null>(null);
   const [novo, setNovo] = useState(false);
   const [nome, setNome] = useState("");
@@ -152,7 +154,7 @@ export default function FluxosRel({ est }: { est: EstadoRel | null }) {
 
   const ler = useCallback(() => void listarFluxosRel().then(setLista).catch((e) => { notifyError(erroDe(e, "Não carregou os fluxos.")); setLista([]); }), []);
   useEffect(ler, [ler]);
-  const abrir = (id: string | null) => { setAberto(id); try { if (id) sessionStorage.setItem("rel_fluxo_aberto", id); else sessionStorage.removeItem("rel_fluxo_aberto"); } catch { /* sem storage */ } };
+  const abrir = (id: string | null) => { setAberto(id); setFiltroAbrir(null); try { sessionStorage.removeItem("rel_fluxo_filtro"); if (id) sessionStorage.setItem("rel_fluxo_aberto", id); else sessionStorage.removeItem("rel_fluxo_aberto"); } catch { /* sem storage */ } };
 
   async function criar() {
     try {
@@ -167,6 +169,7 @@ export default function FluxosRel({ est }: { est: EstadoRel | null }) {
         <style>{MKT_CSS}</style>
         <EditorFluxo fluxoId={aberto} onVoltar={() => { abrir(null); ler(); }}
           adaptador={adaptadorRel({
+            filtroInicial: filtroAbrir,
             extraBarra: (f, sujo) => (
               <Botao variante="primario" title="Mandar este fluxo pra um público"
                 onClick={() => {

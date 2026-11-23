@@ -25,7 +25,7 @@ import {
   COR_NOTA, ROTULO_TIPO, canalDo, novoId, noPadrao, saidasDoNo, validarGrafo,
   type Acao, type Fluxo, type Grafo, type Ligacao, type No, type TipoNo, type CampoPersonalizado,
 } from "./tipos";
-import { acao, estatisticas, lerFluxo, listarCampos, listarFluxos, listarModelos, listarUsuarios, salvarFluxo, type ModeloMkt } from "./api";
+import { acao, estatisticas, lerFluxo, listarCampos, listarFluxos, listarModelos, listarUsuarios, salvarFluxo, type EstatBloco, type ModeloMkt } from "./api";
 import { Aviso, Botao, COR, COR_SUAVE, Carregando, Chip, Modal } from "./ui";
 import PainelBloco from "./PainelBloco";
 import Simulacao, { type ResultadoSimulacao } from "./Simulacao";
@@ -59,7 +59,12 @@ export interface AdaptadorFluxo {
   lerFluxo: (id: string) => Promise<Fluxo | null>;
   listarFluxos: () => Promise<Fluxo[]>;
   salvarFluxo: (id: string, patch: Partial<Pick<Fluxo, "grafo" | "status" | "grafo_rascunho">>) => Promise<void>;
-  estatisticas: (id: string) => Promise<Awaited<ReturnType<typeof estatisticas>>>;
+  /** filtro = recorte dos números (ex.: um disparo); null = tudo. */
+  estatisticas: (id: string, filtro?: string | null) => Promise<Awaited<ReturnType<typeof estatisticas>>>;
+  /** 23/11 (0415): opções do "Números de:" na barra (ex.: cada disparo do fluxo). */
+  filtrosEstat?: (fluxoId: string) => Promise<{ id: string; rotulo: string }[]>;
+  /** Recorte já escolhido ao abrir (ex.: clicou no disparo no Histórico). */
+  filtroInicial?: string | null;
   listarModelos: () => Promise<{ modelos?: ModeloMkt[]; erro?: string; aviso?: string }>;
   listarUsuarios: () => Promise<{ id: string; name: string }[]>;
   listarCampos: () => Promise<CampoPersonalizado[]>;
@@ -109,7 +114,10 @@ export function resumoDoNo(no: No): string {
 const ICONE_MIDIA = { imagem: "📷 Imagem", video: "🎬 Vídeo", audio: "🎧 Áudio", documento: "📄 Documento" } as const;
 
 /** O balão do WhatsApp dentro do bloco (o que a pessoa vai ler). */
-function PreviaBalao({ no, modelos }: { no: No; modelos: ModeloMkt[] | null }) {
+function PreviaBalao({ no, modelos, st }: { no: No; modelos: ModeloMkt[] | null; st?: EstatBloco }) {
+  // 0415: com números de envio, a faixa Enviado/Entregue/Clicado ocupa o topo do balão (igual ManyChat).
+  const envio = st?.envio && (no.tipo === "template" || no.tipo === "mensagem") ? st.envio : null;
+  const cliques = envio ? cliquesDoBloco(no, st!) : 0;
   const linhas: ReactNode[] = [];
   if (no.tipo === "mensagem") {
     no.dados.blocos.forEach((b, i) => {
@@ -117,7 +125,7 @@ function PreviaBalao({ no, modelos }: { no: No; modelos: ModeloMkt[] | null }) {
       else linhas.push(<div key={i} className="font-semibold" style={{ color: "var(--ink2)" }}>{ICONE_MIDIA[b.tipo]}{"legenda" in b && b.legenda ? ` · ${b.legenda}` : ""}</div>);
     });
     const it = no.dados.interacao;
-    if (it?.tipo === "link") linhas.push(<div key="link" className="mt-1 font-semibold" style={{ color: "#0284C7" }}>🔗 {it.rotulo || "Abrir"}</div>);
+    if (it?.tipo === "link") linhas.push(<div key="link" className="mt-1 font-semibold" style={{ color: "#0284C7" }}>🔗 {it.rotulo || "Abrir"}{envio ? <span className="ml-1 font-normal">· CTR {pctTxt(envio.cliques, envio.entregues)}</span> : null}</div>);
     if (it?.tipo === "lista") linhas.push(<div key="lista" className="mt-1 font-semibold" style={{ color: "#0284C7" }}>☰ {it.rotuloBotao || "Ver opções"}</div>);
   } else if (no.tipo === "template") {
     const m = modelos?.find((x) => x.nome === no.dados.nome && x.idioma === no.dados.idioma) ?? modelos?.find((x) => x.nome === no.dados.nome);
@@ -130,12 +138,30 @@ function PreviaBalao({ no, modelos }: { no: No; modelos: ModeloMkt[] | null }) {
     if ((no.dados.sugestoes ?? []).length) linhas.push(<div key="s" className="mt-1 font-semibold" style={{ color: "#0284C7" }}>{no.dados.sugestoes!.join(" · ")}</div>);
   }
   return (
+    <>
+    {envio && (
+      <div className="mt-1 grid grid-cols-3 text-center leading-tight" style={{ height: FAIXA }} title={`${envio.enviadas} enviadas · ${envio.entregues} entregues · ${envio.lidas} lidas · ${cliques} clicaram`}>
+        <div><div className="text-[13px] font-semibold" style={{ color: "#2563EB" }}>{envio.enviadas}</div><div className="text-[9.5px]" style={{ color: "var(--ink3)" }}>Enviado</div></div>
+        <div><div className="text-[13px] font-semibold" style={{ color: "#2563EB" }}>{pctTxt(envio.entregues, envio.enviadas)}</div><div className="text-[9.5px]" style={{ color: "var(--ink3)" }}>Entregue</div></div>
+        <div><div className="text-[13px] font-semibold" style={{ color: "#2563EB" }}>{pctTxt(cliques, envio.entregues)}</div><div className="text-[9.5px]" style={{ color: "var(--ink3)" }}>Clicado</div></div>
+      </div>
+    )}
     <div className="relative mt-1 rounded-lg rounded-tl-none px-2 py-1.5 text-[12px] leading-snug overflow-hidden"
-      style={{ height: TOPO_PREVIA - 46, background: "color-mix(in srgb, #25D366 16%, var(--card))", color: "var(--ink)" }}>
+      style={{ height: TOPO_PREVIA - 46 - (envio ? FAIXA + 4 : 0), background: "color-mix(in srgb, #25D366 16%, var(--card))", color: "var(--ink)" }}>
       {linhas}
       <div className="absolute inset-x-0 bottom-0 h-5" style={{ background: "linear-gradient(transparent, color-mix(in srgb, #25D366 16%, var(--card)))" }} />
     </div>
+    </>
   );
+}
+
+const FAIXA = 30;
+/** 12,3% (ou — sem base). */
+const pctTxt = (n: number, de: number) => (de > 0 ? `${((n / de) * 100).toFixed(1).replace(".", ",")}%` : "—");
+/** Quem clicou no bloco: botões (saídas botao_*) + link rastreado. */
+function cliquesDoBloco(no: No, st: EstatBloco) {
+  const botoes = Object.entries(st.saidas).filter(([k]) => k.startsWith("botao_") || (no.tipo === "mensagem" && !["proximo", "sem_resposta", "falha", "pulou"].includes(k))).reduce((a, [, v]) => a + v, 0);
+  return botoes + (st.envio?.cliques ?? 0);
 }
 
 function useCelular() {
@@ -207,6 +233,8 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
   const [modelos, setModelos] = useState<ModeloMkt[] | null>(null);
   const [usuarios, setUsuarios] = useState<{ id: string; name: string }[]>([]);
   const [stats, setStats] = useState<Awaited<ReturnType<typeof estatisticas>>>(new Map());
+  const [filtro, setFiltro] = useState<string | null>(adaptador?.filtroInicial ?? null);
+  const [opcoesFiltro, setOpcoesFiltro] = useState<{ id: string; rotulo: string }[]>([]);
   const [ocupado, setOcupado] = useState(false);
   const [simulacao, setSimulacao] = useState<ResultadoSimulacao | null>(null);
   const [ligando, setLigando] = useState<{ de: string; saida: string; x: number; y: number } | null>(null);
@@ -233,7 +261,7 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
     let vivo = true;
     (async () => {
       try {
-        const [f, cs, fs, us, st] = await Promise.all([api.lerFluxo(fluxoId), api.listarCampos().catch(() => []), api.listarFluxos().catch(() => []), api.listarUsuarios().catch(() => []), api.estatisticas(fluxoId).catch(() => new Map())]);
+        const [f, cs, fs, us, st] = await Promise.all([api.lerFluxo(fluxoId), api.listarCampos().catch(() => []), api.listarFluxos().catch(() => []), api.listarUsuarios().catch(() => []), api.estatisticas(fluxoId, filtro).catch(() => new Map())]);
         if (!vivo) return;
         if (!f) { notifyError("Fluxo não encontrado."); onVoltarRef.current(); return; }
         setFluxo(f);
@@ -249,6 +277,21 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
       }
     })();
     return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fluxoId]);
+
+  // 0415: números ao vivo (30 s) e no recorte escolhido ("Números de:").
+  useEffect(() => {
+    let vivo = true;
+    const ler = () => void api.estatisticas(fluxoId, filtro).then((st) => { if (vivo) setStats(st); }).catch(() => null);
+    ler();
+    const t = setInterval(ler, 30_000);
+    return () => { vivo = false; clearInterval(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fluxoId, filtro]);
+  useEffect(() => {
+    if (!api.filtrosEstat) return;
+    void api.filtrosEstat(fluxoId).then(setOpcoesFiltro).catch(() => setOpcoesFiltro([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fluxoId]);
 
@@ -579,6 +622,15 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
         </>
       )}
       {api.extraBarra?.(fluxo, sujo)}
+      {api.filtrosEstat && (
+        <label className="flex items-center gap-1.5 text-[12px]" style={{ color: "var(--ink3)" }}>
+          Números de:
+          <select className="mkt-input" style={{ width: "auto", padding: "4px 8px" }} value={filtro ?? ""} onChange={(e) => setFiltro(e.target.value || null)}>
+            <option value="">Todos os envios</option>
+            {opcoesFiltro.map((o) => <option key={o.id} value={o.id}>{o.rotulo}</option>)}
+          </select>
+        </label>
+      )}
     </div>
   );
 
@@ -737,7 +789,7 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
                     {COM_PREVIA.includes(no.tipo) ? (
                       <>
                         <div className="text-[12px] font-semibold truncate" style={{ color: "var(--ink)" }}>{no.titulo || " "}</div>
-                        <PreviaBalao no={no} modelos={modelos} />
+                        <PreviaBalao no={no} modelos={modelos} st={st} />
                       </>
                     ) : (
                       <div className="text-[12.5px] leading-tight mt-0.5 overflow-hidden" style={{ color: "var(--ink)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
@@ -748,11 +800,12 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
                   {saidas.map((s) => {
                     const botao = !s.secundaria && (no.tipo === "template" ? s.id.startsWith("botao_") : no.tipo === "mensagem" && (no.dados.interacao?.tipo === "botoes" || no.dados.interacao?.tipo === "lista"));
                     const pct = st?.entrou && st.saidas[s.id] ? Math.round((st.saidas[s.id] / st.entrou) * 100) : null;
+                    const ctr = botao && st?.envio?.entregues ? pctTxt(st.saidas[s.id] ?? 0, st.envio.entregues) : null;
                     const raio = ((no.dados as { acoesSaida?: Record<string, unknown[]> }).acoesSaida?.[s.id]?.length ?? 0) > 0 ? "⚡ " : "";
                     return (
                       <div key={s.id} className="relative flex items-center justify-end pr-4 text-[11.5px] border-t" style={{ height: LINHA, borderColor: "var(--line)", color: s.secundaria ? "var(--ink3)" : "var(--ink2)" }}>
                         {botao
-                          ? <span className="mx-2 flex-1 truncate rounded-md text-center font-semibold" style={{ color: "#0284C7", background: "color-mix(in srgb, #0284C7 8%, var(--card))" }}>{raio}{s.rotulo}{st?.saidas[s.id] ? ` · ${st.saidas[s.id]}${pct !== null ? ` (${pct}%)` : ""}` : ""}</span>
+                          ? <span className="mx-2 flex-1 truncate rounded-md text-center font-semibold" style={{ color: "#0284C7", background: "color-mix(in srgb, #0284C7 8%, var(--card))" }}>{raio}{s.rotulo}{ctr ? <span className="font-normal"> · CTR {ctr}</span> : st?.saidas[s.id] ? ` · ${st.saidas[s.id]}${pct !== null ? ` (${pct}%)` : ""}` : ""}</span>
                           : <span className="truncate">{raio}{s.rotulo}{st?.saidas[s.id] ? ` · ${st.saidas[s.id]}` : ""}</span>}
                         <span role="button" tabIndex={0} aria-label={`Ligar a saída ${s.rotulo}`}
                           className="absolute rounded-full cursor-crosshair" style={{ right: -7, top: LINHA / 2 - 7, width: 14, height: 14, background: s.secundaria ? "var(--card)" : COR, border: `2px solid ${COR}` }}
