@@ -56,8 +56,8 @@ grant execute on function rel_fluxo_estatisticas_recorte(uuid, uuid, boolean) to
 -- minuto) | simples (disparo simples do Rel). id = o disparo/campanha (nulo no teste).
 create or replace function rel_disparos_historico(p_limite int default 30)
 returns table (tipo text, id uuid, nome text, fluxo_id uuid, inicio timestamptz, status text,
-               pessoas bigint, enviadas bigint, entregues bigint, lidas bigint, clicaram bigint)
-language sql stable security definer set search_path = public as $$
+               pessoas bigint, enviadas bigint, entregues bigint, lidas bigint, clicaram bigint, total bigint)
+language sql stable security definer set search_path = public as $
   with x as (
     select x.id, x.fluxo_id, x.disparo_id, x.iniciada_em,
            coalesce(x.disparo_id::text, 'teste:' || x.fluxo_id || ':' || to_char(date_trunc('minute', x.iniciada_em), 'YYYYMMDDHH24MI')) grupo
@@ -106,7 +106,7 @@ language sql stable security definer set search_path = public as $$
      where c.setor = 'relacionamento' and rel_tem_acesso()
      group by c.id
   )
-  select * from linhas order by inicio desc nulls last limit greatest(1, least(p_limite, 200));
+  select linhas.*, count(*) over () total from linhas order by inicio desc nulls last limit greatest(1, least(p_limite, 200));
 $$;
 revoke all on function rel_disparos_historico(int) from public, anon;
 grant execute on function rel_disparos_historico(int) to authenticated;

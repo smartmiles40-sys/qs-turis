@@ -115,11 +115,13 @@ async function filtrosDoFluxo(fluxoId: string) {
 export interface LinhaHistorico {
   tipo: "fluxo" | "teste" | "simples"; id: string | null; nome: string; fluxo_id: string | null; inicio: string | null; status: string;
   pessoas: number; enviadas: number; entregues: number; lidas: number; clicaram: number;
+  /** Quantas linhas o histórico tem ao todo ("Veja todas as N"). */
+  total: number;
 }
 export async function historicoDisparos(limite = 30): Promise<LinhaHistorico[]> {
   const { data, error } = await supabase.rpc("rel_disparos_historico", { p_limite: limite });
   if (error) throw new Error(/rel_disparos_historico|schema cache/i.test(error.message) ? "O histórico precisa da migration 0415 aplicada no banco." : error.message);
-  return ((data ?? []) as LinhaHistorico[]).map((l) => ({ ...l, pessoas: Number(l.pessoas), enviadas: Number(l.enviadas), entregues: Number(l.entregues), lidas: Number(l.lidas), clicaram: Number(l.clicaram) }));
+  return ((data ?? []) as LinhaHistorico[]).map((l) => ({ ...l, pessoas: Number(l.pessoas), enviadas: Number(l.enviadas), entregues: Number(l.entregues), lidas: Number(l.lidas), clicaram: Number(l.clicaram), total: Number(l.total) }));
 }
 
 // ── Disparar o fluxo ────────────────────────────────────────────────────────

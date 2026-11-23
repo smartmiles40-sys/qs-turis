@@ -23,18 +23,22 @@ import { escalaTela } from "@/lib/escala";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import {
   COR_NOTA, ROTULO_TIPO, canalDo, novoId, noPadrao, saidasDoNo, validarGrafo,
-  type Acao, type Fluxo, type Grafo, type Ligacao, type No, type TipoNo, type CampoPersonalizado,
+  type Acao, type Fluxo, type Grafo, type Ligacao, type No, type Saida, type TipoNo, type CampoPersonalizado,
 } from "./tipos";
 import { acao, estatisticas, lerFluxo, listarCampos, listarFluxos, listarModelos, listarUsuarios, salvarFluxo, type EstatBloco, type ModeloMkt } from "./api";
 import { Aviso, Botao, COR, COR_SUAVE, Carregando, Chip, Modal } from "./ui";
 import PainelBloco from "./PainelBloco";
 import Simulacao, { type ResultadoSimulacao } from "./Simulacao";
 import RelatorioFluxo from "./RelatorioFluxo";
+import IconeWhatsApp from "@/components/ui/IconeWhatsApp";
 
 const LARGURA = 250;
-const TOPO = 64;          // cabeçalho + resumo do bloco
-const TOPO_PREVIA = 150;  // blocos que mostram o balão (mensagem, template, pergunta)
-const LINHA = 26;         // cada saída
+const TOPO = 84;          // cabeçalho + resumo do bloco
+const TOPO_PREVIA = 176;  // blocos que mostram o balão (mensagem, template, pergunta)
+const LINHA = 30;         // cada saída
+const CAB = 50;           // cabeçalho (ícone + "WhatsApp" + título) — 23/11 visual igual ManyChat
+const BALAO = "color-mix(in srgb, var(--ink) 5%, var(--card))";
+const AZUL = "#3B82F6";
 const NOTA = { w: 240, h: 130 };
 const PAPEL = { w: 4000, h: 3000 };
 const HISTORICO_MAX = 100;
@@ -114,19 +118,28 @@ export function resumoDoNo(no: No): string {
 const ICONE_MIDIA = { imagem: "📷 Imagem", video: "🎬 Vídeo", audio: "🎧 Áudio", documento: "📄 Documento" } as const;
 
 /** O balão do WhatsApp dentro do bloco (o que a pessoa vai ler). */
-function PreviaBalao({ no, modelos, st }: { no: No; modelos: ModeloMkt[] | null; st?: EstatBloco }) {
-  // 0415: com números de envio, a faixa Enviado/Entregue/Clicado ocupa o topo do balão (igual ManyChat).
+function PreviaBalao({ no, modelos, st, colado, topo }: { no: No; modelos: ModeloMkt[] | null; st?: EstatBloco; colado: boolean; topo: number }) {
+  // Faixa Enviado / Entregue / Clicado no topo do bloco (igual ManyChat).
   const envio = st?.envio && (no.tipo === "template" || no.tipo === "mensagem") ? st.envio : null;
   const cliques = envio ? cliquesDoBloco(no, st!) : 0;
   const linhas: ReactNode[] = [];
+  let link: ReactNode = null;
   if (no.tipo === "mensagem") {
     no.dados.blocos.forEach((b, i) => {
       if (b.tipo === "texto") linhas.push(<div key={i} className="whitespace-pre-wrap">{b.texto || <i style={{ color: "var(--ink3)" }}>(texto vazio)</i>}</div>);
       else linhas.push(<div key={i} className="font-semibold" style={{ color: "var(--ink2)" }}>{ICONE_MIDIA[b.tipo]}{"legenda" in b && b.legenda ? ` · ${b.legenda}` : ""}</div>);
     });
     const it = no.dados.interacao;
-    if (it?.tipo === "link") linhas.push(<div key="link" className="mt-1 font-semibold" style={{ color: "#0284C7" }}>🔗 {it.rotulo || "Abrir"}{envio ? <span className="ml-1 font-normal">· CTR {pctTxt(envio.cliques, envio.entregues)}</span> : null}</div>);
-    if (it?.tipo === "lista") linhas.push(<div key="lista" className="mt-1 font-semibold" style={{ color: "#0284C7" }}>☰ {it.rotuloBotao || "Ver opções"}</div>);
+    if (it?.tipo === "link") {
+      link = (
+        <div className="absolute inset-x-2 bottom-2 flex h-[26px] items-center justify-center gap-1.5 rounded-md text-[12px]" style={{ background: "var(--card)", border: "1px solid var(--line)" }}>
+          <span className="truncate" style={{ maxWidth: 110 }}>{it.rotulo || "Abrir"}</span>
+          {envio && <span style={{ color: AZUL }}>CTR {pctTxt(envio.cliques, envio.entregues, 0)}</span>}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={AZUL} strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" /><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></svg>
+        </div>
+      );
+    }
+    if (it?.tipo === "lista") linhas.push(<div key="lista" className="mt-1 font-semibold" style={{ color: AZUL }}>☰ {it.rotuloBotao || "Ver opções"}</div>);
   } else if (no.tipo === "template") {
     const m = modelos?.find((x) => x.nome === no.dados.nome && x.idioma === no.dados.idioma) ?? modelos?.find((x) => x.nome === no.dados.nome);
     const corpo = m ? m.corpo.replace(/\{\{(\d+)\}\}/g, (_, n: string) => no.dados.variaveis?.[n] || `{{${n}}}`) : "";
@@ -135,33 +148,90 @@ function PreviaBalao({ no, modelos, st }: { no: No; modelos: ModeloMkt[] | null;
       : <i key="t" style={{ color: "var(--ink3)" }}>(escolha o modelo)</i>);
   } else if (no.tipo === "pergunta") {
     linhas.push(<div key="p" className="whitespace-pre-wrap">{no.dados.pergunta || <i style={{ color: "var(--ink3)" }}>(escreva a pergunta)</i>}</div>);
-    if ((no.dados.sugestoes ?? []).length) linhas.push(<div key="s" className="mt-1 font-semibold" style={{ color: "#0284C7" }}>{no.dados.sugestoes!.join(" · ")}</div>);
+    if ((no.dados.sugestoes ?? []).length) linhas.push(<div key="s" className="mt-1 font-semibold" style={{ color: AZUL }}>{no.dados.sugestoes!.join(" · ")}</div>);
   }
+  const altura = topo - CAB - (envio ? FAIXA : 0) - (colado ? 0 : 10);
   return (
     <>
-    {envio && (
-      <div className="mt-1 grid grid-cols-3 text-center leading-tight" style={{ height: FAIXA }} title={`${envio.enviadas} enviadas · ${envio.entregues} entregues · ${envio.lidas} lidas · ${cliques} clicaram`}>
-        <div><div className="text-[13px] font-semibold" style={{ color: "#2563EB" }}>{envio.enviadas}</div><div className="text-[9.5px]" style={{ color: "var(--ink3)" }}>Enviado</div></div>
-        <div><div className="text-[13px] font-semibold" style={{ color: "#2563EB" }}>{pctTxt(envio.entregues, envio.enviadas)}</div><div className="text-[9.5px]" style={{ color: "var(--ink3)" }}>Entregue</div></div>
-        <div><div className="text-[13px] font-semibold" style={{ color: "#2563EB" }}>{pctTxt(cliques, envio.entregues)}</div><div className="text-[9.5px]" style={{ color: "var(--ink3)" }}>Clicado</div></div>
+      {envio && (
+        <div className="grid grid-cols-3 text-center" style={{ height: FAIXA }} title={`${envio.enviadas} enviadas · ${envio.entregues} entregues · ${envio.lidas} lidas · ${cliques} clicaram`}>
+          {[[String(envio.enviadas), "Enviado"], [pctTxt(envio.entregues, envio.enviadas), "Entregue"], [pctTxt(cliques, envio.entregues), "Clicado"]].map(([v, r]) => (
+            <div key={r} className="leading-tight">
+              <div className="text-[15px]" style={{ color: AZUL }}>{v}</div>
+              <div className="text-[10.5px]" style={{ color: "var(--ink3)" }}>{r}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className={`relative px-2.5 py-2 text-[12px] leading-snug overflow-hidden ${colado ? "rounded-t-xl" : "rounded-xl"}`}
+        style={{ height: altura, background: BALAO, color: "var(--ink)" }}>
+        {linhas}
+        <div className="absolute inset-x-0 h-6" style={{ bottom: link ? 36 : 0, background: `linear-gradient(transparent, ${BALAO})` }} />
+        {link && <div className="absolute inset-x-0 bottom-0 h-9" style={{ background: BALAO }} />}
+        {link}
       </div>
-    )}
-    <div className="relative mt-1 rounded-lg rounded-tl-none px-2 py-1.5 text-[12px] leading-snug overflow-hidden"
-      style={{ height: TOPO_PREVIA - 46 - (envio ? FAIXA + 4 : 0), background: "color-mix(in srgb, #25D366 16%, var(--card))", color: "var(--ink)" }}>
-      {linhas}
-      <div className="absolute inset-x-0 bottom-0 h-5" style={{ background: "linear-gradient(transparent, color-mix(in srgb, #25D366 16%, var(--card)))" }} />
-    </div>
     </>
   );
 }
 
-const FAIXA = 30;
+const FAIXA = 40;
 /** 12,3% (ou — sem base). */
-const pctTxt = (n: number, de: number) => (de > 0 ? `${((n / de) * 100).toFixed(1).replace(".", ",")}%` : "—");
+const pctTxt = (n: number, de: number, casas = 1) => (de > 0 ? `${((n / de) * 100).toFixed(casas).replace(".", ",")}%` : "—");
 /** Quem clicou no bloco: botões (saídas botao_*) + link rastreado. */
 function cliquesDoBloco(no: No, st: EstatBloco) {
-  const botoes = Object.entries(st.saidas).filter(([k]) => k.startsWith("botao_") || (no.tipo === "mensagem" && !["proximo", "sem_resposta", "falha", "pulou"].includes(k))).reduce((a, [, v]) => a + v, 0);
+  const botoes = Object.entries(st.saidas).filter(([k]) => k.startsWith("botao_") || (no.tipo === "mensagem" && !["proximo", "sem_resposta", "falha", "pulou", "texto_livre", "janela_fechada"].includes(k))).reduce((a, [, v]) => a + v, 0);
   return botoes + (st.envio?.cliques ?? 0);
+}
+
+/** É um botão do balão (vai DENTRO do balão, como no ManyChat)? */
+function ehBotaoDoBalao(no: No, s: Saida) {
+  if (s.secundaria) return false;
+  if (no.tipo === "template") return s.id.startsWith("botao_");
+  return no.tipo === "mensagem" && (no.dados.interacao?.tipo === "botoes" || no.dados.interacao?.tipo === "lista");
+}
+/** Ordem na tela: botões do balão primeiro, "Próximo Passo" por último (igual ManyChat). */
+function saidasNo(no: No): Saida[] {
+  const todas = saidasDoNo(no);
+  const botoes = todas.filter((x) => ehBotaoDoBalao(no, x));
+  const resto = todas.filter((x) => !ehBotaoDoBalao(no, x));
+  return [...botoes, ...resto.filter((x) => x.id !== "proximo"), ...resto.filter((x) => x.id === "proximo")];
+}
+const rotuloSaida = (no: No, s: Saida) => (s.id === "proximo" ? (no.tipo === "inicio" ? "Então" : "Próximo Passo") : s.rotulo);
+
+/** Cabeçalho do bloco: bolinha do WhatsApp + "WhatsApp" + título (template/mensagem), ou ícone do tipo. */
+function CabecalhoBloco({ no, canal, st }: { no: No; canal: string; st?: EstatBloco }) {
+  if (no.tipo === "template" || no.tipo === "mensagem") {
+    const titulo = no.titulo || (no.tipo === "template" ? no.dados.nome || "Template" : "Enviar Mensagem");
+    return (
+      <div className="flex items-center gap-2" style={{ height: CAB }}>
+        {canal === "instagram"
+          ? <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] text-white" style={{ background: "linear-gradient(45deg,#F58529,#DD2A7B,#8134AF)" }}>◎</span>
+          : <IconeWhatsApp tamanho={24} />}
+        <div className="min-w-0 flex-1 leading-tight">
+          <div className="text-[10px]" style={{ color: "var(--ink3)" }}>{canal === "instagram" ? "Instagram" : "WhatsApp"}</div>
+          <div className="truncate text-[13.5px]" style={{ color: "var(--ink)" }}>{titulo}</div>
+        </div>
+        {no.tipo === "template" && (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="1.8" aria-label="Modelo aprovado"><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" /></svg>
+        )}
+      </div>
+    );
+  }
+  if (no.tipo === "inicio") {
+    return (
+      <div className="flex items-center gap-2 text-[13.5px]" style={{ height: CAB, color: "var(--ink)" }}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" /></svg>
+        Quando...
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2" style={{ height: CAB }}>
+      <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: COR_TIPO[no.tipo] }}>{ROTULO_TIPO[no.tipo].slice(0, 1)}</span>
+      <div className="min-w-0 flex-1 truncate text-[13.5px]" style={{ color: "var(--ink)" }}>{no.titulo || ROTULO_TIPO[no.tipo]}</div>
+      {st && <span className="text-[10.5px]" style={{ color: "var(--ink3)" }} title={tituloEstat(st)}>{st.entrou} ▸</span>}
+    </div>
+  );
 }
 
 function useCelular() {
@@ -186,7 +256,7 @@ function ordemDoFluxo(g: Grafo): No[] {
     const no = g.nos.find((n) => n.id === id);
     if (!no) continue;
     out.push(no);
-    for (const s of saidasDoNo(no)) {
+    for (const s of saidasNo(no)) {
       const l = g.ligacoes.find((x) => x.de === id && x.saida === s.id);
       if (l) fila.push(l.para);
     }
@@ -473,7 +543,7 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
         else {
           const dentro = grafoRef.current.nos.filter((n) => {
             const w = n.tipo === "nota" ? NOTA.w : LARGURA;
-            const h = n.tipo === "nota" ? NOTA.h : topoDe(n) + saidasDoNo(n).length * LINHA;
+            const h = n.tipo === "nota" ? NOTA.h : topoDe(n) + saidasNo(n).length * LINHA;
             return n.x < x2 && n.x + w > x1 && n.y < y2 && n.y + h > y1;
           }).map((n) => n.id);
           setSelecao((s) => (a.somar ? [...new Set([...s, ...dentro])] : dentro));
@@ -578,7 +648,7 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
   if (!fluxo) return <Carregando />;
 
   const posSaida = (no: No, i: number) => ({ x: no.x + LARGURA, y: no.y + topoDe(no) + i * LINHA + LINHA / 2 });
-  const posEntrada = (no: No) => ({ x: no.x, y: no.y + 20 });
+  const posEntrada = (no: No) => ({ x: no.x, y: no.y + 26 });
   const curva = (a: { x: number; y: number }, b: { x: number; y: number }) => {
     const dx = Math.max(40, Math.abs(b.x - a.x) / 2);
     return `M ${a.x} ${a.y} C ${a.x + dx} ${a.y}, ${b.x - dx} ${b.y}, ${b.x} ${b.y}`;
@@ -706,7 +776,7 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
                   <div className="text-[11px] font-bold uppercase" style={{ color: COR_TIPO[no.tipo] }}>{ROTULO_TIPO[no.tipo]}{st ? ` · ${st.entrou} entraram` : ""}</div>
                   <div className="text-[13px] font-semibold whitespace-pre-wrap" style={{ color: no.tipo === "nota" ? "#1F2937" : "var(--ink)" }}>{no.titulo || resumoDoNo(no)}</div>
                 </button>
-                {saidasDoNo(no).map((s) => {
+                {saidasNo(no).map((s) => {
                   const l = grafo.ligacoes.find((x) => x.de === no.id && x.saida === s.id);
                   return (
                     <label key={s.id} className="flex items-center gap-2 mt-1.5 text-[12px]" style={{ color: s.secundaria ? "var(--ink3)" : "var(--ink2)" }}>
@@ -735,7 +805,7 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
     <div>
       {barra}{paleta}{ajudaIg}{listaProblemas}
       <div className="flex gap-3" style={{ height: "calc(calc(100vh/var(--qs-zoom,1)) - 230px)", minHeight: 460 }}>
-        <div ref={telaRef} className="mkt-card flex-1 overflow-auto relative" style={{ background: "var(--bg)", backgroundImage: "radial-gradient(var(--line) 1px, transparent 1px)", backgroundSize: `${20 * zoom}px ${20 * zoom}px`, cursor: arrasto.current?.tipo === "quadro" ? "grabbing" : "default" }}
+        <div ref={telaRef} className="mkt-card flex-1 overflow-auto relative" style={{ background: "color-mix(in srgb, var(--ink) 3%, var(--bg))", cursor: arrasto.current?.tipo === "quadro" ? "grabbing" : "default" }}
           onPointerDown={pegarQuadro}>
           <div ref={papelRef} style={{ width: PAPEL.w, height: PAPEL.h, transform: `scale(${zoom})`, transformOrigin: "0 0", position: "relative" }}>
             <svg width={PAPEL.w} height={PAPEL.h} style={{ position: "absolute", inset: 0 }}>
@@ -743,7 +813,7 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
                 const de = grafo.nos.find((n) => n.id === l.de);
                 const para = grafo.nos.find((n) => n.id === l.para);
                 if (!de || !para) return null;
-                const i = saidasDoNo(de).findIndex((s) => s.id === l.saida);
+                const i = saidasNo(de).findIndex((s) => s.id === l.saida);
                 if (i < 0) return null;
                 const d = curva(posSaida(de, i), posEntrada(para));
                 const ativa = setaSel === l.id;
@@ -756,7 +826,7 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
               })}
               {ligando && (() => {
                 const de = grafo.nos.find((n) => n.id === ligando.de);
-                const i = de ? saidasDoNo(de).findIndex((s) => s.id === ligando.saida) : -1;
+                const i = de ? saidasNo(de).findIndex((s) => s.id === ligando.saida) : -1;
                 return de && i >= 0 ? <path d={curva(posSaida(de, i), { x: ligando.x, y: ligando.y })} stroke={COR} strokeDasharray="5 4" strokeWidth={2} fill="none" /> : null;
               })()}
               <defs><marker id="seta" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--ink3)" /></marker></defs>
@@ -774,46 +844,57 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
                 );
               }
               const st = stats.get(no.id);
-              const saidas = saidasDoNo(no);
+              const saidas = saidasNo(no);
               const temProblema = problemas.some((p) => p.noId === no.id && p.grave);
               const topo = topoDe(no);
+              const nBotoes = saidas.filter((x) => ehBotaoDoBalao(no, x)).length;
               return (
-                <div key={no.id} data-no-id={no.id} className="absolute rounded-xl shadow-sm select-none"
-                  style={{ left: no.x, top: no.y, width: LARGURA, background: "var(--card)", border: `${marcado ? 2 : 1}px solid ${marcado ? COR : temProblema ? "#DC2626" : "var(--line)"}` }}>
-                  <span className="absolute rounded-full" style={{ left: -6, top: 14, width: 12, height: 12, background: "var(--card)", border: "2px solid var(--ink3)" }} aria-hidden />
-                  <div className="px-3 pt-2 cursor-grab active:cursor-grabbing" style={{ height: topo }} onPointerDown={(e) => pegarBloco(e, no)}>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: COR_TIPO[no.tipo] }}>{ROTULO_TIPO[no.tipo]}</span>
-                      {st && <span className="ml-auto text-[10.5px] font-semibold whitespace-nowrap" style={{ color: "var(--ink3)" }} title={tituloEstat(st)}>{st.entrou} ▸{st.envio?.enviadas ? ` · ✓✓${st.envio.entregues} · 👁${st.envio.lidas}${st.envio.cliques ? ` · 🔗${st.envio.cliques}` : ""}` : ""}{st.erros ? ` · ${st.erros} erro` : ""}</span>}
-                    </div>
+                <div key={no.id} data-no-id={no.id} className="absolute select-none"
+                  style={{ left: no.x, top: no.y, width: LARGURA, background: "var(--card)", borderRadius: 16, boxShadow: "0 1px 3px rgba(0,0,0,.07)", border: `${marcado ? 2 : 1}px solid ${marcado ? AZUL : temProblema ? "#DC2626" : "var(--line)"}` }}>
+                  <div className="px-3 cursor-grab active:cursor-grabbing" style={{ height: topo }} onPointerDown={(e) => pegarBloco(e, no)}>
+                    <CabecalhoBloco no={no} canal={canal} st={st} />
                     {COM_PREVIA.includes(no.tipo) ? (
-                      <>
-                        <div className="text-[12px] font-semibold truncate" style={{ color: "var(--ink)" }}>{no.titulo || " "}</div>
-                        <PreviaBalao no={no} modelos={modelos} st={st} />
-                      </>
+                      <PreviaBalao no={no} modelos={modelos} st={st} colado={nBotoes > 0} topo={topo} />
+                    ) : no.tipo === "inicio" ? (
+                      <div className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px]" style={{ background: "color-mix(in srgb, #22C55E 16%, var(--card))", color: "var(--ink)" }}>
+                        <span aria-hidden>➤</span><span className="truncate">{resumoDoNo(no)}</span>
+                      </div>
                     ) : (
-                      <div className="text-[12.5px] leading-tight mt-0.5 overflow-hidden" style={{ color: "var(--ink)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-                        {no.titulo ? <strong>{no.titulo}: </strong> : null}{resumoDoNo(no)}
+                      <div className="rounded-lg px-2.5 py-1.5 text-[12px] leading-snug overflow-hidden" style={{ background: BALAO, color: "var(--ink)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                        {resumoDoNo(no)}
                       </div>
                     )}
                   </div>
-                  {saidas.map((s) => {
-                    const botao = !s.secundaria && (no.tipo === "template" ? s.id.startsWith("botao_") : no.tipo === "mensagem" && (no.dados.interacao?.tipo === "botoes" || no.dados.interacao?.tipo === "lista"));
-                    const pct = st?.entrou && st.saidas[s.id] ? Math.round((st.saidas[s.id] / st.entrou) * 100) : null;
-                    const ctr = botao && st?.envio?.entregues ? pctTxt(st.saidas[s.id] ?? 0, st.envio.entregues) : null;
+                  {saidas.map((s, i) => {
+                    const botao = ehBotaoDoBalao(no, s);
+                    const ultimoBotao = botao && i === nBotoes - 1;
+                    const n = st?.saidas[s.id] ?? 0;
+                    const ctr = botao && st?.envio?.entregues ? pctTxt(n, st.envio.entregues, 0) : null;
                     const raio = ((no.dados as { acoesSaida?: Record<string, unknown[]> }).acoesSaida?.[s.id]?.length ?? 0) > 0 ? "⚡ " : "";
-                    return (
-                      <div key={s.id} className="relative flex items-center justify-end pr-4 text-[11.5px] border-t" style={{ height: LINHA, borderColor: "var(--line)", color: s.secundaria ? "var(--ink3)" : "var(--ink2)" }}>
-                        {botao
-                          ? <span className="mx-2 flex-1 truncate rounded-md text-center font-semibold" style={{ color: "#0284C7", background: "color-mix(in srgb, #0284C7 8%, var(--card))" }}>{raio}{s.rotulo}{ctr ? <span className="font-normal"> · CTR {ctr}</span> : st?.saidas[s.id] ? ` · ${st.saidas[s.id]}${pct !== null ? ` (${pct}%)` : ""}` : ""}</span>
-                          : <span className="truncate">{raio}{s.rotulo}{st?.saidas[s.id] ? ` · ${st.saidas[s.id]}` : ""}</span>}
-                        <span role="button" tabIndex={0} aria-label={`Ligar a saída ${s.rotulo}`}
-                          className="absolute rounded-full cursor-crosshair" style={{ right: -7, top: LINHA / 2 - 7, width: 14, height: 14, background: s.secundaria ? "var(--card)" : COR, border: `2px solid ${COR}` }}
-                          onPointerDown={(e) => {
-                            e.stopPropagation();
-                            const p = posSaida(no, saidas.indexOf(s));
-                            setLigando({ de: no.id, saida: s.id, x: p.x, y: p.y });
-                          }} />
+                    const bolinha = (
+                      <span role="button" tabIndex={0} aria-label={`Ligar a saída ${rotuloSaida(no, s)}`}
+                        className="absolute rounded-full cursor-crosshair" style={{ right: -6, top: LINHA / 2 - 6, width: 12, height: 12, background: botao ? "#6B7280" : "var(--card)", border: "2px solid #6B7280" }}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          const p = posSaida(no, saidas.indexOf(s));
+                          setLigando({ de: no.id, saida: s.id, x: p.x, y: p.y });
+                        }} />
+                    );
+                    return botao ? (
+                      <div key={s.id} className="relative px-3" style={{ height: LINHA }}>
+                        <div className={`flex h-full items-center px-2 ${ultimoBotao ? "rounded-b-xl pb-1" : ""}`} style={{ background: BALAO }}>
+                          <div className="flex h-[24px] w-full items-center justify-center gap-1.5 rounded-md text-[12px]" style={{ background: "var(--card)", border: "1px solid var(--line)", color: "var(--ink)" }}
+                            title={n ? `${n} tocaram` : undefined}>
+                            <span className="truncate">{raio}{s.rotulo}</span>
+                            {ctr ? <span className="shrink-0" style={{ color: AZUL }}>CTR {ctr}</span> : n ? <span className="shrink-0" style={{ color: AZUL }}>{n}</span> : null}
+                          </div>
+                        </div>
+                        {bolinha}
+                      </div>
+                    ) : (
+                      <div key={s.id} className="relative flex items-center justify-end pr-4 text-[12px]" style={{ height: LINHA, color: "var(--ink3)" }}>
+                        <span className="truncate">{raio}{rotuloSaida(no, s)}{n ? ` · ${n}` : ""}</span>
+                        {bolinha}
                       </div>
                     );
                   })}
