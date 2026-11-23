@@ -51,7 +51,7 @@ import {
 import { acaoMarketing, acordarAgendadas, lerNumeroMkt, rodarRecorrencias, rodarSequencias } from './_mktDisparo.js';
 import { acaoMktOficial, juntarModelosMkt, rodadaMkt } from './_mktDisparoOficial.js';
 import { conferirExtra } from './_mktOficialRegras.js';
-import { acaoRelOficial, estadoRel, juntarModelosRel, lerConfigRel, numeroDoDisparo, numerosTesteRel, registrarClique, rodadaRel } from './_relDisparoOficial.js';
+import { acaoRelOficial, estadoRel, juntarModelosRel, lerConfigRel, numeroDoDisparo, numerosTesteRel, registrarClique, registrarTeste, rodadaRel } from './_relDisparoOficial.js';
 import { conferirRespostas, urlSegura } from './_relDisparoRegras.js';
 import { rodadaFluxosRel, iniciarTesteRel, agendarDisparoFluxo, cancelarDisparoFluxo, modelosParaFluxo } from './_relFluxoMotor.js';
 import { simularFluxo } from './_mktAutoRegras.js';
@@ -203,6 +203,7 @@ export default async function handler(req, res) {
       const enviados = [], erros = [];
       for (const n of lista) {
         const r = await iniciarTesteRel({ fluxoId: String(body.fluxoId || ''), telefone: n.telefone, nome: n.nome });
+        await registrarTeste({ u, origem: 'fluxo', telefone: n.telefone, modelo: body.fluxoNome || 'fluxo', r });
         if (r.erro) erros.push({ nome: n.nome, erro: r.erro }); else enviados.push(n.nome);
         if (r.erro && /travado|não encontrado|Template|Ligue/i.test(r.erro)) break; // problema do fluxo/trava: igual pra todos
       }
@@ -213,6 +214,7 @@ export default async function handler(req, res) {
       const telefone = body.telefone || u.whatsapp_number;
       if (!telefone) return res.status(400).json({ error: 'Informe o número pra testar (ou cadastre seu WhatsApp no perfil do QS).' });
       const r = await iniciarTesteRel({ fluxoId: String(body.fluxoId || ''), telefone, nome: u.name });
+      await registrarTeste({ u, origem: 'fluxo', telefone, modelo: body.fluxoNome || 'fluxo', r });
       if (r.erro) return res.status(422).json({ error: r.erro });
       return res.status(200).json({ ok: true, ...r });
     }

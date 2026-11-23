@@ -423,8 +423,61 @@ export async function enviarTeste({ telefone, campanha, nomeTeste }) {
     envioId: null,
   });
   if (!r.wamid) return { erro: r.erro ? classificarErroMeta(r.codigo, r.erro).motivo : 'A Meta recusou.' };
+  r.phone_number_id = numero.phone_number_id;
   if (numero.tipo === 'relacionamento') await bolhaNaConversa({ phoneId: cr.phoneId || numero.phone_number_id, telefone: tel, wamid: r.wamid, texto: r.texto, campanha: { ...campanha, nome: `TESTE ${campanha.nome || ''}` } });
   return { ok: true, wamid: r.wamid };
+}
+
+/**
+ * 0412: guarda cada teste (deu certo ou o MOTIVO), pra aba Acompanhar. Nunca lança
+ * (sem a 0412 aplicada só não guarda).
+ */
+export async function registrarTeste({ u, origem = 'disparo', telefone, phoneId = null, modelo = null, r }) {
+  await rest('rel_disparo_testes', {
+    method: 'POST', prefer: 'return=minimal',
+    body: {
+      user_id: u?.id || null, user_nome: u?.name || null, origem,
+      telefone: String(telefone || '').replace(/\D/g, '').slice(0, 20) || null,
+      phone_number_id: r?.phone_number_id || phoneId || null, modelo_nome: modelo ? String(modelo).slice(0, 120) : null,
+      ok: !r?.erro, erro: r?.erro ? String(r.erro).slice(0, 400) : null, wamid: r?.wamid || null, status: r?.wamid ? 'sent' : null,
+    },
+  }).catch((e) => console.warn('[rel-disparo] teste não registrado (0412?):', e?.message));
+}
+
+const mascarar = (t) => (t ? `…${String(t).replace(/\D/g, '').slice(-4)}` : null);
+
+/** 0412: tudo da aba Acompanhar numa chamada. */
+export async function acompanharRel() {
+  const agora = new Date();
+  const funil = (desde) => rest('rpc/rel_disparo_acompanhar', { method: 'POST', body: { p_desde: desde.toISOString() } }).catch(() => null);
+  const [semana, hoje, testes, campanhas, numeros] = await Promise.all([
+    funil(new Date(agora.getTime() - 7 * 86_400_000)),
+    funil(inicioDoDiaBRT(agora)),
+    rest('rel_disparo_testes?select=*&order=criado_em.desc&limit=20').catch(() => null),
+    rest('qs_disparo_campanhas?select=id,nome,status,phone_number_id,modelo_nome,ultimo_erro,iniciada_em,agendada_para,concluida_em,criado_em&setor=eq.relacionamento&order=criado_em.desc&limit=40').catch(() => []),
+    numerosDoDisparo(),
+  ]);
+  // Recibo dos testes pelo número do Rel: vem da bolha na conversa (rel_wa_mensagens).
+  const semRecibo = (testes || []).filter((t) => t.wamid && !['read', 'failed'].includes(t.status));
+  if (semRecibo.length) {
+    const rs = (await rest(`rel_wa_mensagens?select=wamid,status,erro&wamid=in.(${semRecibo.map((t) => `"${t.wamid}"`).join(',')})`).catch(() => [])) || [];
+    const porW = new Map(rs.map((x) => [x.wamid, x]));
+    for (const t of testes) { const x = porW.get(t.wamid); if (x?.status) { t.status = x.status; if (x.erro && !t.erro) t.erro = x.erro; } }
+  }
+  const ids = (campanhas || []).map((c) => c.id);
+  const envios = ids.length ? ((await rest(
+    `qs_disparo_envios?select=nome,telefone,status,motivo,erro_codigo,simulado,enviado_em,entregue_em,lido_em,clicou_em,botao,phone_number_id,campanha_id` +
+    `&campanha_id=in.(${ids.join(',')})&enviado_em=not.is.null&order=enviado_em.desc&limit=40`
+  ).catch(() => [])) || []) : [];
+  const ativas = (campanhas || []).filter((c) => ['enviando', 'agendada', 'pausada'].includes(c.status));
+  const pend = await Promise.all(ativas.map((c) => rest(`qs_disparo_envios?select=id&campanha_id=eq.${c.id}&status=eq.pendente&limit=5000`).then((l) => (l || []).length, () => null)));
+  return {
+    semTabela: testes === null,
+    numeros, semana: semana || [], hoje: hoje || [],
+    testes: (testes || []).map((t) => ({ ...t, telefone: mascarar(t.telefone) })),
+    ativas: ativas.map((c, i) => ({ ...c, pendentes: pend[i] })),
+    envios: envios.map((e) => ({ ...e, telefone: mascarar(e.telefone), campanha: (campanhas || []).find((c) => c.id === e.campanha_id)?.nome || '' })),
+  };
 }
 
 // ── Clique no link rastreado ────────────────────────────────────────────────
@@ -546,6 +599,7 @@ export async function estadoRel({ conferir = false } = {}) {
 
 export async function acaoRelOficial({ acao, body, u }) {
   if (acao === 'rel_oficial_estado') return { status: 200, json: await estadoRel({ conferir: body.conferir === true }) };
+  if (acao === 'rel_acompanhar') return { status: 200, json: await acompanharRel() };
 
   if (acao === 'rel_sincronizar_modelos') {
     try {
@@ -611,6 +665,7 @@ export async function acaoRelOficial({ acao, body, u }) {
       const enviados = [], erros = [];
       for (const n of lista) {
         const r = await enviarTeste({ telefone: n.telefone, campanha: c, nomeTeste: n.nome.split(/\s+/)[0] });
+        await registrarTeste({ u, telefone: n.telefone, phoneId: c.phone_number_id, modelo: c.modelo_nome, r });
         if (r.erro) erros.push({ nome: n.nome, erro: r.erro }); else enviados.push(n.nome);
         if (r.erro && /travado|conectado|token/i.test(r.erro)) break; // trava geral: nem tenta os outros
       }
@@ -618,6 +673,7 @@ export async function acaoRelOficial({ acao, body, u }) {
       return { status: 200, json: { ok: true, enviados, erros } };
     }
     const r = await enviarTeste({ telefone: body.telefone, campanha: c, nomeTeste: String(u.name || '').split(/\s+/)[0] });
+    await registrarTeste({ u, telefone: body.telefone, phoneId: c.phone_number_id, modelo: c.modelo_nome, r });
     return r.erro ? { status: 400, json: { error: r.erro } } : { status: 200, json: r };
   }
 

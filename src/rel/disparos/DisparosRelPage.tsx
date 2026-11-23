@@ -31,6 +31,7 @@ import NumerosTeste from "./NumerosTeste";
 import NovoDisparoRel from "./NovoDisparoRel";
 import ContatosRel from "./ContatosRel";
 import FluxosRel from "./FluxosRel";
+import AcompanharRel from "./AcompanharRel";
 
 const STATUS: Record<StatusCampanha, { rotulo: string; tom: "neutro" | "rel" | "aviso" | "erro" }> = {
   rascunho: { rotulo: "rascunho", tom: "neutro" }, agendada: { rotulo: "agendado", tom: "rel" }, enviando: { rotulo: "enviando", tom: "rel" },
@@ -337,7 +338,7 @@ function AbaNumero({ est, ehAdmin, podeTeste, onMudou }: { est: EstadoRel | null
 
 // ── Página ──────────────────────────────────────────────────────────────────
 
-type Aba = "fluxos" | "disparos" | "contatos" | "numero";
+type Aba = "acompanhar" | "fluxos" | "disparos" | "contatos" | "numero";
 
 export default function DisparosRelPage() {
   const { currentUser } = useQsAuth();
@@ -355,7 +356,7 @@ export default function DisparosRelPage() {
   }, []);
   useEffect(() => { void ler(); }, [ler]);
   const ir = (a: Aba) => { setAba(a); try { localStorage.setItem("rel_disparos_aba", a); } catch { /* sem storage */ } };
-  const ABAS: { id: Aba; rotulo: string }[] = [{ id: "fluxos", rotulo: "Fluxos" }, { id: "disparos", rotulo: "Disparo simples" }, { id: "contatos", rotulo: "Contatos e etiquetas" }, { id: "numero", rotulo: "Número e ritmo" }];
+  const ABAS: { id: Aba; rotulo: string }[] = [{ id: "acompanhar", rotulo: "Acompanhar" }, { id: "fluxos", rotulo: "Fluxos" }, { id: "disparos", rotulo: "Disparo simples" }, { id: "contatos", rotulo: "Contatos e etiquetas" }, { id: "numero", rotulo: "Número e ritmo" }];
 
   return (
     <div className={`mx-auto space-y-4 p-4 ${aba === "fluxos" ? "max-w-none" : "max-w-[1100px]"}`}>
@@ -373,6 +374,7 @@ export default function DisparosRelPage() {
             style={aba === a.id ? { borderColor: "var(--rel)", color: "var(--rel-ink)" } : { borderColor: "transparent", color: "var(--ink3)" }}>{a.rotulo}</button>
         ))}
       </nav>
+      {aba === "acompanhar" && <AcompanharRel est={est} />}
       {aba === "fluxos" && <FluxosRel est={est} />}
       {aba === "disparos" && <AbaDisparos est={est} modelos={modelos} onIrNumero={() => ir("numero")} onModelosMudaram={() => void ler()} />}
       {aba === "contatos" && <ContatosRel ehGestor={ehGestor} />}

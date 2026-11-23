@@ -30,6 +30,8 @@ export async function reciboDeDisparo(st) {
   const agora = new Date().toISOString();
   const w = `qs_disparo_envios?wamid=eq.${encodeURIComponent(id)}&simulado=eq.false`;
   const patch = (filtro, body) => rest(`${w}&${filtro}`, { method: 'PATCH', prefer: 'return=minimal', body }).then(() => true, () => false);
+  // 0412: o teste mandado pelo número do SDR também ganha o recibo.
+  await rest(`rel_disparo_testes?wamid=eq.${encodeURIComponent(id)}`, { method: 'PATCH', prefer: 'return=minimal', body: { status: s } }).catch(() => null);
   if (s === 'delivered') return patch('status=eq.enviado', { status: 'entregue', entregue_em: agora });
   if (s === 'read') return patch('status=in.(enviado,entregue)', { status: 'lido', lido_em: agora });
   return patch('status=in.(enviado,entregue)', { status: 'erro', motivo: 'a Meta não entregou (falhou)' });
