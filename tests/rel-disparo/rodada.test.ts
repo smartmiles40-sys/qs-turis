@@ -13,6 +13,7 @@ type Linha = Record<string, unknown>;
 type Chamada = { metodo: string; url: string; corpo: unknown };
 
 const PH = "777000111";
+const PH_SDR = "888000222"; // 0411: número de um SDR (outra WABA)
 const CAMP = "22222222-2222-4222-8222-222222222222";
 const E1 = "33333333-3333-4333-8333-333333333331";
 const E2 = "33333333-3333-4333-8333-333333333332";
@@ -25,6 +26,7 @@ let modelos: Linha[] = [];
 let etiquetas: Linha[] = [];
 let mensagensRel: Linha[] = [];
 let numeroRel: Linha | null = null;
+let numeroSdr: Linha | null = null;
 let optout = false;
 
 const resp = (status: number, corpo: unknown) =>
@@ -39,8 +41,10 @@ globalThis.fetch = (async (entrada: string | URL | Request, init: RequestInit = 
 
   if (url.startsWith("https://graph.facebook.com/")) {
     const u = new URL(url);
-    if (metodo === "GET" && u.pathname.endsWith(`/${PH}`)) return resp(200, { whatsapp_business_manager_messaging_limit: "TIER_1K", quality_rating: "GREEN" });
-    if (metodo === "POST" && u.pathname.endsWith(`/${PH}/messages`)) return resp(200, { messages: [{ id: `wamid.R${chamadas.length}` }] });
+    for (const ph of [PH, PH_SDR]) {
+      if (metodo === "GET" && u.pathname.endsWith(`/${ph}`)) return resp(200, { whatsapp_business_manager_messaging_limit: "TIER_1K", quality_rating: "GREEN" });
+      if (metodo === "POST" && u.pathname.endsWith(`/${ph}/messages`)) return resp(200, { messages: [{ id: `wamid.R${chamadas.length}` }] });
+    }
     return resp(404, { error: { message: "rota falsa", code: 100 } });
   }
 
@@ -50,8 +54,9 @@ globalThis.fetch = (async (entrada: string | URL | Request, init: RequestInit = 
 
   if (tabela === "qs_settings") { const k = eq(q, "key"); return resp(200, k in settings ? [{ value: settings[k] }] : []); }
   if (tabela === "qs_wa_numeros_meta") {
-    if ((q.get("select") || "").startsWith("waba_id")) return resp(200, [{ waba_id: "W9" }]);
-    return resp(200, numeroRel ? [numeroRel] : []);
+    if ((q.get("select") || "").startsWith("waba_id")) return resp(200, [{ waba_id: eq(q, "phone_number_id") === PH_SDR ? "W_SDR" : "W9" }]);
+    if (eq(q, "setor") === "relacionamento") return resp(200, numeroRel ? [numeroRel] : []);
+    return resp(200, [...(numeroRel ? [{ ...numeroRel, setor: "relacionamento", waba_id: "W9" }] : []), ...(numeroSdr ? [numeroSdr] : [])]);
   }
   if (tabela === "rpc/qs_meta_token") return resp(200, "tok-falso");
   if (tabela === "rpc/mkt_disparo_contar") return resp(200, 0);
@@ -60,8 +65,8 @@ globalThis.fetch = (async (entrada: string | URL | Request, init: RequestInit = 
   if (tabela === "rel_wa_mensagens") return resp(200, []);
   if (tabela === "rel_viagens") return resp(200, [{ destino: "Japão", titulo: "Japão 2027" }]);
   if (tabela === "rel_wa_modelos") {
-    const n = eq(q, "nome"); const i = eq(q, "idioma");
-    return resp(200, modelos.filter((m) => (!n || m.nome === n) && (!i || m.idioma === i)));
+    const n = eq(q, "nome"); const i = eq(q, "idioma"); const w = eq(q, "waba_id");
+    return resp(200, modelos.filter((m) => (!n || m.nome === n) && (!i || m.idioma === i) && (!w || m.waba_id === w)));
   }
   if (tabela === "rel_cliente_etiquetas") {
     if (metodo === "POST") { for (const l of corpo as Linha[]) etiquetas.push(l); return resp(201, undefined); }
@@ -120,7 +125,8 @@ beforeEach(() => {
   chamadas = []; etiquetas = []; mensagensRel = []; optout = false;
   settings = { rel_disparo_ritmo: RITMO };
   numeroRel = { phone_number_id: PH, numero: "+55 11 98012-4183", nome_verificado: "Rel", status: "conectado", segredo_id: "s1" };
-  modelos = [{ ...MODELO }];
+  numeroSdr = null;
+  modelos = [{ ...MODELO, waba_id: "W9" }];
   campanhas = [{
     id: CAMP, setor: "relacionamento", nome: "Volta da viagem", status: "enviando", modelo_nome: "volta_viagem", modelo_idioma: "pt_BR",
     params: { 1: { fonte: "nome" }, 2: { fonte: "destino" }, 3: { fonte: "link", valor: "https://fotos.com/japao" } },
@@ -212,4 +218,24 @@ test("tocou no botão: marca o clique, põe a etiqueta e responde UMA vez", asyn
 test("mensagem que não é resposta a disparo: ignora", async () => {
   const r = await tratarCliqueDeDisparo({ m: { id: "x", type: "button", button: { text: "Oi" }, context: { id: "wamid.OUTRO" } }, phoneId: PH, telefone: "5511999990001", conversaId: "c" });
   assert.equal(r, null);
+});
+test("0411: disparo pelo número do SDR — sai por ele, só template da conta dele, sem bolha no Rel", async () => {
+  process.env.REL_DISPARO_ENVIO = "1";
+  settings.rel_disparo_simulacao = false;
+  numeroSdr = { phone_number_id: PH_SDR, numero: "+55 11 94394-8398", rotulo: "Hugo", setor: "comercial", status: "conectado", segredo_id: "s2", waba_id: "W_SDR" };
+  campanhas[0].phone_number_id = PH_SDR;
+  // O modelo só existe na WABA do Rel: pelo SDR não acha → pausa, nada sai.
+  let r = await rodadaRel({ agora: TERCA_MEIO_DIA, limiteMs: 5_000 });
+  assert.equal(graphPosts().length, 0);
+  assert.equal(campanhas[0].status, "pausada");
+  assert.match(String(campanhas[0].ultimo_erro), /número escolhido/);
+  // Aprovado na conta do SDR: sai pelo número dele, sem bolha na conversa do Rel.
+  modelos.push({ ...MODELO, waba_id: "W_SDR" });
+  campanhas[0].status = "enviando";
+  r = await rodadaRel({ agora: TERCA_MEIO_DIA, limiteMs: 5_000 });
+  assert.equal(r.modo, "real");
+  const posts = graphPosts();
+  assert.equal(posts.length, 2);
+  assert.ok(posts.every((p) => p.url.includes(`/${PH_SDR}/messages`)));
+  assert.equal(mensagensRel.length, 0);
 });

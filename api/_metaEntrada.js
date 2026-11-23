@@ -514,6 +514,11 @@ export async function processarMensagensDaMeta(changes) {
             });
             if (r.novo) conta.recebidas++;
             if (r.ignorada === 'sem-lead') conta.semLead++;
+            // 0411: tocou no botão de um disparo do Rel que saiu por ESTE número (SDR).
+            if (m.context?.id && (m.type === 'button' || m.type === 'interactive')) {
+              const { tratarCliqueDeDisparo } = await import('./_relDisparoBotoes.js');
+              await tratarCliqueDeDisparo({ m, phoneId: numero?.phone_number_id || value?.metadata?.phone_number_id, telefone: String(m.from || ''), conversaId: null, outroNumero: true });
+            }
             if (r.ignorada === 'sem-conteudo' && m.type !== 'request_welcome') console.warn(`[meta-entrada] mensagem sem conteúdo, tipo=${m.type} id=${m.id}`);
           } catch (e) {
             conta.erros++;
@@ -524,6 +529,11 @@ export async function processarMensagensDaMeta(changes) {
         for (const st of value.statuses || []) {
           try {
             if (await reciboComercial(st, numero)) conta.recibos++;
+            else {
+              // 0411: disparo do Rel que saiu pelo número do SDR (não tem bolha no chat).
+              const { reciboDeDisparo } = await import('./_relDisparoBotoes.js');
+              await reciboDeDisparo(st);
+            }
           } catch (e) {
             console.warn('[meta-entrada] recibo:', st?.id, e?.message);
           }

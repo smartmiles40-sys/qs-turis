@@ -22,7 +22,11 @@ export async function chamar<T>(corpo: Record<string, unknown>): Promise<T> {
   return j as T;
 }
 
-export type ModeloRel = ModeloMkt;
+/** waba = a conta da Meta dona do modelo (cada número de SDR tem a sua). */
+export type ModeloRel = ModeloMkt & { waba?: string | null };
+
+/** 0411: número que pode mandar o disparo. Pelos de SDR/Marketing só sai template. */
+export interface NumeroDisparo { phone_number_id: string; numero: string | null; rotulo: string; tipo: "relacionamento" | "sdr" | "marketing"; conectado: boolean; waba_id: string | null }
 
 /** O que fazer quando a pessoa toca num botão de resposta rápida. */
 export interface RespostaBotao { texto?: string; etiqueta?: string; tirar_etiqueta?: string; avisar?: boolean }
@@ -34,6 +38,8 @@ export interface NumeroTeste { nome: string; telefone: string }
 export interface EstadoRel {
   /** Os números de teste (aba Número e ritmo) — o teste vai pra todos eles. */
   numerosTeste?: NumeroTeste[];
+  /** 0411: números que o disparo pode usar (o do Rel primeiro). */
+  numeros?: NumeroDisparo[];
   simulacao: boolean; envLigado: boolean; real: boolean; faltam: string[]; temToken: boolean;
   numero: { phone_number_id: string; numero: string | null; rotulo?: string; conectado: boolean } | null;
   ritmo: RitmoRel; precos: PrecosMkt;
@@ -49,19 +55,19 @@ export interface AoVivoRel {
 }
 
 export const estadoRel = (conferir = false) => chamar<EstadoRel>({ acao: "rel_oficial_estado", conferir });
-export const sincronizarModelosRel = () => chamar<{ ok: true; total: number; aprovados: number }>({ acao: "rel_sincronizar_modelos" });
+export const sincronizarModelosRel = (phoneId?: string | null) => chamar<{ ok: true; total: number; aprovados: number }>({ acao: "rel_sincronizar_modelos", phoneId: phoneId ?? null });
 export const aoVivoRel = (campanhaId: string) => chamar<AoVivoRel>({ acao: "rel_kpis", campanhaId });
 export const salvarRitmoRel = (ritmo: RitmoRel) => chamar<{ ok: true; ritmo: RitmoRel }>({ acao: "rel_salvar_ritmo", ritmo });
 export const salvarNumerosTesteRel = (numeros: NumeroTeste[]) => chamar<{ ok: true; numeros: NumeroTeste[] }>({ acao: "rel_salvar_numeros_teste", numeros });
 
-export const criarCampanhaRel = (c: { nome: string; modelo_nome: string; modelo_idioma: string; params: MapaVariaveis; publico: PublicoRel; envio_extra?: EnvioExtraRel; grupo_link?: string | null }) =>
+export const criarCampanhaRel = (c: { nome: string; phone_number_id?: string | null; modelo_nome: string; modelo_idioma: string; params: MapaVariaveis; publico: PublicoRel; envio_extra?: EnvioExtraRel; grupo_link?: string | null }) =>
   chamar<{ campanha: Campanha }>({ acao: "criar", ...c });
 
 export const agendarRel = (campanhaId: string, agendada_para: string) => chamar<{ ok: true }>({ acao: "agendar", campanhaId, agendada_para });
 export const desagendarRel = (campanhaId: string) => chamar<{ ok: true }>({ acao: "desagendar", campanhaId });
 
 /** Manda UMA mensagem agora pra um número (campanha salva ou o rascunho da tela). */
-export const testarRel = (telefone: string, alvo: { campanhaId: string } | { rascunho: { nome: string; modelo_nome: string; modelo_idioma: string; params: MapaVariaveis; envio_extra?: EnvioExtraRel; grupo_link?: string | null } }) =>
+export const testarRel = (telefone: string, alvo: { campanhaId: string } | { rascunho: { nome: string; phone_number_id?: string | null; modelo_nome: string; modelo_idioma: string; params: MapaVariaveis; envio_extra?: EnvioExtraRel; grupo_link?: string | null } }) =>
   chamar<{ ok: true; wamid: string }>({ acao: "rel_teste", telefone, ...alvo });
 
 /** Manda pra TODOS os números de teste configurados. */

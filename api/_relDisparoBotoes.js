@@ -18,6 +18,23 @@ import { rest } from './_supabaseAdmin.js';
 import { enviarTexto } from './_meta.js';
 import { respostaDoBotao, personalizarResposta, listaDeEtiquetas } from './_relDisparoRegras.js';
 
+/**
+ * 0411: recibo (entregue/lido/falhou) de um disparo do Rel que saiu pelo número
+ * de um SDR. Esses envios não viram bolha em nenhum chat do QS, então o
+ * conciliar() não os acha: o webhook do Comercial chama isto direto.
+ */
+export async function reciboDeDisparo(st) {
+  const s = String(st?.status || '').toLowerCase();
+  const id = st?.id ? String(st.id) : '';
+  if (!id || !['delivered', 'read', 'failed'].includes(s)) return false;
+  const agora = new Date().toISOString();
+  const w = `qs_disparo_envios?wamid=eq.${encodeURIComponent(id)}&simulado=eq.false`;
+  const patch = (filtro, body) => rest(`${w}&${filtro}`, { method: 'PATCH', prefer: 'return=minimal', body }).then(() => true, () => false);
+  if (s === 'delivered') return patch('status=eq.enviado', { status: 'entregue', entregue_em: agora });
+  if (s === 'read') return patch('status=in.(enviado,entregue)', { status: 'lido', lido_em: agora });
+  return patch('status=in.(enviado,entregue)', { status: 'erro', motivo: 'a Meta não entregou (falhou)' });
+}
+
 /** O texto do botão tocado, ou null se a mensagem não é clique de botão. */
 export function botaoClicado(m) {
   if (m?.type === 'button') return String(m.button?.text || m.button?.payload || '').trim() || null;
@@ -38,7 +55,7 @@ async function etiquetar(clienteId, etiquetas, tirar) {
   }).catch((e) => console.warn('[rel-botoes] etiqueta não gravada:', e?.message));
 }
 
-async function avisar({ conversaId, nome, campanha, botao, envioId }) {
+async function avisar({ conversaId, nome, campanha, botao, envioId, outroNumero = false }) {
   const conv = conversaId ? (await rest(`rel_wa_conversas?select=atendente_id&id=eq.${conversaId}&limit=1`).catch(() => null))?.[0] : null;
   let quem = conv?.atendente_id ? [conv.atendente_id] : [];
   if (!quem.length) {
@@ -51,7 +68,7 @@ async function avisar({ conversaId, nome, campanha, botao, envioId }) {
       body: {
         user_id: id, tipo: 'tarefa', area: 'relacionamento',
         titulo: `${String(nome || 'Cliente').split(/\s+/)[0]} tocou em "${botao}"`.slice(0, 200),
-        texto: `Disparo "${campanha}". Responda pelo WhatsApp do Relacionamento.`.slice(0, 400),
+        texto: `Disparo "${campanha}". Responda pelo WhatsApp ${outroNumero ? 'do número que disparou (SDR/Marketing)' : 'do Relacionamento'}.`.slice(0, 400),
         link: '#rel/whatsapp', origem: 'rel_disparo_botao', origem_id: envioId, chave: `rel-botao:${envioId}`,
       },
     }).catch(() => null);
@@ -62,7 +79,7 @@ async function avisar({ conversaId, nome, campanha, botao, envioId }) {
  * Mensagem nova do cliente no número do Rel. Se for clique num botão de um
  * disparo do Rel, registra e responde. Devolve o que fez (pros logs/testes).
  */
-export async function tratarCliqueDeDisparo({ m, phoneId, telefone, conversaId }) {
+export async function tratarCliqueDeDisparo({ m, phoneId, telefone, conversaId, outroNumero = false }) {
   try {
     const botao = botaoClicado(m);
     const ctx = m?.context?.id ? String(m.context.id) : null;
@@ -83,7 +100,8 @@ export async function tratarCliqueDeDisparo({ m, phoneId, telefone, conversaId }
     const feito = [];
     if (cfg.etiqueta) { await etiquetar(envio.cliente_id, [cfg.etiqueta], false); feito.push('etiqueta'); }
     if (cfg.tirar_etiqueta) { await etiquetar(envio.cliente_id, [cfg.tirar_etiqueta], true); feito.push('tirou etiqueta'); }
-    if (cfg.texto && !envio.clicou_em) {
+    // 0411: pelo número de SDR/Marketing só sai template — sem resposta em texto.
+    if (cfg.texto && !envio.clicou_em && !outroNumero) {
       // Só no 1º clique: tocar 3 vezes não manda 3 respostas.
       let destino = null;
       if (envio.viagem_id) {
@@ -102,7 +120,7 @@ export async function tratarCliqueDeDisparo({ m, phoneId, telefone, conversaId }
         }
       }
     }
-    if (cfg.avisar && !envio.clicou_em) { await avisar({ conversaId, nome: envio.nome, campanha: c.nome, botao, envioId: envio.id }); feito.push('avisou'); }
+    if (cfg.avisar && !envio.clicou_em) { await avisar({ conversaId, nome: envio.nome, campanha: c.nome, botao, envioId: envio.id, outroNumero }); feito.push('avisou'); }
     return { envio: envio.id, botao, feito };
   } catch (e) {
     console.warn('[rel-botoes] falhou:', e?.message);

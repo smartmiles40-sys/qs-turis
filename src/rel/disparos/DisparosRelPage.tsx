@@ -206,7 +206,7 @@ function CartaoCampanha({ c, r, numerosTeste, onAoVivo, onMudou }: { c: Campanha
   );
 }
 
-function AbaDisparos({ est, modelos, onIrNumero }: { est: EstadoRel | null; modelos: ModeloRel[]; onIrNumero: () => void }) {
+function AbaDisparos({ est, modelos, onIrNumero, onModelosMudaram }: { est: EstadoRel | null; modelos: ModeloRel[]; onIrNumero: () => void; onModelosMudaram: () => void }) {
   const [lista, setLista] = useState<Campanha[] | null>(null);
   const [res, setRes] = useState<Record<string, Resumo>>({});
   const [novo, setNovo] = useState(false);
@@ -241,7 +241,7 @@ function AbaDisparos({ est, modelos, onIrNumero }: { est: EstadoRel | null; mode
       {lista === null ? <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>
         : !visiveis.length ? <Vazio titulo="Nenhum disparo ainda" texto="Monte o primeiro: escolha quem recebe (por etiqueta, viagem, aniversário…), o modelo aprovado e o que cada botão faz." acao={<Botao variante="primario" onClick={() => setNovo(true)}>+ Novo disparo</Botao>} />
         : <ul className="space-y-3">{visiveis.map((c) => <CartaoCampanha key={c.id} c={c} r={res[c.id]} numerosTeste={est?.numerosTeste ?? []} onAoVivo={() => setAoVivo(c)} onMudou={() => void ler()} />)}</ul>}
-      {novo && <NovoDisparoRel modelos={modelos} simulacao={est?.simulacao !== false} numerosTeste={est?.numerosTeste ?? []} onFechar={() => setNovo(false)} onCriado={() => { setNovo(false); void ler(); }} />}
+      {novo && <NovoDisparoRel modelos={modelos} numeros={est?.numeros ?? []} onModelosMudaram={onModelosMudaram} simulacao={est?.simulacao !== false} numerosTeste={est?.numerosTeste ?? []} onFechar={() => setNovo(false)} onCriado={() => { setNovo(false); void ler(); }} />}
       {aoVivo && <AoVivo c={aoVivo} onFechar={() => setAoVivo(null)} onMudou={() => void ler()} />}
     </div>
   );
@@ -362,7 +362,7 @@ export default function DisparosRelPage() {
       <header className="flex flex-wrap items-center gap-3">
         <div className="mr-auto">
           <h1 className="text-[20px] font-bold" style={{ color: "var(--ink)" }}>Disparos</h1>
-          <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>Mensagem em massa pelo WhatsApp do Relacionamento, só com modelo aprovado pela Meta.</p>
+          <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>Mensagem em massa pelo WhatsApp do Relacionamento ou de um SDR, só com modelo aprovado pela Meta.</p>
         </div>
         {est && <Etiqueta tom={est.real ? "rel" : "aviso"}>{est.real ? "envio real ligado" : est.simulacao ? "simulação" : "travado"}</Etiqueta>}
       </header>
@@ -374,7 +374,7 @@ export default function DisparosRelPage() {
         ))}
       </nav>
       {aba === "fluxos" && <FluxosRel est={est} />}
-      {aba === "disparos" && <AbaDisparos est={est} modelos={modelos} onIrNumero={() => ir("numero")} />}
+      {aba === "disparos" && <AbaDisparos est={est} modelos={modelos} onIrNumero={() => ir("numero")} onModelosMudaram={() => void ler()} />}
       {aba === "contatos" && <ContatosRel ehGestor={ehGestor} />}
       {aba === "numero" && <AbaNumero est={est} ehAdmin={ehAdmin} podeTeste={ehAdmin || currentUser?.role === "gestor"} onMudou={() => void ler()} />}
     </div>

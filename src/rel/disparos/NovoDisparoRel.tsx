@@ -14,7 +14,7 @@ import {
 import { Aviso, Botao, Campo, Entrada, Modal } from "@/rel/ui";
 import PreviaWhatsApp from "@/mkt/disparos/PreviaWhatsApp";
 import { ROTULO_CATEGORIA, type FonteExtra } from "@/mkt/disparos/oficial";
-import { agendarRel, avisoDoTeste, criarCampanhaRel, testarRel, testarRelNumerosTeste, type EnvioExtraRel, type ModeloRel, type NumeroTeste, type RespostaBotao } from "./oficialRel";
+import { agendarRel, avisoDoTeste, criarCampanhaRel, sincronizarModelosRel, testarRel, testarRelNumerosTeste, type EnvioExtraRel, type ModeloRel, type NumeroDisparo, type NumeroTeste, type RespostaBotao } from "./oficialRel";
 import { CampoEtiquetas, limparPublico, PublicoRelForm, useEtiquetas } from "./PublicoRel";
 
 const FONTES_REL = FONTES.filter((f) => f.setores.includes("relacionamento"));
@@ -74,14 +74,18 @@ function FonteEValor({ v, set, placeholder }: { v?: { fonte: FonteExtra; valor?:
   );
 }
 
-function RespostaDoBotao({ rotulo, r, set, etiquetas }: { rotulo: string; r: RespostaBotao; set: (r: RespostaBotao) => void; etiquetas: { etiqueta: string; n: number }[] }) {
+function RespostaDoBotao({ rotulo, r, set, etiquetas, soTemplate = false }: { rotulo: string; r: RespostaBotao; set: (r: RespostaBotao) => void; etiquetas: { etiqueta: string; n: number }[]; soTemplate?: boolean }) {
   return (
     <div className="space-y-2 rounded-xl border p-3" style={{ borderColor: "var(--line)" }}>
       <p className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>Quando tocarem em “{rotulo}”</p>
-      <Campo rotulo="Responder com" dica="Sai na hora, só no 1º toque. Pode usar {{nome}} e {{destino}}. Vazio = não responde.">
-        <textarea className="rel-input min-h-[70px]" value={r.texto ?? ""} placeholder="Ex.: Oba, {{nome}}! Já te mando as datas de 2027 😊"
-          onChange={(e) => set({ ...r, texto: e.target.value })} />
-      </Campo>
+      {soTemplate ? (
+        <p className="text-[12px]" style={{ color: "var(--ink3)" }}>Por este número só sai template aprovado: não dá pra responder em texto. A etiqueta e o aviso continuam valendo.</p>
+      ) : (
+        <Campo rotulo="Responder com" dica="Sai na hora, só no 1º toque. Pode usar {{nome}} e {{destino}}. Vazio = não responde.">
+          <textarea className="rel-input min-h-[70px]" value={r.texto ?? ""} placeholder="Ex.: Oba, {{nome}}! Já te mando as datas de 2027 😊"
+            onChange={(e) => set({ ...r, texto: e.target.value })} />
+        </Campo>
+      )}
       <div className="grid gap-2 sm:grid-cols-2">
         <Campo rotulo="Pôr a etiqueta"><CampoEtiquetas valor={r.etiqueta ? [r.etiqueta] : []} onChange={(v) => set({ ...r, etiqueta: v[v.length - 1] })} existentes={etiquetas} placeholder="ex.: quente" /></Campo>
         <Campo rotulo="Tirar a etiqueta"><CampoEtiquetas valor={r.tirar_etiqueta ? [r.tirar_etiqueta] : []} onChange={(v) => set({ ...r, tirar_etiqueta: v[v.length - 1] })} existentes={etiquetas} placeholder="ex.: frio" /></Campo>
@@ -94,9 +98,14 @@ function RespostaDoBotao({ rotulo, r, set, etiquetas }: { rotulo: string; r: Res
   );
 }
 
-export default function NovoDisparoRel({ modelos, simulacao, numerosTeste = [], onFechar, onCriado }: {
-  modelos: ModeloRel[]; simulacao: boolean; numerosTeste?: NumeroTeste[]; onFechar: () => void; onCriado: () => void;
+export default function NovoDisparoRel({ modelos, numeros = [], simulacao, numerosTeste = [], onFechar, onCriado, onModelosMudaram }: {
+  modelos: ModeloRel[]; numeros?: NumeroDisparo[]; simulacao: boolean; numerosTeste?: NumeroTeste[]; onFechar: () => void; onCriado: () => void; onModelosMudaram?: () => void;
 }) {
+  // 0411: por qual número sai. Padrão = o do Relacionamento.
+  const [numeroId, setNumeroId] = useState(() => numeros.find((n) => n.tipo === "relacionamento")?.phone_number_id ?? numeros[0]?.phone_number_id ?? "");
+  const numero = numeros.find((n) => n.phone_number_id === numeroId) ?? null;
+  const soTemplate = !!numero && numero.tipo !== "relacionamento";
+  const [sincronizando, setSincronizando] = useState(false);
   const etiquetas = useEtiquetas();
   const [passo, setPasso] = useState(0);
   const [publico, setPublico] = useState<PublicoRel>({});
@@ -112,7 +121,10 @@ export default function NovoDisparoRel({ modelos, simulacao, numerosTeste = [], 
   const [telTeste, setTelTeste] = useState(() => { try { return localStorage.getItem("rel_disparo_tel_teste") ?? ""; } catch { return ""; } });
   const [ocupado, setOcupado] = useState<"" | "criar" | "teste">("");
 
-  const aprovados = useMemo(() => modelos.filter((m) => m.status === "aprovado"), [modelos]);
+  // Só os modelos aprovados na conta da Meta do número escolhido (cada SDR tem a sua).
+  const aprovados = useMemo(() => modelos.filter((m) => m.status === "aprovado" && (
+    !numero ? true : m.origem === "meta" ? (m.waba ?? "") === (numero.waba_id ?? "") : numero.tipo === "relacionamento"
+  )), [modelos, numero]);
   const modelo = aprovados.find((m) => m.nome === modeloNome) ?? null;
   const vars = modelo ? variaveisDoCorpo(modelo.corpo) : [];
   const usaGrupo = Object.values(mapa).some((x) => x.fonte === "link_grupo");
@@ -136,7 +148,9 @@ export default function NovoDisparoRel({ modelos, simulacao, numerosTeste = [], 
   const podeAvancar = [Boolean(pv && pv.total > 0), mensagemOk, quandoOk, nome.trim().length >= 2][passo];
 
   const envioExtra = (): EnvioExtraRel => {
-    const respostas = Object.fromEntries(Object.entries(extra.respostas ?? {}).filter(([i]) => botoesResposta.some((b) => String(b.indice) === i)));
+    const respostas = Object.fromEntries(Object.entries(extra.respostas ?? {})
+      .filter(([i]) => botoesResposta.some((b) => String(b.indice) === i))
+      .map(([i, r]) => [i, soTemplate ? { ...r, texto: undefined } : r]));
     return { ...extra, respostas };
   };
 
@@ -144,7 +158,7 @@ export default function NovoDisparoRel({ modelos, simulacao, numerosTeste = [], 
     if (!modelo) return;
     setOcupado("teste");
     try {
-      const r = await testarRelNumerosTeste({ rascunho: { nome: nome || "teste", modelo_nome: modelo.nome, modelo_idioma: modelo.idioma, params: mapa, envio_extra: envioExtra(), grupo_link: grupoLink || null } });
+      const r = await testarRelNumerosTeste({ rascunho: { nome: nome || "teste", phone_number_id: numeroId || null, modelo_nome: modelo.nome, modelo_idioma: modelo.idioma, params: mapa, envio_extra: envioExtra(), grupo_link: grupoLink || null } });
       (r.erros.length ? notifyError : notifySuccess)(avisoDoTeste(r));
     } catch (e) { notifyError(erroDe(e, "O teste não saiu.")); } finally { setOcupado(""); }
   }
@@ -154,7 +168,7 @@ export default function NovoDisparoRel({ modelos, simulacao, numerosTeste = [], 
     setOcupado("teste");
     try {
       try { localStorage.setItem("rel_disparo_tel_teste", telTeste); } catch { /* sem storage */ }
-      await testarRel(telTeste, { rascunho: { nome: nome || "teste", modelo_nome: modelo.nome, modelo_idioma: modelo.idioma, params: mapa, envio_extra: envioExtra(), grupo_link: grupoLink || null } });
+      await testarRel(telTeste, { rascunho: { nome: nome || "teste", phone_number_id: numeroId || null, modelo_nome: modelo.nome, modelo_idioma: modelo.idioma, params: mapa, envio_extra: envioExtra(), grupo_link: grupoLink || null } });
       notifySuccess("Teste enviado. Confira no WhatsApp.");
     } catch (e) { notifyError(erroDe(e, "O teste não saiu.")); } finally { setOcupado(""); }
   }
@@ -164,7 +178,7 @@ export default function NovoDisparoRel({ modelos, simulacao, numerosTeste = [], 
     setOcupado("criar");
     try {
       const { campanha } = await criarCampanhaRel({
-        nome: nome.trim(), modelo_nome: modelo.nome, modelo_idioma: modelo.idioma, params: mapa, publico: limpo,
+        nome: nome.trim(), phone_number_id: numeroId || null, modelo_nome: modelo.nome, modelo_idioma: modelo.idioma, params: mapa, publico: limpo,
         envio_extra: envioExtra(), grupo_link: usaGrupo ? grupoLink : null,
       });
       if (quando === "agora") {
@@ -216,8 +230,32 @@ export default function NovoDisparoRel({ modelos, simulacao, numerosTeste = [], 
 
           {passo === 1 && (
             <>
+              {numeros.length > 0 && (
+                <div className="space-y-1.5">
+                  <Campo rotulo="Mandar pelo número" dica="Cada número tem os próprios modelos aprovados, o próprio limite por dia e a própria qualidade na Meta.">
+                    <div className="flex flex-wrap gap-2">
+                      <select className="rel-input min-w-[220px] flex-1" value={numeroId} onChange={(e) => { setNumeroId(e.target.value); setModeloNome(""); setMapa({}); setExtra({}); }}>
+                        {(["relacionamento", "sdr", "marketing"] as const).map((t) => {
+                          const doTipo = numeros.filter((n) => n.tipo === t);
+                          return doTipo.length ? (
+                            <optgroup key={t} label={t === "relacionamento" ? "Relacionamento" : t === "sdr" ? "SDRs (só template)" : "Marketing (só template)"}>
+                              {doTipo.map((n) => <option key={n.phone_number_id} value={n.phone_number_id}>{n.rotulo}{n.numero ? ` · final ${n.numero.replace(/\D/g, "").slice(-4)}` : ""}</option>)}
+                            </optgroup>
+                          ) : null;
+                        })}
+                      </select>
+                      <Botao variante="fantasma" disabled={sincronizando || !numeroId} onClick={() => {
+                        setSincronizando(true);
+                        sincronizarModelosRel(numeroId).then((r) => { notifySuccess(`${r.total} modelo(s), ${r.aprovados} aprovado(s) neste número.`); onModelosMudaram?.(); })
+                          .catch((e) => notifyError(erroDe(e, "Não sincronizou."))).finally(() => setSincronizando(false));
+                      }}>{sincronizando ? "Sincronizando…" : "Sincronizar modelos deste número"}</Botao>
+                    </div>
+                  </Campo>
+                  {soTemplate && <Aviso>Pelo número {numero?.tipo === "sdr" ? "do SDR" : "do Marketing"} só sai template aprovado. As respostas do cliente caem no WhatsApp desse número, não no Atendimento do Relacionamento.</Aviso>}
+                </div>
+              )}
               {!aprovados.length ? (
-                <Aviso>Nenhum modelo aprovado no número do Relacionamento. Crie e aprove o modelo no WhatsApp Manager da Meta e clique em “Sincronizar modelos” (aba Número e ritmo).</Aviso>
+                <Aviso>Nenhum modelo aprovado {numero ? `no número “${numero.rotulo}”` : "no número do Relacionamento"}. Crie e aprove o modelo no WhatsApp Manager da Meta (na conta desse número) e clique em “Sincronizar modelos deste número”.</Aviso>
               ) : (
                 <div role="radiogroup" aria-label="Modelo aprovado" className="grid gap-2 sm:grid-cols-2">
                   {aprovados.map((m) => {
@@ -280,7 +318,7 @@ export default function NovoDisparoRel({ modelos, simulacao, numerosTeste = [], 
               )}
 
               {botoesResposta.map((b) => (
-                <RespostaDoBotao key={b.indice} rotulo={b.texto} etiquetas={etiquetas}
+                <RespostaDoBotao key={b.indice} rotulo={b.texto} etiquetas={etiquetas} soTemplate={soTemplate}
                   r={extra.respostas?.[String(b.indice)] ?? {}}
                   set={(r) => setExtra({ ...extra, respostas: { ...extra.respostas, [String(b.indice)]: r } })} />
               ))}
@@ -313,6 +351,7 @@ export default function NovoDisparoRel({ modelos, simulacao, numerosTeste = [], 
               <Campo rotulo="Nome do disparo"><Entrada value={nome} placeholder="Ex.: Datas 2027 — quem foi pro Japão" onChange={(e) => setNome(e.target.value)} /></Campo>
               <dl className="space-y-1.5 text-[13px]" style={{ color: "var(--ink)" }}>
                 <div><dt className="inline font-semibold">Para quem: </dt><dd className="inline">{descreverPublico("relacionamento", limpo)} — {contando ? "…" : `${pv?.total ?? 0} clientes`}</dd></div>
+                {numero && <div><dt className="inline font-semibold">Pelo número: </dt><dd className="inline">{numero.rotulo}</dd></div>}
                 <div><dt className="inline font-semibold">Modelo: </dt><dd className="inline">{modelo?.nome}</dd></div>
                 <div><dt className="inline font-semibold">Quando: </dt><dd className="inline">{quando === "agora" ? "agora" : dataHora.replace("T", " às ")}</dd></div>
                 {botoesResposta.some((b) => extra.respostas?.[String(b.indice)]) && (
@@ -337,7 +376,7 @@ export default function NovoDisparoRel({ modelos, simulacao, numerosTeste = [], 
           )}
         </div>
         <div className="lg:sticky lg:top-0 lg:self-start">
-          <PreviaWhatsApp baloes={balao} contato="Se Tu For, Eu Vou! · Relacionamento" vazio="Escolha o modelo pra ver a mensagem." />
+          <PreviaWhatsApp baloes={balao} contato={numero && numero.tipo !== "relacionamento" ? numero.rotulo : "Se Tu For, Eu Vou! · Relacionamento"} vazio="Escolha o modelo pra ver a mensagem." />
         </div>
       </div>
     </Modal>

@@ -204,7 +204,8 @@ export async function montarFila({ campanha, recebem, de = 'rascunho' }) {
   const mkt = campanha.setor === 'marketing';
   const linhas = recebem.map((a) => ({
     campanha_id: campanha.id, lead_id: a.lead_id || null, cliente_id: a.cliente_id || null, viagem_id: a.viagem_id || null,
-    sdr_id: a.sdr_id || null, phone_number_id: a.phone_number_id, nome: a.nome, telefone: a.telefone,
+    // 0411: campanha do Rel com número escolhido → todo mundo sai por ele.
+    sdr_id: a.sdr_id || null, phone_number_id: campanha.phone_number_id || a.phone_number_id, nome: a.nome, telefone: a.telefone,
     // Colunas da 0242 só nas campanhas do Marketing: Comercial/Rel continuam
     // funcionando mesmo antes de a 0242 ser aplicada.
     ...(mkt ? { contato_id: a.contato_id || null, inscricao_id: a.inscricao_id || null } : {}),

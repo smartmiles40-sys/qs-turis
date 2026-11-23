@@ -51,7 +51,7 @@ import {
 import { acaoMarketing, acordarAgendadas, lerNumeroMkt, rodarRecorrencias, rodarSequencias } from './_mktDisparo.js';
 import { acaoMktOficial, juntarModelosMkt, rodadaMkt } from './_mktDisparoOficial.js';
 import { conferirExtra } from './_mktOficialRegras.js';
-import { acaoRelOficial, estadoRel, juntarModelosRel, lerConfigRel, numerosTesteRel, registrarClique, rodadaRel } from './_relDisparoOficial.js';
+import { acaoRelOficial, estadoRel, juntarModelosRel, lerConfigRel, numeroDoDisparo, numerosTesteRel, registrarClique, rodadaRel } from './_relDisparoOficial.js';
 import { conferirRespostas, urlSegura } from './_relDisparoRegras.js';
 import { rodadaFluxosRel, iniciarTesteRel, agendarDisparoFluxo, cancelarDisparoFluxo, modelosParaFluxo } from './_relFluxoMotor.js';
 import { simularFluxo } from './_mktAutoRegras.js';
@@ -277,7 +277,11 @@ export default async function handler(req, res) {
     if (acao === 'criar') {
       const nome = String(body.nome || '').trim();
       if (nome.length < 2) return res.status(400).json({ error: 'Dê um nome à campanha.' });
-      const modelo = cfg.modelos.find((m) => m.nome === body.modelo_nome && (m.idioma || 'pt_BR') === (body.modelo_idioma || 'pt_BR'));
+      // 0411: o Rel escolhe o número (Rel, SDR ou Marketing); o modelo tem que ser da conta da Meta DELE.
+      const numeroRel = setor === 'relacionamento' ? await numeroDoDisparo(body.phone_number_id || null) : null;
+      if (setor === 'relacionamento' && !numeroRel) return res.status(400).json({ error: 'Escolha um número conectado pra mandar.' });
+      const daConta = (m) => setor !== 'relacionamento' || (m.origem === 'meta' ? (m.waba || '') === (numeroRel.waba_id || '') : numeroRel.tipo === 'relacionamento');
+      const modelo = cfg.modelos.find((m) => m.nome === body.modelo_nome && (m.idioma || 'pt_BR') === (body.modelo_idioma || 'pt_BR') && daConta(m));
       if (!modelo || modelo.status !== 'aprovado') return res.status(400).json({ error: 'Escolha um modelo APROVADO pela Meta.' });
       const params = body.params && typeof body.params === 'object' ? body.params : {};
       const falta = varsDoCorpo(modelo.corpo).find((k) => !params[k] || !fontesDo(setor).includes(params[k].fonte) || (['texto', 'campo'].includes(params[k].fonte) && !String(params[k].valor || '').trim()));
@@ -299,6 +303,10 @@ export default async function handler(req, res) {
         if (setor === 'relacionamento') {
           const rs = conferirRespostas(modelo, body.envio_extra?.respostas);
           if (rs.erro) return res.status(400).json({ error: rs.erro });
+          // Pelo número de SDR/Marketing só sai template: nada de resposta em texto no botão.
+          if (numeroRel.tipo !== 'relacionamento' && Object.values(rs.respostas).some((x) => String(x?.texto || '').trim())) {
+            return res.status(400).json({ error: 'Pelo número de SDR ou do Marketing só sai template aprovado: tire a resposta em texto dos botões (etiqueta e aviso continuam valendo).' });
+          }
           if (Object.keys(rs.respostas).length) extraMkt.envio_extra = { ...ex.extra, respostas: rs.respostas };
         }
       }
@@ -309,6 +317,7 @@ export default async function handler(req, res) {
           params, publico: body.publico || {}, cadence_id: setor === 'comercial' ? body.cadence_id : null,
           grupo_link: body.grupo_link || null, criado_por: u.id,
           ...(extraMkt || {}),
+          ...(numeroRel && numeroRel.tipo !== 'relacionamento' ? { phone_number_id: numeroRel.phone_number_id } : {}),
         },
       });
       return res.status(200).json({ campanha: nova?.[0] });
@@ -317,7 +326,9 @@ export default async function handler(req, res) {
     if (acao === 'iniciar') {
       if (campanha.status !== 'rascunho') return res.status(409).json({ error: 'Esta campanha já foi iniciada.' });
       const p = await montarPublico({ setor, publico: campanha.publico, ritmo: cfg.ritmo });
-      if (setor === 'relacionamento' && !p.numeroOk) return res.status(409).json({ error: 'O número do Relacionamento não está conectado na Meta.' });
+      if (setor === 'relacionamento' && !(campanha.phone_number_id ? await numeroDoDisparo(campanha.phone_number_id) : p.numeroOk)) {
+        return res.status(409).json({ error: campanha.phone_number_id ? 'O número escolhido pra este disparo não está conectado.' : 'O número do Relacionamento não está conectado na Meta.' });
+      }
       if (setor === 'marketing' && !p.numeroOk) return res.status(409).json({ error: 'O Marketing ainda não tem número (aba Número). Sem número, não envia.' });
       if (!p.recebem.length) return res.status(400).json({ error: 'Ninguém recebe com esse filtro.' });
       const f = await montarFila({ campanha, recebem: p.recebem, de: 'rascunho' });

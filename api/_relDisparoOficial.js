@@ -71,6 +71,38 @@ export async function lerNumeroRel() {
   return { phone_number_id: n.phone_number_id, numero: n.numero, rotulo: n.nome_verificado || 'Relacionamento', conectado: true };
 }
 
+/**
+ * 0411 (23/11/2026): números que o disparo do Rel pode usar — o do Rel (padrão)
+ * + os dos SDRs e do Marketing conectados com token. Pelos dos SDRs só sai
+ * template (o disparo é só template; a resposta em texto do botão fica off).
+ * [{ phone_number_id, numero, rotulo, tipo: 'relacionamento'|'sdr'|'marketing', conectado, waba_id }]
+ */
+export async function numerosDoDisparo() {
+  const rel = await lerNumeroRel().catch(() => null);
+  const linhas = (await rest('qs_wa_numeros_meta?select=phone_number_id,numero,rotulo,setor,status,segredo_id,waba_id&order=setor.asc,rotulo.asc').catch(() => [])) || [];
+  const lista = [];
+  if (rel?.phone_number_id) {
+    const w = linhas.find((n) => String(n.phone_number_id) === String(rel.phone_number_id))?.waba_id || null;
+    lista.push({ phone_number_id: String(rel.phone_number_id), numero: rel.numero || null, rotulo: `Relacionamento · ${rel.rotulo || 'número oficial'}`, tipo: 'relacionamento', conectado: Boolean(rel.conectado), waba_id: w });
+  }
+  for (const n of linhas) {
+    const id = String(n.phone_number_id || '');
+    if (!/^\d{6,30}$/.test(id) || id === String(rel?.phone_number_id || '')) continue;
+    if (n.status !== 'conectado' || !n.segredo_id) continue;
+    const tipo = n.setor === 'marketing' ? 'marketing' : n.setor === 'comercial' ? 'sdr' : null;
+    if (!tipo) continue;
+    lista.push({ phone_number_id: id, numero: n.numero || null, rotulo: `${tipo === 'sdr' ? 'SDR' : 'Marketing'} · ${n.rotulo || id.slice(-4)}`, tipo, conectado: true, waba_id: n.waba_id || null });
+  }
+  return lista;
+}
+
+/** O número de UMA campanha (phone_number_id null = o do Rel). null se não serve mais. */
+export async function numeroDoDisparo(phoneId) {
+  const lista = await numerosDoDisparo();
+  if (!phoneId) return lista.find((n) => n.tipo === 'relacionamento') || null;
+  return lista.find((n) => n.phone_number_id === String(phoneId)) || null;
+}
+
 async function patchEnvio(id, body, filtro = '') {
   try {
     await rest(`qs_disparo_envios?id=eq.${id}${filtro}`, { method: 'PATCH', prefer: 'return=minimal', body });
@@ -100,12 +132,12 @@ async function marcarOptoutCliente(clienteId) {
 
 // ── Modelos (WABA do Relacionamento) ────────────────────────────────────────
 
-export async function sincronizarModelosRel() {
-  const numero = await lerNumeroRel();
-  if (!numero?.phone_number_id) return { erro: 'O Relacionamento não tem número conectado.' };
+export async function sincronizarModelosRel(phoneId = null) {
+  const numero = await numeroDoDisparo(phoneId);
+  if (!numero?.phone_number_id) return { erro: phoneId ? 'Esse número não está conectado.' : 'O Relacionamento não tem número conectado.' };
   const cr = await credenciaisDaMeta(numero.phone_number_id).catch(() => null);
-  if (!cr?.token) return { erro: 'O QS não tem o token do número do Relacionamento (conecte pelo painel de WhatsApp).' };
-  if (!cr.waba) return { erro: 'Não achei a WABA do número do Relacionamento.' };
+  if (!cr?.token) return { erro: `O QS não tem o token do número "${numero.rotulo}" (conecte pelo painel de WhatsApp).` };
+  if (!cr.waba) return { erro: `Não achei a conta da Meta (WABA) do número "${numero.rotulo}".` };
 
   const inicio = new Date().toISOString();
   const base = `/${cr.waba}/message_templates?fields=id,name,language,status,category,parameter_format,components,rejected_reason&limit=100`;
@@ -119,11 +151,11 @@ export async function sincronizarModelosRel() {
   }
   const linhas = itens.map((t) => ({ ...modeloDaMeta(t, cr.waba), sincronizado_em: inicio })).filter((m) => m.nome);
   for (let i = 0; i < linhas.length; i += 200) {
-    await rest('rel_wa_modelos?on_conflict=nome,idioma', {
+    await rest('rel_wa_modelos?on_conflict=waba_id,nome,idioma', {
       method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal', body: linhas.slice(i, i + 200), timeoutMs: 20_000,
     });
   }
-  await rest(`rel_wa_modelos?sincronizado_em=lt.${encodeURIComponent(inicio)}`, { method: 'DELETE', prefer: 'return=minimal' }).catch(() => null);
+  await rest(`rel_wa_modelos?waba_id=eq.${encodeURIComponent(cr.waba)}&sincronizado_em=lt.${encodeURIComponent(inicio)}`, { method: 'DELETE', prefer: 'return=minimal' }).catch(() => null);
   return { total: linhas.length, aprovados: linhas.filter((m) => m.status === 'APPROVED').length };
 }
 
@@ -132,21 +164,22 @@ export async function lerModelosRel() {
 }
 
 /** Modelo da Meta no formato da tela, marcado como do Relacionamento. */
-export const modeloRelParaTela = (m) => ({ ...modeloParaTela(m), setor: 'relacionamento' });
+export const modeloRelParaTela = (m) => ({ ...modeloParaTela(m), setor: 'relacionamento', waba: m.waba_id || null });
 
 /** Lista da tela do Rel = os da WABA do Rel + os montados à mão do Rel sem par na Meta. */
 export async function juntarModelosRel(modelosCfg) {
   const meta = (await lerModelosRel()).map(modeloRelParaTela);
-  const k = (m) => `${m.nome}|${m.idioma || 'pt_BR'}`;
+  const k = (m) => `${m.waba || ''}|${m.nome}|${m.idioma || 'pt_BR'}`;
   const tem = new Set(meta.map(k));
   return [...meta, ...(modelosCfg || []).filter((m) => (!m.setor || m.setor === 'relacionamento') && !tem.has(k(m)))];
 }
 
-async function modeloDaCampanha(c, modo) {
-  const r = await rest(`rel_wa_modelos?select=*&nome=eq.${encodeURIComponent(c.modelo_nome)}&idioma=eq.${encodeURIComponent(c.modelo_idioma || 'pt_BR')}&limit=1`).catch(() => null);
+async function modeloDaCampanha(c, modo, waba = null) {
+  const daWaba = waba ? `&waba_id=eq.${encodeURIComponent(waba)}` : '';
+  const r = await rest(`rel_wa_modelos?select=*&nome=eq.${encodeURIComponent(c.modelo_nome)}&idioma=eq.${encodeURIComponent(c.modelo_idioma || 'pt_BR')}${daWaba}&limit=1`).catch(() => null);
   const meta = r?.[0] || null;
   if (meta) return meta.status === 'APPROVED' ? { modelo: meta } : { erro: `O modelo "${c.modelo_nome}" está ${meta.status || 'sem status'} na Meta — só APROVADO dispara.` };
-  if (modo === 'real') return { erro: `O modelo "${c.modelo_nome}" não está na WABA do Relacionamento (clique em "Sincronizar modelos").` };
+  if (modo === 'real') return { erro: `O modelo "${c.modelo_nome}" não está aprovado na conta da Meta do número escolhido (clique em "Sincronizar modelos" desse número).` };
   // Simulação com modelo montado à mão: usa o corpo guardado na campanha.
   if (!c.modelo_corpo) return { erro: 'Modelo não encontrado.' };
   return { modelo: { nome: c.modelo_nome, idioma: c.modelo_idioma || 'pt_BR', categoria: 'MARKETING', corpo: c.modelo_corpo, formato_parametros: 'POSITIONAL', cabecalho_formato: null, botoes: [] } };
@@ -209,7 +242,7 @@ async function bolhaNaConversa({ phoneId, telefone, wamid, texto, campanha }) {
  * Confere de novo na hora e manda UM envio da fila. Devolve:
  *   { feito: true } | { acao: 'esperar', motivo } | { acao: 'parar', motivo }
  */
-async function enviarUmRel({ envio, c, modelo, modo, cr, cache }) {
+async function enviarUmRel({ envio, c, modelo, modo, cr, cache, ehRel = true }) {
   const pular = (motivo) => patchEnvio(envio.id, { status: 'pulado', motivo }).then(() => ({ feito: true }));
   const devolver = (r) => patchEnvio(envio.id, { pego_em: null }).then(() => r);
   try {
@@ -241,7 +274,9 @@ async function enviarUmRel({ envio, c, modelo, modo, cr, cache }) {
       tentativas: (envio.tentativas || 0) + 1, motivo: r.simulado ? 'simulação' : null,
       cobranca_categoria: String(modelo.categoria || 'MARKETING').toLowerCase(),
     });
-    if (!r.simulado) await bolhaNaConversa({ phoneId: cr.phoneId, telefone: tel, wamid: r.wamid, texto: r.texto, campanha: c });
+    // A conversa do Atendimento do Rel só existe pro número do Rel; pelo número do
+    // SDR o celular dele já mostra a mensagem (coexistência).
+    if (!r.simulado && ehRel) await bolhaNaConversa({ phoneId: cr.phoneId, telefone: tel, wamid: r.wamid, texto: r.texto, campanha: c });
     return { feito: true };
   } catch (e) {
     await patchEnvio(envio.id, { status: 'erro', motivo: String(e?.message || 'erro').slice(0, 300), tentativas: (envio.tentativas || 0) + 1 });
@@ -263,14 +298,14 @@ export async function contar(phone, desde, simulado) {
 }
 
 /** Decide o modo (real/simulação) e as credenciais. { modo, cr, numero, tier } ou { parado }. */
-export async function prepararModo(cfg) {
-  const numero = await lerNumeroRel();
+export async function prepararModo(cfg, numero0 = undefined) {
+  const numero = numero0 === undefined ? await lerNumeroRel() : numero0;
   if (cfg.simulacao) return { modo: 'simulacao', cr: numero?.phone_number_id ? { phoneId: numero.phone_number_id } : null, numero, tier: cfg.ritmo.tier_padrao };
   const cr = numero?.phone_number_id ? await credenciaisDaMeta(numero.phone_number_id).catch(() => null) : null;
   const t = travasDoEnvioRel({ envLigado: cfg.envLigado, simulacao: cfg.simulacao, numero, temToken: Boolean(cr?.token) });
   if (!t.real) return { parado: `envio real travado: ${t.motivos.join('; ')}` };
   const saude = await saudeDoNumero(numero.phone_number_id, cr);
-  if (String(saude?.qualidade || '').toUpperCase() === 'RED') return { parado: 'a qualidade do número do Relacionamento está VERMELHA na Meta — nada sai até melhorar' };
+  if (String(saude?.qualidade || '').toUpperCase() === 'RED') return { parado: `a qualidade do número "${numero.rotulo || 'Relacionamento'}" está VERMELHA na Meta — nada sai até melhorar` };
   return { modo: 'real', cr: { ...cr, phoneId: cr.phoneId || numero.phone_number_id }, numero, tier: saude?.tier || cfg.ritmo.tier_padrao };
 }
 
@@ -282,9 +317,36 @@ export async function rodadaRel({ limiteMs = 45_000, agora = new Date() } = {}) 
   const campanhas = (await rest('qs_disparo_campanhas?select=*&setor=eq.relacionamento&status=eq.enviando&order=iniciada_em.asc').catch(() => [])) || [];
   if (!campanhas.length) return { ok: true, campanhas: [] };
 
-  const m0 = await prepararModo(cfg);
+  // 0411: cada número tem o próprio teto, tier e credencial → uma rodada por número.
+  const lista = await numerosDoDisparo();
+  const relPh = lista.find((n) => n.tipo === 'relacionamento')?.phone_number_id || '';
+  const grupos = new Map();
+  for (const c of campanhas) {
+    const ph = String(c.phone_number_id || relPh);
+    grupos.set(ph, [...(grupos.get(ph) || []), c]);
+  }
+  const porNumero = [];
+  for (const [ph, cs] of grupos) {
+    if (Date.now() - inicio > limiteMs) break;
+    const numero = lista.find((n) => n.phone_number_id === ph) || null;
+    if (!numero) {
+      for (const c of cs) await pausarCampanha(c.id, 'o número escolhido pra este disparo não está mais conectado');
+      porNumero.push({ numero: ph.slice(-4), parado: 'número desconectado' });
+      continue;
+    }
+    porNumero.push({ numero: numero.rotulo, ...(await rodadaDoNumero({ cfg, numero, campanhas: cs, inicio, limiteMs, agora })) });
+  }
+  // Um número só (o caso de sempre): mesmo formato de antes ({ ok, modo, … } ou { parado }).
+  if (porNumero.length === 1) return porNumero[0].parado ? { parado: porNumero[0].parado, numero: porNumero[0].numero } : porNumero[0];
+  return { ok: true, numeros: porNumero };
+}
+
+async function rodadaDoNumero({ cfg, numero: numeroEscolhido, campanhas, inicio, limiteMs, agora }) {
+  const m0 = await prepararModo(cfg, numeroEscolhido);
   if (m0.parado) return { parado: m0.parado };
   const { modo, cr, numero, tier } = m0;
+  const ehRel = numeroEscolhido.tipo === 'relacionamento';
+  const waba = numeroEscolhido.waba_id || cr?.waba || null;
   const ph = numero?.phone_number_id || null;
   const sim = modo === 'simulacao';
   const [n24, nHoje] = await Promise.all([contar(ph, new Date(agora.getTime() - 86_400_000), sim), contar(ph, inicioDoDiaBRT(agora), sim)]);
@@ -300,7 +362,7 @@ export async function rodadaRel({ limiteMs = 45_000, agora = new Date() } = {}) 
 
   for (const c of campanhas) {
     if (folga <= 0 || parouNumero || Date.now() - inicio > limiteMs) break;
-    const m = await modeloDaCampanha(c, modo);
+    const m = await modeloDaCampanha(c, modo, waba);
     if (m.erro) { await pausarCampanha(c.id, m.erro); resumo.push({ campanha: c.nome, pausada: m.erro }); continue; }
 
     const cands = (await rest(
@@ -320,7 +382,7 @@ export async function rodadaRel({ limiteMs = 45_000, agora = new Date() } = {}) 
         await patchEnvio(pegou.id, { status: 'erro', motivo: 'envio interrompido no meio — pode ter saído; não reenviado pra não duplicar' });
         continue;
       }
-      const r = await enviarUmRel({ envio: pegou, c, modelo: m.modelo, modo, cr, cache });
+      const r = await enviarUmRel({ envio: pegou, c, modelo: m.modelo, modo, cr, cache, ehRel });
       if (r.acao === 'esperar') { parouNumero = r.motivo; break; }
       if (r.acao === 'parar') { pausou = r.motivo; break; }
       feitos++;
@@ -349,11 +411,11 @@ export async function enviarTeste({ telefone, campanha, nomeTeste }) {
   const tel = foneDestino(telefone);
   if (!tel) return { erro: 'Telefone inválido. Use DDD + número.' };
   if (!envLigadoRel()) return { erro: 'O envio real está travado na Vercel (REL_DISPARO_ENVIO=1). Sem ele nem o teste sai.' };
-  const numero = await lerNumeroRel();
-  if (!numero?.conectado) return { erro: 'O número do Relacionamento não está conectado.' };
+  const numero = await numeroDoDisparo(campanha.phone_number_id || null);
+  if (!numero?.conectado) return { erro: campanha.phone_number_id ? 'O número escolhido não está conectado.' : 'O número do Relacionamento não está conectado.' };
   const cr = await credenciaisDaMeta(numero.phone_number_id).catch(() => null);
-  if (!cr?.token) return { erro: 'O QS não tem o token do número do Relacionamento.' };
-  const m = await modeloDaCampanha(campanha, 'real');
+  if (!cr?.token) return { erro: `O QS não tem o token do número "${numero.rotulo}".` };
+  const m = await modeloDaCampanha(campanha, 'real', numero.waba_id || cr.waba || null);
   if (m.erro) return { erro: m.erro };
   const r = await mandarModelo({
     c: campanha, modelo: m.modelo, modo: 'real', cr: { ...cr, phoneId: cr.phoneId || numero.phone_number_id },
@@ -361,7 +423,7 @@ export async function enviarTeste({ telefone, campanha, nomeTeste }) {
     envioId: null,
   });
   if (!r.wamid) return { erro: r.erro ? classificarErroMeta(r.codigo, r.erro).motivo : 'A Meta recusou.' };
-  await bolhaNaConversa({ phoneId: cr.phoneId || numero.phone_number_id, telefone: tel, wamid: r.wamid, texto: r.texto, campanha: { ...campanha, nome: `TESTE ${campanha.nome || ''}` } });
+  if (numero.tipo === 'relacionamento') await bolhaNaConversa({ phoneId: cr.phoneId || numero.phone_number_id, telefone: tel, wamid: r.wamid, texto: r.texto, campanha: { ...campanha, nome: `TESTE ${campanha.nome || ''}` } });
   return { ok: true, wamid: r.wamid };
 }
 
@@ -473,8 +535,9 @@ export async function estadoRel({ conferir = false } = {}) {
   const modelos = await lerModelosRel();
   const saude = conferir && cr ? await saudeDoNumero(numero.phone_number_id, cr) : null;
   const numerosTeste = await numerosTesteRel();
+  const numeros = await numerosDoDisparo();
   return {
-    numerosTeste,
+    numerosTeste, numeros,
     simulacao: cfg.simulacao, envLigado: cfg.envLigado, real: travas.real, faltam: travas.motivos,
     temToken: Boolean(cr?.token), numero, ritmo: cfg.ritmo, precos: cfg.precos, saude,
     modelos: { total: modelos.length, aprovados: modelos.filter((m) => m.status === 'APPROVED').length, sincronizadoEm: modelos[0]?.sincronizado_em || null },
@@ -486,7 +549,7 @@ export async function acaoRelOficial({ acao, body, u }) {
 
   if (acao === 'rel_sincronizar_modelos') {
     try {
-      const r = await sincronizarModelosRel();
+      const r = await sincronizarModelosRel(/^\d{6,30}$/.test(String(body.phoneId || '')) ? String(body.phoneId) : null);
       return r.erro ? { status: 400, json: { error: r.erro } } : { status: 200, json: { ok: true, ...r } };
     } catch (e) {
       return { status: 502, json: { error: `A Meta respondeu: ${e?.message || 'falhou'}` } };
@@ -538,7 +601,7 @@ export async function acaoRelOficial({ acao, body, u }) {
     const c = UUID.test(String(body.campanhaId || ''))
       ? (await rest(`qs_disparo_campanhas?select=*&id=eq.${body.campanhaId}&limit=1`).catch(() => null))?.[0]
       : body.rascunho && typeof body.rascunho === 'object'
-        ? { nome: String(body.rascunho.nome || 'rascunho'), modelo_nome: body.rascunho.modelo_nome, modelo_idioma: body.rascunho.modelo_idioma || 'pt_BR', params: body.rascunho.params || {}, envio_extra: body.rascunho.envio_extra || {}, grupo_link: body.rascunho.grupo_link || null }
+        ? { nome: String(body.rascunho.nome || 'rascunho'), phone_number_id: /^\d{6,30}$/.test(String(body.rascunho.phone_number_id || '')) ? String(body.rascunho.phone_number_id) : null, modelo_nome: body.rascunho.modelo_nome, modelo_idioma: body.rascunho.modelo_idioma || 'pt_BR', params: body.rascunho.params || {}, envio_extra: body.rascunho.envio_extra || {}, grupo_link: body.rascunho.grupo_link || null }
         : null;
     if (!c || (c.setor && c.setor !== 'relacionamento')) return { status: 400, json: { error: 'Escolha o modelo antes de testar.' } };
     // paraTeste: manda pra TODOS os números de teste configurados, cada um com o próprio nome.
