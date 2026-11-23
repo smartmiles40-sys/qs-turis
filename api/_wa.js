@@ -15,6 +15,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
+import { coordenaSetor } from './_coordena.js';
 
 // ── Assinatura do SDR ───────────────────────────────────────────────────────
 // Todo mundo escreve pelo MESMO número oficial. Do lado do cliente, isso
@@ -264,7 +265,7 @@ export async function getSupabaseUserId(authHeader) {
  */
 export async function assertCanAccessLead(userId, leadId) {
   const [users, lead] = await Promise.all([
-    rest(`qs_users?select=id,name,role,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`),
+    rest(`qs_users?select=id,name,role,setores,coordena,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`),
     getLead(leadId),
   ]);
   const user = (Array.isArray(users) && users[0]) || null;
@@ -275,7 +276,7 @@ export async function assertCanAccessLead(userId, leadId) {
   // Espelha a migration 0050, que abriu o mesmo caminho na leitura — as duas
   // pontas precisam andar juntas, senão ele VÊ a conversa e toma 403 ao
   // responder, que é pior do que não ver.
-  const podeTudo = user.role === 'admin' || user.role === 'gestor' || user.role === 'closer';
+  const podeTudo = user.role === 'admin' || user.role === 'gestor' || user.role === 'closer' || coordenaSetor(user, 'comercial');
   if (podeTudo || lead.owner_id === userId || lead.owner_id == null) return { ok: true, lead, user };
 
   // Quem passou o lead adiante continua podendo falar com o cliente. Sem este

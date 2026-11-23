@@ -364,7 +364,7 @@ async function checarPessoas(agoraMs) {
 // ---------------------------------------------------------------- envio
 
 async function destinatarios() {
-  const rows = await rest('qs_users?select=id,name,role,setores&is_active=eq.true&role=in.(admin,gestor)');
+  const rows = await rest('qs_users?select=id,name,role,setores,coordena&is_active=eq.true&or=(role.in.(admin,gestor),coordena.neq.{})');
   return Array.isArray(rows) ? rows : [];
 }
 
@@ -379,7 +379,8 @@ export function setorDoAlerta(id) {
 export function destinatariosDoAlerta(alertaId, pessoas) {
   const setor = setorDoAlerta(alertaId);
   return (pessoas || []).filter((p) => p?.role === 'admin'
-    || (p?.role === 'gestor' && Array.isArray(p.setores) && p.setores.includes(setor)));
+    || (p?.role === 'gestor' && Array.isArray(p.setores) && p.setores.includes(setor))
+    || (Array.isArray(p?.coordena) && p.coordena.includes(setor)));
 }
 
 /** O aviso anterior do mesmo alerta, ainda não lido, sai do sino (fica só o novo). */

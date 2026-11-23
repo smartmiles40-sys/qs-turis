@@ -59,6 +59,8 @@ export interface SdrUser {
   whatsapp_number?: string | null;
   /** Áreas que a pessoa pode abrir (0100). Admin tem as duas sempre. */
   setores?: Setor[] | null;
+  /** 0413: setores em que é CO-COORDENADORA (mantém o cargo, ganha os poderes de gestor ali). */
+  coordena?: Setor[] | null;
   created_at: string;
 }
 

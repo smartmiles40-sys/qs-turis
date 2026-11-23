@@ -15,7 +15,7 @@
 // Configurações). O servidor confere de novo.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
-import { useQsAuth, setoresDe } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import {
   carregarPainelMeta, conectarPelaMeta, pedirHistoricoMeta, copiarModelosDoOficial, desconectarNumeroMeta, registrarNumeroMeta, salvarConfigId,
   type NumeroMeta, type PainelMeta,
@@ -42,7 +42,7 @@ const msg = (e: unknown, padrao: string) => (e instanceof Error ? e.message : pa
 
 export default function WhatsAppPage() {
   const { currentUser } = useQsAuth();
-  const pode = currentUser?.role === "admin" || (currentUser?.role === "gestor" && setoresDe(currentUser).includes("relacionamento"));
+  const pode = coordena(currentUser, "relacionamento");
   const ehAdmin = currentUser?.role === "admin";
   // Apontar o webhook: o servidor (wa-config) já aceita gestor; a gestora do Rel também resolve.
   const podeWebhook = pode;

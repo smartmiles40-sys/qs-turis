@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { setMeetingStatus, setMeetingSal, deleteMeeting, gerarSalaMeet, avisarBitrixDaSala, reenviarDesfechoAoBitrix, temDesfecho, desfechoDaOportunidadeFutura, type DesfechoCompleto } from "@/lib/qs/meetings";
 import DesfechoVenda from "./DesfechoVenda";
@@ -142,7 +142,7 @@ export default function MeetingDetailModal({
     );
   }
 
-  const isManager = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const isManager = coordena(currentUser, "comercial");
   const podeMexer =
     isManager || meeting.owner_id === currentUser?.id || meeting.closer_id === currentUser?.id;
 

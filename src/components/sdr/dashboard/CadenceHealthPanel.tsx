@@ -35,7 +35,7 @@ function startOfDay(d: Date): number { const x = new Date(d); x.setHours(0, 0, 0
 
 export default function CadenceHealthPanel() {
   const { currentUser } = useQsAuth();
-  const isManager = !!currentUser && canSeeAllData(currentUser.role);
+  const isManager = !!currentUser && canSeeAllData(currentUser);
   const [stages, setStages] = useState<LeadStage[]>([]);
   // Leads que CONCLUÍRAM o plano (sem tarefa aberta) e seguem sem desfecho —
   // o fim de cadência agora é visível aqui, não um limbo (sprint 2026-07-24).

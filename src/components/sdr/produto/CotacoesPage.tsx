@@ -8,7 +8,7 @@
 // enquanto a cotação não foi entregue.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import { fetchQsUsers } from "@/lib/qs/queries";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import {
@@ -29,7 +29,7 @@ interface Pendente { cot: Cotacao; para: CotacaoStatus }
 
 export default function CotacoesPage() {
   const { currentUser } = useQsAuth();
-  const gestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const gestor = coordena(currentUser, "comercial");
   const [lista, setLista] = useState<Cotacao[] | null>(null);
   const [nomes, setNomes] = useState<Map<string, string>>(new Map());
   const [periodo, setPeriodo] = useState("30");

@@ -25,16 +25,17 @@ import { pedirHistorico, conectarNumero, desconectarNumero, listarConexoes, salv
 import { rest } from './_supabaseAdmin.js';
 import { diagAutorizado, diagnosticoMeta } from './_metaDiag.js';
 import { sincronizarPermissao, gravarPermissao, lerPermissaoLocal, permissaoVale } from './_permissaoLigacao.js';
+import { coordenaSetor } from './_coordena.js';
 
 /** Só admin/gestor mexe nos modelos e nas respostas prontas. */
 async function ehAdmin(userId) {
   const u = await perfil(userId);
-  return !!u && u.is_active !== false && (u.role === 'admin' || u.role === 'gestor');
+  return !!u && u.is_active !== false && (u.role === 'admin' || u.role === 'gestor' || coordenaSetor(u, 'comercial'));
 }
 
 async function perfil(userId) {
   try {
-    const u = await rest(`qs_users?select=id,name,role,setores,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`);
+    const u = await rest(`qs_users?select=id,name,role,setores,coordena,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`);
     return (Array.isArray(u) && u[0]) || null;
   } catch { return null; }
 }
@@ -356,7 +357,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'O nome do modelo do Financeiro começa com fin_ (só minúsculas, números e _).' });
     }
     if (body.acao === 'excluir') {
-      if (!(eu.role === 'admin' || (eu.role === 'gestor' && setores.includes('financeiro')))) {
+      if (!(eu.role === 'admin' || (eu.role === 'gestor' && setores.includes('financeiro')) || coordenaSetor(eu, 'financeiro'))) {
         return res.status(403).json({ error: 'Só a gestão do Financeiro exclui modelo.' });
       }
       const r = await excluirModelo(nome, phone);

@@ -1082,7 +1082,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
     !!currentUser &&
     // O closer atende qualquer conversa (0050) — o card do cliente acompanha,
     // senão o "Abrir card" da lista de WhatsApp termina num beco sem saída.
-    (canSeeAllData(currentUser.role) || currentUser.role === "closer" || lead.owner_id === currentUser.id ||
+    (canSeeAllData(currentUser) || currentUser.role === "closer" || lead.owner_id === currentUser.id ||
       // SDR que MARCOU reunião com este lead continua com acesso depois que o
       // card passa pro closer (Bruno, 18/11: "eles precisam mudar status de
       // reuniões… ter acesso ao perfil mesmo depois do agendamento"). A RLS
@@ -1096,11 +1096,11 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
   // sobrescrevia o desfecho); a saída correta é "Reativar Lead".
   const isClosed = lead.status === "ganho" || lead.status === "perdido";
   // Excluir lead é ação de gestor/admin (RLS leads_delete = qs_is_manager()).
-  const canDeleteLead = !!currentUser && canSeeAllData(currentUser.role);
+  const canDeleteLead = !!currentUser && canSeeAllData(currentUser);
   // Oportunidade futura: decisão do closer (ou da gestão) sobre o NEGÓCIO.
-  const podeOportunidade = !!currentUser && (canSeeAllData(currentUser.role) || currentUser.role === "closer");
+  const podeOportunidade = !!currentUser && (canSeeAllData(currentUser) || currentUser.role === "closer");
   // Cotação de aéreo do SDR: cronômetro, não meta (0206). Sem a migration, some.
-  const podeCotarAereo = !!currentUser && (currentUser.role === "sdr" || canSeeAllData(currentUser.role)) && cotacao !== "sem-tabela";
+  const podeCotarAereo = !!currentUser && (currentUser.role === "sdr" || canSeeAllData(currentUser)) && cotacao !== "sem-tabela";
   const cotandoAgora = cotacao && cotacao !== "sem-tabela" ? cotacao : null;
 
   const agora = new Date();
@@ -1224,7 +1224,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
   function renderItem(i: ItemDaLinha, ultimo: boolean) {
     const n = i.nota;
     // A RLS (0007: notes_update/delete) só aceita autor ou gestor — o menu segue a mesma regra.
-    const podeMexerNaNota = !!n && !!currentUser && (canSeeAllData(currentUser.role) || n.author_id === currentUser.id);
+    const podeMexerNaNota = !!n && !!currentUser && (canSeeAllData(currentUser) || n.author_id === currentUser.id);
     const editando = !!n && editingNoteId === n.id;
     const m = i.reuniao;
     const ponto = i.perigo ? "perigo" : i.tipo;

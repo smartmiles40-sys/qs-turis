@@ -120,7 +120,7 @@ function attemptOf(tags: string[] | null): number {
 
 export default function FupAnalyticsPanel() {
   const { currentUser } = useQsAuth();
-  const isManager = !!currentUser && canSeeAllData(currentUser.role);
+  const isManager = !!currentUser && canSeeAllData(currentUser);
   const [days, setDays] = useState<PeriodDays>(30);
   const [done, setDone] = useState<DoneTask[]>([]);
   const [skipped, setSkipped] = useState<SkippedTask[]>([]);

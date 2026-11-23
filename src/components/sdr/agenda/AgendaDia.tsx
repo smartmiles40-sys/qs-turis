@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { px } from "@/lib/escala";
 import { supabase } from "@/lib/supabase";
-import { useQsAuth, podeExecutar } from "@/contexts/QsAuthContext";
+import { useQsAuth, podeExecutar, coordena } from "@/contexts/QsAuthContext";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import {
   fetchClosers,
@@ -700,7 +700,7 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo, semBotaoAgend
 
       {/* Desfechos que não chegaram no Bitrix (22/09) — só pra gestão, que é
           quem responde pelo número do Dashboard. Mesmo botão de sempre. */}
-      {!demo && (currentUser?.role === "admin" || currentUser?.role === "gestor") && <DesfechosNaoEnviados />}
+      {!demo && coordena(currentUser, "comercial") && <DesfechosNaoEnviados />}
 
       <div className="flex flex-wrap items-start gap-4">
         {/* ── Grade (computador) ───────────────────────────────────────────── */}

@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ProgressBar } from "@/components/ui";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import {
   acaoCampanha, descreverPublico, lerConfig, listarCampanhas, type Campanha, type StatusCampanha,
 } from "@/lib/qs/disparos";
@@ -343,7 +343,7 @@ type Aba = "acompanhar" | "fluxos" | "disparos" | "contatos" | "numero";
 export default function DisparosRelPage() {
   const { currentUser } = useQsAuth();
   const ehAdmin = currentUser?.role === "admin";
-  const ehGestor = ehAdmin || currentUser?.role === "gestor";
+  const ehGestor = coordena(currentUser, "relacionamento");
   const [aba, setAba] = useState<Aba>(() => { try { return (localStorage.getItem("rel_disparos_aba") as Aba) || "fluxos"; } catch { return "fluxos"; } });
   const [est, setEst] = useState<EstadoRel | null>(null);
   const [modelos, setModelos] = useState<ModeloRel[]>([]);
@@ -378,7 +378,7 @@ export default function DisparosRelPage() {
       {aba === "fluxos" && <FluxosRel est={est} />}
       {aba === "disparos" && <AbaDisparos est={est} modelos={modelos} onIrNumero={() => ir("numero")} onModelosMudaram={() => void ler()} />}
       {aba === "contatos" && <ContatosRel ehGestor={ehGestor} />}
-      {aba === "numero" && <AbaNumero est={est} ehAdmin={ehAdmin} podeTeste={ehAdmin || currentUser?.role === "gestor"} onMudou={() => void ler()} />}
+      {aba === "numero" && <AbaNumero est={est} ehAdmin={ehAdmin} podeTeste={ehGestor} onMudou={() => void ler()} />}
     </div>
   );
 }

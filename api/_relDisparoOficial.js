@@ -30,6 +30,7 @@ import { foneDestino, valoresDasVariaveis, preencher, enviarTemplate, naJanela }
 import { numeroDoRelacionamento, numeroConectado } from './_relWa.js';
 import { gravarRel } from './_relEntrada.js';
 import { saudeDoNumero } from './_mktDisparoOficial.js';
+import { coordenaSetor } from './_coordena.js';
 import {
   calcularFolga, pausaEntreEnvios, classificarErroMeta, modeloDaMeta, modeloParaTela,
   montarComponentes, pacoteDoEnvio, custoEstimado,
@@ -557,7 +558,7 @@ export async function etiquetar({ ids, etiquetas, tirar = false, origem = 'manua
 
 const num = (v, min, max, d) => Math.min(max, Math.max(min, Number.isFinite(Number(v)) ? Number(v) : d));
 const hhmm = (v, d) => (/^([01]\d|2[0-3]):[0-5]\d$/.test(String(v || '')) ? String(v) : d);
-const gestorOuAdmin = (u) => u.role === 'admin' || u.role === 'gestor';
+const gestorOuAdmin = (u) => coordenaSetor(u, 'relacionamento');
 
 /**
  * NÚMEROS DE TESTE (19/11): lista fixa (até 10) que o time configura uma vez em

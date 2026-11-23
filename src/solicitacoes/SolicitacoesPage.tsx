@@ -24,7 +24,7 @@
 // Recusadas e canceladas saem do quadro e ficam no Histórico.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
+import { setoresDe, useQsAuth, coordenaAlgum } from "@/contexts/QsAuthContext";
 import { useAvisos } from "@/avisos/AvisosProvider";
 import { PainelConversa, QuadroQ } from "./QuadroConversa";
 import { passaNoFiltro, totalNaoLidas, type FiltroQ } from "./conversa";
@@ -130,7 +130,7 @@ function CentralDoSetor({ setor, links, abrirId, onAbrirId, onMudou, seletor = n
 }) {
   const { currentUser } = useQsAuth();
   const meuId = currentUser?.id ?? "";
-  const gestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const gestor = coordenaAlgum(currentUser);
   // 0266 (04/11/2026): no Marketing, o próprio time ajusta os tipos de pedido
   // que o setor recebe (o banco libera só setor = 'marketing' pra ele).
   const ajustaTipos = gestor || (setor === "marketing" && currentUser?.role === "marketing");

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import { createQsAuthUser, updateQsAuthUser, deleteQsAuthUser } from "@/lib/adminUsers";
 import { loadWorkHours, saveWorkHours, DEFAULT_WORK_HOURS, WEEKDAY_NAMES, type WorkHours } from "@/lib/workHours";
 import { getSetting, setSetting } from "@/lib/qsSettings";
@@ -374,7 +374,7 @@ function UsuariosSection() {
   // todas sempre; os papéis de área (Relacionamento, Financeiro, Operações) têm
   // só a deles — pra esses as caixinhas nem aparecem. SDR/closer/marketing são
   // sempre do Comercial; gestor pode ser só de outra área (ex.: gestora do Rel).
-  const [form, setForm] = useState({ name: "", email: "", role: "sdr" as UserRole, password: "", whatsapp_number: "", areas: ["comercial"] as Setor[] });
+  const [form, setForm] = useState({ name: "", email: "", role: "sdr" as UserRole, password: "", whatsapp_number: "", areas: ["comercial"] as Setor[], coordena: [] as Setor[] });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -389,14 +389,14 @@ function UsuariosSection() {
 
   function openAdd() {
     setEditUser(null);
-    setForm({ name: "", email: "", role: "sdr", password: "", whatsapp_number: "", areas: ["comercial"] });
+    setForm({ name: "", email: "", role: "sdr", password: "", whatsapp_number: "", areas: ["comercial"], coordena: [] });
     setSaveError(null);
     setShowModal(true);
   }
 
   function openEdit(u: SdrUser) {
     setEditUser(u);
-    setForm({ name: u.name, email: u.email, role: u.role, password: "", whatsapp_number: u.whatsapp_number ?? "", areas: (u.setores?.length ? u.setores : ["comercial"]) as Setor[] });
+    setForm({ name: u.name, email: u.email, role: u.role, password: "", whatsapp_number: u.whatsapp_number ?? "", areas: (u.setores?.length ? u.setores : ["comercial"]) as Setor[], coordena: (u.coordena ?? []) as Setor[] });
     setSaveError(null);
     setShowModal(true);
   }
@@ -421,6 +421,8 @@ function UsuariosSection() {
       : PAPEL_DE_AREA.includes(form.role) ? [form.role as Setor]
       : form.role === "gestor" ? (escolhidas.length ? escolhidas : ["comercial"])
       : SETORES.filter((x) => x === "comercial" || escolhidas.includes(x));
+    // 0413: co-coordena só setor que a pessoa acessa; admin e gestor não precisam.
+    const coordenaFinal: Setor[] = form.role === "admin" || form.role === "gestor" ? [] : form.coordena.filter((x) => setores.includes(x));
     try {
       const res = editUser
         ? await updateQsAuthUser({
@@ -429,6 +431,7 @@ function UsuariosSection() {
             email: form.email,
             role: form.role,
             setores,
+            coordena: coordenaFinal,
             whatsapp_number: form.whatsapp_number.trim() || null,
             ...(form.password ? { password: form.password } : {}),
           })
@@ -437,6 +440,7 @@ function UsuariosSection() {
             email: form.email,
             role: form.role,
             setores,
+            coordena: coordenaFinal,
             whatsapp_number: form.whatsapp_number.trim() || null,
             password: form.password,
           });
@@ -630,6 +634,26 @@ function UsuariosSection() {
                             type="checkbox"
                             checked={form.areas.includes(a)}
                             onChange={(e) => setForm(p => ({ ...p, areas: e.target.checked ? [...p.areas, a] : p.areas.filter((x) => x !== a) }))}
+                          />
+                          {NOME_SETOR[a]}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
+                {form.role !== "admin" && form.role !== "gestor" && (
+                  <fieldset className="mt-2.5">
+                    <legend className="text-xs text-gray-600 mb-1">
+                      Co-coordena
+                      <span className="block text-[10px] text-gray-400">Mantém o papel e ganha os poderes de gestor no setor, o tempo todo — cobre quando a coordenação não estiver.</span>
+                    </legend>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                      {(PAPEL_DE_AREA.includes(form.role) ? [form.role as Setor] : SETORES.filter((x) => x === "comercial" || form.areas.includes(x))).map((a) => (
+                        <label key={a} className="flex items-center gap-1.5 cursor-pointer text-xs text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={form.coordena.includes(a)}
+                            onChange={(e) => setForm(p => ({ ...p, coordena: e.target.checked ? [...p.coordena, a] : p.coordena.filter((x) => x !== a) }))}
                           />
                           {NOME_SETOR[a]}
                         </label>
@@ -1907,7 +1931,7 @@ function RespostasProntasCard() {
 
 function AtendimentoSection() {
   const { currentUser } = useQsAuth();
-  const ehGestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const ehGestor = coordena(currentUser, "comercial");
 
   // Assinatura do SDR na mensagem (2026-07-28). Todo mundo escreve pelo mesmo
   // número, então sem isto o cliente não sabe com quem está falando.
@@ -2141,7 +2165,7 @@ export default function SettingsPage() {
   // "Números do WhatsApp" só aparece pra admin/gestor. A rota /api/sdr-pool já
   // recusa quem não é (a checagem que vale é a do servidor), mas deixar o botão
   // à mostra pra um SDR só rende um 403 na cara de quem não podia clicar.
-  const ehGestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const ehGestor = coordena(currentUser, "comercial");
   const itensVisiveis = SIDEBAR_ITEMS.filter((i) => i.key === "mesa" ? podeVerMesa(currentUser) : (i.key !== "numeros" && i.key !== "whatsapp-meta") || ehGestor);
 
   const groups = itensVisiveis.reduce<Record<string, SidebarItem[]>>(

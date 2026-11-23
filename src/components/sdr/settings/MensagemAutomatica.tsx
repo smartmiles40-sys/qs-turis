@@ -29,7 +29,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { listarModelosAdmin, type WaModeloAdmin } from "@/lib/qs/waInbox";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 
 const CHAVE = "primeiro_contato_auto";
 
@@ -77,7 +77,7 @@ function inicioDoDiaSP(): string {
 
 export default function MensagemAutomatica() {
   const { currentUser } = useQsAuth();
-  const podeMexer = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const podeMexer = coordena(currentUser, "comercial");
 
   const [modelos, setModelos] = useState<WaModeloAdmin[]>([]);
   const [cfg, setCfg] = useState<Config>({ ativo: false, gatilho: "lead_novo", teto_dia: 200 });

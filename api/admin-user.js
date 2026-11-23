@@ -45,6 +45,11 @@ const SETORES = new Set(['comercial', 'relacionamento', 'financeiro', 'operacion
 // Áreas que têm "gestor de área" (tudo menos o Comercial) — o papel do atendente
 // tem o MESMO nome da área.
 const AREAS = new Set(['relacionamento', 'financeiro', 'operacional']);
+/** 0413: setores em que é co-coordenador(a). [] limpa; undefined = não mexe. */
+function coordenaValida(v) {
+  if (!Array.isArray(v)) return undefined;
+  return [...new Set(v.filter((x) => SETORES.has(x)))];
+}
 function setoresValidos(v) {
   if (!Array.isArray(v)) return undefined;
   const s = [...new Set(v.filter((x) => SETORES.has(x)))];
@@ -117,7 +122,7 @@ export default async function handler(req, res) {
   // 2) Autorização: admin, ou gestora do Relacionamento (escopo travado abaixo)
   let caller;
   try {
-    const rows = await rest(`qs_users?select=role,setores,is_active&id=eq.${callerId}&limit=1`);
+    const rows = await rest(`qs_users?select=role,setores,coordena,is_active&id=eq.${callerId}&limit=1`);
     caller = rows?.[0] || null;
   } catch {
     return res.status(500).json({ success: false, error: 'Falha ao validar permissão' });
@@ -138,7 +143,7 @@ export default async function handler(req, res) {
   // Lista do time da área, com o último acesso (vem da conta de auth).
   if (action === 'listar_equipe') {
     try {
-      const time = await rest(`qs_users?select=id,name,email,role,setores,is_active,whatsapp_number,cargo_id&role=neq.admin&setores=cs.{${area}}&order=name.asc`);
+      const time = await rest(`qs_users?select=id,name,email,role,setores,coordena,is_active,whatsapp_number,cargo_id&role=neq.admin&setores=cs.{${area}}&order=name.asc`);
       const lista = await Promise.all((time || []).map(async (u) => {
         let ultimo = null;
         try { ultimo = (await authAdmin(`/${u.id}`, { method: 'GET' }))?.last_sign_in_at || null; } catch { /* sem conta de auth */ }
@@ -209,6 +214,8 @@ export default async function handler(req, res) {
       if (user.cargo_id) profileBody.cargo_id = user.cargo_id;
       const setoresNovos = setoresValidos(user.setores);
       if (setoresNovos) profileBody.setores = setoresNovos;
+      const coordenaNova = coordenaValida(user.coordena);
+      if (coordenaNova?.length) profileBody.coordena = coordenaNova;
       let profile;
       try {
         profile = await rest('qs_users', {
@@ -253,6 +260,8 @@ export default async function handler(req, res) {
       }
       const setoresEditados = setoresValidos(user.setores);
       if (setoresEditados) fields.setores = setoresEditados;
+      const coordenaEditada = coordenaValida(user.coordena);
+      if (coordenaEditada) fields.coordena = coordenaEditada;
       if (Object.keys(fields).length) {
         await rest(`qs_users?id=eq.${user.id}`, { method: 'PATCH', body: fields, prefer: 'return=minimal' });
       }
@@ -299,9 +308,11 @@ const NOME_AREA = { relacionamento: 'Relacionamento', financeiro: 'Financeiro', 
  * (13/10 a gestora do Rel; 14/10 Financeiro e Operações). Senão, nenhuma.
  */
 function areasDeGestor(u) {
-  if (!u || u.is_active === false || u.role !== 'gestor') return [];
+  if (!u || u.is_active === false) return [];
   const s = Array.isArray(u.setores) ? u.setores : [];
   if (s.includes('comercial')) return [];
+  // 0413: co-coordenador(a) da área cuida do time como o gestor.
+  if (u.role !== 'gestor') return (Array.isArray(u.coordena) ? u.coordena : []).filter((x) => AREAS.has(x) && s.includes(x));
   return s.filter((x) => AREAS.has(x));
 }
 function soRelacionamento(u) {
@@ -322,6 +333,7 @@ async function recusaDoGestorDeArea({ action, user, callerId, area }) {
   const PAPEIS_DELA = new Set([area, 'gestor']);
   const nome = NOME_AREA[area] || area;
   if (action === 'delete') return 'Pra tirar alguém do time, desative a conta (só o admin exclui).';
+  if (Array.isArray(user?.coordena) && user.coordena.some((x) => x !== area)) return 'Você só dá co-coordenação da sua área.';
   if (action === 'create') {
     if (!PAPEIS_DELA.has(user?.role || area)) return `Você só cadastra atendente ou gestor(a) do ${nome}.`;
     if (!user.role) user.role = area;

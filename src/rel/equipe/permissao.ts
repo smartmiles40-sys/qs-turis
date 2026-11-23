@@ -6,12 +6,13 @@ import { setoresDe } from "@/contexts/QsAuthContext";
 import type { SdrUser } from "@/components/sdr/types";
 import type { AreaComTime } from "@/lib/adminUsers";
 
-type Quem = Pick<SdrUser, "role" | "setores" | "is_active"> | null | undefined;
+type Quem = Pick<SdrUser, "role" | "setores" | "is_active" | "coordena"> | null | undefined;
 
 export function podeGerirArea(u: Quem, area: AreaComTime): boolean {
   if (!u || u.is_active === false) return false;
   if (u.role === "admin") return true;
-  return u.role === "gestor" && setoresDe(u).includes(area);
+  // 0413: co-coordenador da área tem os mesmos poderes.
+  return (u.role === "gestor" && setoresDe(u).includes(area)) || (u.coordena ?? []).includes(area);
 }
 
 /**

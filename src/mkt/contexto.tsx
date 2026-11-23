@@ -67,7 +67,7 @@ export function MktProvider({ children }: { children: ReactNode }) {
     const porId = new Map(pessoas.map((p) => [p.id, p.nome]));
     const meusPapeis = eu?.papeis ?? [];
     const role = currentUser?.role;
-    const gestor = role === "admin" || role === "gestor" || meusPapeis.includes("gestor");
+    const gestor = role === "admin" || role === "gestor" || meusPapeis.includes("gestor") || (currentUser?.coordena ?? []).includes("marketing");
     const visoes = visoesDe(meusPapeis, gestor);
     return {
       pessoas,

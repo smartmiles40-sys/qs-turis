@@ -709,7 +709,7 @@ export default function SdrDashboard() {
   // Gestor/admin veem a Visão do Gestor (time); SDR/closer veem a Visão do SDR
   // (só o próprio). canSeeAllData é a MESMA regra usada no resto do app.
   const { currentUser } = useQsAuth();
-  const isManager = !!currentUser && canSeeAllData(currentUser.role);
+  const isManager = !!currentUser && canSeeAllData(currentUser);
 
   // Visão do SDR — "Minha fila" (FUP), leads quentes sem 1º contato e priorização.
   const [myStages, setMyStages] = useState<QueueStage[]>([]);
@@ -728,7 +728,7 @@ export default function SdrDashboard() {
   // seletor (feito no render). Efeitos que dependem de selectedUser reagem sozinhos.
   useEffect(() => {
     if (!currentUser) return;
-    setSelectedUser(canSeeAllData(currentUser.role) ? "all" : currentUser.id);
+    setSelectedUser(canSeeAllData(currentUser) ? "all" : currentUser.id);
   }, [currentUser]);
 
   const periodLabel = PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.label || "Mês atual";

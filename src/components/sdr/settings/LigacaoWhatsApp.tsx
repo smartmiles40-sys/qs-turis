@@ -29,7 +29,7 @@ import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { lerChamadas, ativarChamadasNaMeta, apontarWebhookDaMeta, pedirPermissaoLigacao, lerDiagnosticoChamadas,
          lerPermissaoDeLigacao, type ConfigChamadas, type DiagnosticoChamadas } from "@/lib/qs/waInbox";
 import { ligarPeloWhatsApp, type Ligacao, type PassoLigacao } from "@/lib/qs/waCall";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import { getSetting, setSetting } from "@/lib/qsSettings";
 import { supabase } from "@/lib/supabase";
 import { normalizePhoneBR } from "@/lib/whatsapp";
@@ -52,7 +52,7 @@ function nomeDoLead(l: LinhaPermissao): string | null {
 
 export default function LigacaoWhatsApp() {
   const { currentUser } = useQsAuth();
-  const podeMexer = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const podeMexer = coordena(currentUser, "comercial");
 
   const [cfg, setCfg] = useState<ConfigChamadas | null>(null);
   const [diag, setDiag] = useState<DiagnosticoChamadas | null>(null);

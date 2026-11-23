@@ -55,6 +55,7 @@ import { acaoRelOficial, estadoRel, juntarModelosRel, lerConfigRel, numeroDoDisp
 import { conferirRespostas, urlSegura } from './_relDisparoRegras.js';
 import { rodadaFluxosRel, iniciarTesteRel, agendarDisparoFluxo, cancelarDisparoFluxo, modelosParaFluxo } from './_relFluxoMotor.js';
 import { simularFluxo } from './_mktAutoRegras.js';
+import { coordenaSetor } from './_coordena.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SETORES = ['comercial', 'relacionamento', 'marketing'];
@@ -70,8 +71,8 @@ const varsDoCorpo = (corpo) => [...new Set([...String(corpo || '').matchAll(/{{\
 async function quem(req) {
   const id = await getSupabaseUserId(req.headers['authorization']);
   if (!id || !UUID.test(id)) return null;
-  const u = (await rest(`qs_users?select=id,name,role,setores,is_active,whatsapp_number&id=eq.${id}&limit=1`).catch(() => null))?.[0]
-    || (await rest(`qs_users?select=id,name,role,setores,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
+  const u = (await rest(`qs_users?select=id,name,role,setores,coordena,is_active,whatsapp_number&id=eq.${id}&limit=1`).catch(() => null))?.[0]
+    || (await rest(`qs_users?select=id,name,role,setores,coordena,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
   return u?.is_active ? u : null;
 }
 
@@ -83,7 +84,7 @@ async function podeDisparar(u, setor) {
   if (u.role === 'admin') return true;
   const s = Array.isArray(u.setores) ? u.setores : [];
   // Marketing (0242): papel marketing, ou gestor com o setor marketing.
-  if (setor === 'marketing') return u.role === 'marketing' || s.includes('marketing');
+  if (setor === 'marketing') return u.role === 'marketing' || s.includes('marketing') || coordenaSetor(u, 'marketing');
   if (u.role === 'gestor' && (s.includes(setor) || (setor === 'comercial' && s.length === 0))) return true;
   const r = await rest('rpc/qs_pode_de', { method: 'POST', body: { p_user: u.id, p: `${setor}.disparos` } }).catch(() => null);
   return r === true;
@@ -387,7 +388,7 @@ export default async function handler(req, res) {
     if (acao === 'salvar_modelo') {
       // Marketing (0242): o papel marketing mexe nos modelos DELE.
       const doMkt = setor === 'marketing' && u.role === 'marketing';
-      if (!(u.role === 'admin' || u.role === 'gestor' || doMkt)) return res.status(403).json({ error: 'Só admin ou gestor mexe nos modelos.' });
+      if (!(coordenaSetor(u, setor || 'comercial') || doMkt)) return res.status(403).json({ error: 'Só admin ou gestor mexe nos modelos.' });
       const m = body.modelo || {};
       const modelo = {
         nome: String(m.nome || '').trim(), idioma: m.idioma || 'pt_BR', categoria: m.categoria || 'MARKETING',

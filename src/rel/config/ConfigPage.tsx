@@ -9,7 +9,7 @@
 // confere — rel_pode_configurar).
 // -----------------------------------------------------------------------------
 import { useEffect, useState, type ReactNode } from "react";
-import { useQsAuth, setoresDe } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import {
   carregarConfig, salvarConfig, statusDoNumero,
   type ConfigRel, type NumeroRel,
@@ -38,7 +38,7 @@ function Bloco({ titulo, sub, children }: { titulo: string; sub?: string; childr
 /** A conexão do WhatsApp mora aqui (Bruno, 13/10: "tira do Início, deixa a primeira tela clean"). */
 export default function ConfigPage({ onAbrirWhatsApp }: { onAbrirWhatsApp?: () => void } = {}) {
   const { currentUser } = useQsAuth();
-  const pode = currentUser?.role === "admin" || (currentUser?.role === "gestor" && setoresDe(currentUser).includes("relacionamento"));
+  const pode = coordena(currentUser, "relacionamento");
   const [cfg, setCfg] = useState<ConfigRel | null>(null);
   const [numero, setNumero] = useState<NumeroRel | null>(null);
   const [msg, setMsg] = useState<{ tom: "ok" | "erro"; t: string } | null>(null);

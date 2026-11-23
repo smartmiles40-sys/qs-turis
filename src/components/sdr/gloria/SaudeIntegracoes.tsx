@@ -18,7 +18,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { authHeaders } from "@/lib/qs/waInbox";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 
 interface Porta {
   nome: string;
@@ -80,7 +80,7 @@ export default function SaudeIntegracoes({ onRetrato }: { onRetrato?: (r: Retrat
   // rota so aceita gestor/admin. O retrato (GET) todo mundo ve: saber que a
   // cadencia dela parou e informacao operacional, nao privilegio.
   const { currentUser } = useQsAuth();
-  const podeTestar = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const podeTestar = coordena(currentUser, "comercial");
 
   const [retrato, setRetrato] = useState<Retrato | null>(null);
   const [portas, setPortas] = useState<Porta[] | null>(null);

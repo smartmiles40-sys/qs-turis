@@ -126,6 +126,24 @@ export function setoresDe(user: Pick<SdrUser, "role" | "setores"> | null | undef
   return SETORES.filter((x) => x === "comercial" || validos.includes(x) || (x === "marketing" && user.role === "marketing"));
 }
 
+/**
+ * 0413 (23/11/2026): COORDENA este setor? admin, gestor com o setor, ou
+ * co-coordenador dele (qs_users.coordena). Espelho de qs_coordena() no banco.
+ * Toda tela que antes olhava role === "gestor" pergunta isto.
+ */
+export function coordena(user: Pick<SdrUser, "role" | "setores" | "coordena"> | null | undefined, setor: Setor): boolean {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  if (user.role === "gestor") return setoresDe(user).includes(setor);
+  return (user.coordena ?? []).includes(setor);
+}
+
+/** Coordena (ou co-coordena) ALGUM setor. */
+export function coordenaAlgum(user: Pick<SdrUser, "role" | "setores" | "coordena"> | null | undefined): boolean {
+  if (!user) return false;
+  return user.role === "admin" || user.role === "gestor" || (user.coordena ?? []).length > 0;
+}
+
 const CHAVE_AREA = "qs_area";
 function areaGuardada(): Setor {
   try { const v = localStorage.getItem(CHAVE_AREA) as Setor | null; return v && SETORES.includes(v) ? v : "comercial"; }
@@ -170,7 +188,10 @@ export function telaInicial(role: UserRole | undefined | null): string {
   return "painel";
 }
 
-export function canSeeAllData(role: UserRole): boolean {
+export function canSeeAllData(quem: UserRole | Pick<SdrUser, "role" | "setores" | "coordena">): boolean {
+  const role = typeof quem === "string" ? quem : quem.role;
+  // 0413: co-coordenador do Comercial vê tudo, como o gestor.
+  if (typeof quem !== "string" && (quem.coordena ?? []).includes("comercial")) return true;
   return role === "admin" || role === "gestor" || role === "marketing";
 }
 

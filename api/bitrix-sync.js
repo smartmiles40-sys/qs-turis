@@ -30,6 +30,7 @@ import { bx, comentarNoNegocio, bitrixConfigurado, moverNegocioParaReuniao, move
 import { gravarGanhoNoBitrix, enviarReuniaoDireto } from './_bitrixSaida.js';
 import { deveLevarParaReuniao } from './_bitrixSaidaRegras.js';
 import { garantirCardDoLead, marcarFalha } from './_leadCardBitrix.js';
+import { coordenaSetor } from './_coordena.js';
 
 // 'primeiro-contato' (2026-07-28): o SDR conclui a 1ª atividade no QS e o negócio
 // anda sozinho de "Novo lead" para "Follow-up 1" no Bitrix. Quem decide se move é
@@ -385,11 +386,11 @@ async function getSupabaseUserId(authHeader) {
  * na lista.
  */
 async function podeMexerNoLead(userId, lead, leadId) {
-  const users = await rest(`qs_users?select=role,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`);
+  const users = await rest(`qs_users?select=role,setores,coordena,is_active&id=eq.${encodeURIComponent(userId)}&limit=1`);
   const user = (Array.isArray(users) && users[0]) || null;
   if (!user || user.is_active === false) return { ok: false, reason: 'usuario-invalido' };
   if (!lead) return { ok: false, reason: 'lead-inexistente' };
-  if (user.role === 'admin' || user.role === 'gestor' || user.role === 'closer') return { ok: true };
+  if (user.role === 'admin' || user.role === 'gestor' || user.role === 'closer' || coordenaSetor(user, 'comercial')) return { ok: true };
   if (lead.owner_id === userId || lead.owner_id == null) return { ok: true };
 
   // A SDR QUE ACOMPANHOU O LEAD (22/09). Marcar reunião TRANSFERE o lead pro

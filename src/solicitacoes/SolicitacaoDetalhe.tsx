@@ -34,7 +34,7 @@
 // 0222: pedido distribuído no rodízio aparece como "distribuída automaticamente".
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
+import { setoresDe, useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import { Avatar, Btn, Menu, SectorChip, StatusChip, Timeline, type ChipTone, type MenuGrupo, type TimelineItem } from "@/components/ui";
 import EscolherClienteVenda, { type Escolha } from "./EscolherClienteVenda";
 import PropostasDaSolicitacao from "@/propostas/PropostasDaSolicitacao";
@@ -265,7 +265,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links, nav }
   const recebe = !!s && meusSetores.includes(s.para_setor);
   // 0197: o pedido é DA PESSOA que pediu — confirmar, ajustar, desfecho, reabrir e
   // prazo são dela (ou do gestor do setor dela / admin). Os colegas do setor veem e comentam.
-  const gestorDoSetor = !!s && (currentUser?.role === "admin" || (currentUser?.role === "gestor" && meusSetores.includes(s.de_setor)));
+  const gestorDoSetor = !!s && coordena(currentUser, s.de_setor as Setor);
   const pediu = !!s && (s.criado_por === meuId || gestorDoSetor);
   const doSetorQuePediu = !!s && meusSetores.includes(s.de_setor);
   const cot = s ? lerCotacao(s.formulario) : null;
@@ -281,7 +281,7 @@ export default function SolicitacaoDetalhe({ id, onFechar, onMudou, links, nav }
   const foiDistribuida = !!distribuida && ehDistribuicao(distribuida) && distribuida.para === s?.responsavel_nome;
   const cli = s ? clienteDo(s) : null;
   const porEvento = anexosPorEvento(anexos);
-  const gestorDoPedido = !!s && (currentUser?.role === "admin" || (currentUser?.role === "gestor" && (meusSetores.includes(s.de_setor) || meusSetores.includes(s.para_setor))));
+  const gestorDoPedido = !!s && (coordena(currentUser, s.de_setor as Setor) || coordena(currentUser, s.para_setor as Setor));
 
   const pedir = (p: Pedindo) => { setPedindo(p); setTexto(""); setErro(null); };
   const escolherQuem = () => { if (s) pessoasDoSetor(s.para_setor).then(setPessoas).catch(() => setPessoas([])); };

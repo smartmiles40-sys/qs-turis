@@ -84,7 +84,7 @@ function primeiroNome(nome: string | null | undefined): string {
 
 export default function MinhaAgendaPage({ onOpenLead }: Props) {
   const { currentUser } = useQsAuth();
-  const gestor = currentUser ? canSeeAllData(currentUser.role) : false;
+  const gestor = currentUser ? canSeeAllData(currentUser) : false;
   // A MESMA TELA, DOIS PONTOS DE VISTA (Bruno, 01/09).
   //
   // Pro closer, "pendente" é reunião DELE que ele não registrou — é cobrança.

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import { useQsAuth, canSeeAllData, podeExecutar } from "@/contexts/QsAuthContext";
+import { useQsAuth, canSeeAllData, podeExecutar, coordena } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
 import ImportarListaCsv from "./ImportarListaCsv";
 import SeloCardBitrix from "./SeloCardBitrix";
@@ -110,7 +110,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   const [handoverFromId, setHandoverFromId] = useState("");
   const [handoverQty, setHandoverQty] = useState("10");
   const [handoverAge, setHandoverAge] = useState<"novos" | "antigos">("novos");
-  const isHandoverAdmin = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const isHandoverAdmin = coordena(currentUser, "comercial");
 
   // ── WhatsApp modal state ──
   const [waLead, setWaLead] = useState<{ id: string; name: string | null; phone: string | null } | null>(null);
@@ -154,13 +154,13 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
   // (Bruno, 09/09). Guardada em estado porque o caminho do DUPLICADO ("Cadastrar
   // mesmo assim") é um segundo clique, noutro botão: sem lembrar o que a pessoa
   // escolheu, o lead forçado ia sempre pro caminho errado, calado.
-  const isManager = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const isManager = coordena(currentUser, "comercial");
 
   // ── Filtros (vão pro banco) ──
   // SDR/closer só veem a própria carteira nesta tela — era o filtro por papel
   // que rodava no navegador; virou um eq no banco. A RLS continua sendo quem
   // protege de verdade.
-  const somenteDoDono = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
+  const somenteDoDono = currentUser && !canSeeAllData(currentUser) ? currentUser.id : null;
   const filtros = useMemo<FiltrosLeads>(() => ({
     busca: buscaAplicada,
     source: filterSource,

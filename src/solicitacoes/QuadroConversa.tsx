@@ -23,7 +23,7 @@
 // conversa aberta se recarrega com o Realtime (aoMudarSolicitacao) e a cada 15 s.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
+import { setoresDe, useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import { VerCotacao } from "./FormCotacao";
 import { VerPagamento } from "./FormPagamento";
 import { lerCotacao } from "./cotacao";
@@ -320,8 +320,8 @@ export function PainelConversa({ id, onFechar, onMudou, onVerTudo, links }: {
   useEffect(() => { tl.current?.scrollTo({ top: tl.current.scrollHeight }); }, [eventos.length]);
 
   const recebe = !!s && meusSetores.includes(s.para_setor);
-  const gestorQuePediu = !!s && (currentUser?.role === "admin" || (currentUser?.role === "gestor" && meusSetores.includes(s.de_setor)));
-  const gestorDoPedido = !!s && (currentUser?.role === "admin" || (currentUser?.role === "gestor" && (meusSetores.includes(s.de_setor) || meusSetores.includes(s.para_setor))));
+  const gestorQuePediu = !!s && coordena(currentUser, s.de_setor as Setor);
+  const gestorDoPedido = !!s && (coordena(currentUser, s.de_setor as Setor) || coordena(currentUser, s.para_setor as Setor));
   const pediu = !!s && (s.criado_por === meuId || gestorQuePediu);
   const coluna = s ? colunaDoQuadro(s, agora) : null;
   const ehPagamento = !!s && !!TIPO_PAG_DO[s.tipo_id ?? ""];

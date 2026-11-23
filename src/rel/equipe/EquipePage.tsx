@@ -79,7 +79,7 @@ function quando(iso: string | null) {
   return new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-interface Form { id?: string; name: string; email: string; papel: Papel; senha: string; whatsapp: string; cargo_id: string; /** Cargo de quando abriu (só manda cargo_id se mudou). */ cargo_antes?: string }
+interface Form { id?: string; name: string; email: string; papel: Papel; senha: string; whatsapp: string; cargo_id: string; /** 0413: co-coordena a área. */ coord: boolean; /** Cargo de quando abriu (só manda cargo_id se mudou). */ cargo_antes?: string }
 
 
 /** Como o nome sai no topo da mensagem do WhatsApp (igual ao servidor). */
@@ -88,7 +88,7 @@ const assinaturaDe = (nome: string) => `*${nome.trim().replace(/\s+/g, " ") || "
 export default function EquipePage({ area = "relacionamento" }: { area?: AreaComTime } = {}) {
   const { currentUser } = useQsAuth();
   const info = AREA[area];
-  const vazio: Form = { name: "", email: "", papel: area, senha: "", whatsapp: "", cargo_id: "" };
+  const vazio: Form = { name: "", email: "", papel: area, senha: "", whatsapp: "", cargo_id: "", coord: false };
   const pode = podeGerirTime(currentUser, area);
   const ehAdmin = currentUser?.role === "admin";
 
@@ -152,7 +152,7 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
     if (!form.id && form.senha.length < 8) { setErroForm("A senha provisória precisa de 8+ caracteres."); return; }
     setSalvando(true); setErroForm(null);
     const mudouCargo = !form.id || (form.cargo_id || "") !== (form.cargo_antes || "");
-    const base = { name: nome, email, role: form.papel, setores: [area], whatsapp_number: form.whatsapp.trim() || null, ...(mudouCargo ? { cargo_id: form.cargo_id || null } : {}) };
+    const base = { name: nome, email, role: form.papel, setores: [area], coordena: form.papel !== "gestor" && form.coord ? [area] : [], whatsapp_number: form.whatsapp.trim() || null, ...(mudouCargo ? { cargo_id: form.cargo_id || null } : {}) };
     const r = form.id
       ? await updateQsAuthUser({ id: form.id, ...base }, area)
       : await createQsAuthUser({ ...base, password: form.senha, is_active: true }, area);
@@ -222,6 +222,7 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold" style={{ color: "var(--ink)" }}>{m.name}</span>
                   <Etiqueta tom={m.role === "gestor" ? "rel" : "neutro"}>{PAPEL[m.role] || m.role}</Etiqueta>
+                  {m.role !== "gestor" && (m.coordena ?? []).includes(area) && <Etiqueta tom="rel">Co-coordena</Etiqueta>}
                   {!m.is_active && <Etiqueta tom="erro">Desativado</Etiqueta>}
                   {!soDaArea(m) && <Etiqueta>Também em outra área</Etiqueta>}
                   {m.id === currentUser?.id && <Etiqueta>Você</Etiqueta>}
@@ -250,7 +251,7 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
               </div>
               {podeMexer(m) ? (
                 <div className="flex flex-wrap gap-2">
-                  <Botao onClick={() => { setErroForm(null); setForm({ id: m.id, name: m.name, email: m.email || "", papel: (m.role === "gestor" ? "gestor" : area), senha: "", whatsapp: m.whatsapp_number || "", cargo_id: m.cargo_id || "", cargo_antes: m.cargo_id || "" }); }}>Editar</Botao>
+                  <Botao onClick={() => { setErroForm(null); setForm({ id: m.id, name: m.name, email: m.email || "", papel: (m.role === "gestor" ? "gestor" : area), senha: "", whatsapp: m.whatsapp_number || "", cargo_id: m.cargo_id || "", cargo_antes: m.cargo_id || "", coord: (m.coordena ?? []).includes(area) }); }}>Editar</Botao>
                   <Botao onClick={() => void redefinirSenha(m)}>Nova senha</Botao>
                   {m.id !== currentUser?.id && (
                     <Botao variante={m.is_active ? "perigo" : "secundario"} onClick={() => void alternarAtivo(m)}>{m.is_active ? "Desativar" : "Reativar"}</Botao>
@@ -288,6 +289,13 @@ export default function EquipePage({ area = "relacionamento" }: { area?: AreaCom
                 <option value="gestor">Gestor(a) do {info.nome}</option>
               </select>
             </Campo>
+            {form.papel !== "gestor" && (
+              <label className="flex items-start gap-2 cursor-pointer text-[13px]" style={{ color: "var(--ink2)" }}>
+                <input type="checkbox" className="mt-0.5" checked={form.coord} onChange={(e) => setForm({ ...form, coord: e.target.checked })} />
+                <span><b style={{ color: "var(--ink)" }}>Co-coordena o {info.nome}</b><br />
+                  <span style={{ color: "var(--ink3)" }}>Continua no papel dela e ganha os poderes da coordenação o tempo todo (configurar, cuidar do time, aprovar). Serve pra cobrir quando a coordenação não estiver.</span></span>
+              </label>
+            )}
             <Campo rotulo="Cargo" dica="O nome da função. Crie novos na aba Cargos.">
               <select className="rel-input w-full" value={form.cargo_id} onChange={(e) => setForm({ ...form, cargo_id: e.target.value })}>
                 <option value="">Sem cargo</option>

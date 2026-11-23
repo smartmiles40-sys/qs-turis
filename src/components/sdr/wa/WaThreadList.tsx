@@ -25,7 +25,7 @@ import {
   type WaThread, type UserLite,
 } from "@/lib/qs/waInbox";
 import { formatPhoneDisplay } from "@/lib/whatsapp";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import { WaAvatar, WaLinhaEsqueleto } from "./WaBits";
 import { waPlain } from "./waFormat";
 import WaMenuContexto, { IconeMenu, PATHS, useToqueLongo, type ItemMenu, type PosMenu } from "./WaMenuContexto";
@@ -51,7 +51,7 @@ function IconPin({ size = 13, filled = false }: { size?: number; filled?: boolea
 
 export default function WaThreadList({ selectedLeadId, onPick, onOpenLead }: Props) {
   const { currentUser } = useQsAuth();
-  const ehGestor = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const ehGestor = coordena(currentUser, "comercial");
   // O closer atende a empresa inteira (0050): pra ele "Meus" nunca teve
   // sentido — ele não tem carteira. As abas passam a funcionar como as do
   // gestor, e ele abre já numa lista com gente de verdade dentro.

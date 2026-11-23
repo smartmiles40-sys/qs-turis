@@ -25,7 +25,7 @@
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "@/rel/ui";
 import { STATUS_PROPOSTA, TIPOS, TOM_PROPOSTA, type StatusProposta } from "@/propostas/lib";
 import FichaFechamento from "./FichaFechamento";
@@ -154,7 +154,7 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
   const preVenda = emPreVenda(n);
   const totalItens = somaDosItens(itensVenda);
   const selo = seloDaVenda(n);
-  const gestao = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const gestao = coordena(currentUser, "comercial");
   const podeTrocar = gestao || (!!currentUser?.id && n.closer_id === currentUser.id);
   // 0367: cancelar a venda = mesma regra do banco (closer dono do cartão ou gestão). Venda só em negociação não ocupa nada.
   const vendaQueVale = vendaAtiva && vendaAtiva.estado !== "negociacao" ? vendaAtiva : null;

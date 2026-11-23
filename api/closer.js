@@ -80,6 +80,7 @@ import { bx, bitrixConfigurado, comentarNoNegocio, atualizarNegocioComFunil, res
 import { getSupabaseUserId } from './_wa.js';
 import { NOME_ETAPA, emPreVenda, etapaParaColuna } from './_closerBitrixPlano.js';
 import { brl, espelharCartao } from './_closerEspelho.js';
+import { coordenaSetor } from './_coordena.js';
 import {
   apagarNoZapsign, arquivarAssinado, criarNoZapsign, gerarPdf, gravarNoCadastro, guardarPdf, hashDoCorpo, lerConfig, lerNoZapsign,
   linkDoPdf, montarPrevia, nomesDoArquivo, normalizarCampos, oQueFalta, statusDoDocumento, testarZapsign, urlDoApp,
@@ -93,14 +94,14 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 async function quemChama(req) {
   const id = await getSupabaseUserId(req.headers['authorization']);
   if (!id || !UUID_RE.test(id)) return null;
-  const u = (await rest(`qs_users?select=id,name,role,setores,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
+  const u = (await rest(`qs_users?select=id,name,role,setores,coordena,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
   return u?.is_active ? u : null;
 }
 
 /** Mesma regra do banco (closer_pode_mexer): gestor do Comercial/admin, ou o closer dono. */
 function podeMexer(u, negocio) {
   if (u.role === 'admin') return true;
-  if (u.role === 'gestor' && Array.isArray(u.setores) && u.setores.includes('comercial')) return true;
+  if (coordenaSetor(u, 'comercial')) return true;
   return u.role === 'closer' && negocio.closer_id === u.id;
 }
 
@@ -286,7 +287,7 @@ function safeParse(s) { try { return JSON.parse(s); } catch { return {}; } }
 // ═════════════════════════════════════════════════════════════════════════════
 // CONTRATO
 // ═════════════════════════════════════════════════════════════════════════════
-const ehGestao = (u) => u.role === 'admin' || (u.role === 'gestor' && Array.isArray(u.setores) && u.setores.includes('comercial'));
+const ehGestao = (u) => coordenaSetor(u, 'comercial');
 const env = (k) => String(process.env[k] || '').trim();
 
 async function carregarNegocio(id) {

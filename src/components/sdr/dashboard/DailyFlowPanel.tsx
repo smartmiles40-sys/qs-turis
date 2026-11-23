@@ -79,7 +79,7 @@ function fmtDay(d: Date): string {
 
 export default function DailyFlowPanel() {
   const { currentUser } = useQsAuth();
-  const isManager = !!currentUser && canSeeAllData(currentUser.role);
+  const isManager = !!currentUser && canSeeAllData(currentUser);
   const scope = isManager ? "do time" : "seu";
 
   const [leadBuckets, setLeadBuckets] = useState<DayBucket[]>([]);

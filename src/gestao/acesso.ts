@@ -8,8 +8,9 @@
 import type { SdrUser } from "@/components/sdr/types";
 
 /** Admin e gestor (o qs_is_manager() do banco). */
-export function podeAbrirGestao(u: Pick<SdrUser, "role"> | null | undefined): boolean {
-  return u?.role === "admin" || u?.role === "gestor";
+export function podeAbrirGestao(u: Pick<SdrUser, "role" | "coordena"> | null | undefined): boolean {
+  // 0413: co-coordenador do Comercial também (qs_is_manager() já aceita).
+  return u?.role === "admin" || u?.role === "gestor" || (u?.coordena ?? []).includes("comercial");
 }
 export const ehHashDaGestao = () => /^#\/?gestao(\/|$)/.test(window.location.hash);
 export function abrirGestao() { window.location.hash = "#gestao"; }

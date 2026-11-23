@@ -19,7 +19,7 @@
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import { Aviso, Botao, Etiqueta, Modal, Vazio } from "@/rel/ui";
 import { ETAPAS, ETAPAS_COM_MOTIVO, ETAPAS_FINAIS, NOME_ETAPA, bancoSemPipelineV2, brl, dataBr, emPreVenda, espelharNoBitrix, listarNegocios, moverNegocio, nomeDoLead, seloDaVenda, trazerDoBitrix, useConfigDaArea, type Etapa, type Negocio } from "./lib";
 import NegocioPainel, { type LinksDoPainel } from "./NegocioPainel";
@@ -39,7 +39,7 @@ export default function PipelinePage({ abrirId, onAbrirId, links }: {
   links: LinksDoPainel;
 }) {
   const { currentUser } = useQsAuth();
-  const gestao = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const gestao = coordena(currentUser, "comercial");
   const ehCloser = currentUser?.role === "closer";
   const [lista, setLista] = useState<Negocio[]>([]);
   const [carregando, setCarregando] = useState(true);

@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/qs/queries";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import { Aviso, Botao } from "@/rel/ui";
 import { brl, hojeISO } from "./lib";
 import { lotes } from "@/lib/lotes";
@@ -68,7 +68,7 @@ async function lerClosers(): Promise<{ id: string; nome: string; ativo: boolean 
 
 export default function DesempenhoCloser() {
   const { currentUser } = useQsAuth();
-  const gestao = currentUser?.role === "admin" || (currentUser?.role === "gestor" && (!currentUser.setores?.length || currentUser.setores.includes("comercial")));
+  const gestao = coordena(currentUser, "comercial");
   const [preset, setPreset] = useState<PresetPeriodo>("mes");
   const [datas, setDatas] = useState(() => datasDoPreset("mes", hojeISO()));
   const [closers, setClosers] = useState<{ id: string; nome: string; ativo: boolean }[]>([]);

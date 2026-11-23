@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, type ReactNode } from "react";
 import "../agenda/agenda.css";
 import { ABAS_AGENDA, type AbaAgenda } from "@/lib/qs/agendaStatus";
 import { supabase } from "@/lib/supabase";
-import { useQsAuth, podeExecutar } from "@/contexts/QsAuthContext";
+import { useQsAuth, podeExecutar, coordena } from "@/contexts/QsAuthContext";
 import type { Meeting, MeetingStatus, Lead, SdrUser } from "../types";
 import { MEETING_STATUS_LABELS } from "../types";
 import { notifyBitrix } from "@/lib/qs/bitrixSync";
@@ -163,7 +163,7 @@ export default function MeetingsPage({ onOpenLead, aba: abaPedida, onAba, extras
   const [fCloserId, setFCloserId] = useState("");
   // SDR responsável quando quem marca é a gestão/conta Master (Bruno, 27/10):
   // a reunião fica no nome dele (confirma, remarca, "agendou" no Bitrix).
-  const isManager = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const isManager = coordena(currentUser, "comercial");
   const [sdrs, setSdrs] = useState<{ id: string; name: string }[]>([]);
   const [fSdrId, setFSdrId] = useState("");
   // Combobox de lead (item 5): texto digitado; fLeadId só é preenchido ao escolher.

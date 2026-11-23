@@ -89,7 +89,7 @@ export default function CommandPalette({ onOpenLead }: { onOpenLead: (leadId: st
       // atende conversa de todo mundo (0050) e precisa achar o cliente da
       // próxima reunião — que ainda é do SDR até a transferência. O resultado
       // real continua limitado pela RLS do banco.
-      if (currentUser && !canSeeAllData(currentUser.role) && currentUser.role !== "closer") {
+      if (currentUser && !canSeeAllData(currentUser) && currentUser.role !== "closer") {
         sq = sq.eq("owner_id", currentUser.id);
       }
       const { data } = await sq.order("updated_at", { ascending: false }).limit(8);

@@ -176,7 +176,7 @@ export default function CoveragePanel({ onOpenLead }: { onOpenLead?: (leadId: st
       // Isolamento por dono: o SDR só enxerga a cobertura dos PRÓPRIOS leads.
       // Gestor/admin veem o time todo (e podem filtrar por SDR no seletor acima).
       // Backstop de tela — a garantia real é a RLS 0007/0008 no banco.
-      const scoped = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
+      const scoped = currentUser && !canSeeAllData(currentUser) ? currentUser.id : null;
 
       // ── Fila "aguardando contato": leads ATIVOS com chegada — paginado
       // (cap 1000 do PostgREST; a fila cheia não pode sumir lead em silêncio).

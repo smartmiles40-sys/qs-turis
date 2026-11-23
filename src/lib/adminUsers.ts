@@ -18,6 +18,8 @@ export interface AdminUserInput {
   is_active?: boolean;
   /** Cargo (0122) — nome da função; null tira. */
   cargo_id?: string | null;
+  /** 0413: setores em que é co-coordenador(a); [] tira. */
+  coordena?: Setor[];
 }
 
 type AdminResult = { success: boolean; error?: string; user?: unknown; equipe?: MembroEquipe[] };
@@ -29,6 +31,8 @@ export interface MembroEquipe {
   /** Só desta área (sem Comercial nem outra área) — o gestor da área pode mexer. */
   so_area?: boolean;
   cargo_id?: string | null;
+  /** 0413: setores em que é co-coordenador(a). */
+  coordena?: Setor[] | null;
 }
 
 /** Áreas que têm time próprio (gestor de área). */

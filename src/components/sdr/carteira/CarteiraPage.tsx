@@ -124,7 +124,7 @@ function digitos(s: string): string {
 
 export default function CarteiraPage({ onOpenLead }: Props) {
   const { currentUser } = useQsAuth();
-  const gestor = currentUser ? canSeeAllData(currentUser.role) : false;
+  const gestor = currentUser ? canSeeAllData(currentUser) : false;
 
   const [itens, setItens] = useState<ItemCarteira[]>([]);
   const [cadencias, setCadencias] = useState<Cadencia[]>([]);

@@ -11,7 +11,7 @@ import { getSupabaseUserId } from './_wa.js';
 export async function quemChama(req) {
   const id = await getSupabaseUserId(req.headers['authorization']);
   if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return null;
-  const u = (await rest(`qs_users?select=id,name,role,setores,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
+  const u = (await rest(`qs_users?select=id,name,role,setores,coordena,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
   if (!u?.is_active) return null;
   const ok = u.role === 'admin' || (Array.isArray(u.setores) && u.setores.includes('relacionamento'));
   return ok ? u : null;
@@ -25,7 +25,7 @@ export async function quemChama(req) {
 export async function quemAtende(req) {
   const id = await getSupabaseUserId(req.headers['authorization']);
   if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return null;
-  const u = (await rest(`qs_users?select=id,name,role,setores,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
+  const u = (await rest(`qs_users?select=id,name,role,setores,coordena,is_active&id=eq.${id}&limit=1`).catch(() => null))?.[0];
   if (!u?.is_active) return null;
   const s = Array.isArray(u.setores) ? u.setores : [];
   if (u.role === 'admin' || s.includes('relacionamento')) return { ...u, soFinanceiro: false };

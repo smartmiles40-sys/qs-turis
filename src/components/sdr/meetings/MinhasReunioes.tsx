@@ -30,7 +30,7 @@ import {
 import "../agenda/agenda.css";
 import MeetingDetailModal from "../agenda/MeetingDetailModal";
 import ScheduleMeetingModal from "../agenda/ScheduleMeetingModal";
-import type { Meeting } from "../types";
+import type { Meeting } from "../types";
 import { lotes } from "@/lib/lotes";
 
 interface Props {
@@ -52,7 +52,7 @@ const POR_PAGINA = 80;
 
 export default function MinhasReunioes({ onOpenLead, versao = 0 }: Props) {
   const { currentUser } = useQsAuth();
-  const gestao = currentUser ? canSeeAllData(currentUser.role) : false;
+  const gestao = currentUser ? canSeeAllData(currentUser) : false;
   // Closer (aba "Reuniões do time" da área dele, 03/11): as que ELE atende.
   const ehCloser = !gestao && currentUser?.role === "closer";
   const titulo = gestao ? "Reuniões marcadas pelo time" : ehCloser ? "Reuniões que você atende" : "Reuniões que você marcou";

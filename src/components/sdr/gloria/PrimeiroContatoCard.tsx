@@ -18,7 +18,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
 import { listarModelosAdmin, type WaModeloAdmin } from "@/lib/qs/waInbox";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 
 const CHAVE_TEMPLATE = "gloria_template_abertura";
 const CHAVE_TETO = "gloria_teto_dia";
@@ -53,7 +53,7 @@ export default function PrimeiroContatoCard({
   // gravar ve o resumo — que e a parte util pra todo mundo: com que modelo
   // ela puxa assunto e quanto ja saiu hoje — sem o botao que daria erro.
   const { currentUser } = useQsAuth();
-  const podeMexer = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const podeMexer = coordena(currentUser, "comercial");
 
   const [modelos, setModelos] = useState<WaModeloAdmin[]>([]);
   const [carregandoModelos, setCarregandoModelos] = useState(true);

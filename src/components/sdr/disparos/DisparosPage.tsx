@@ -15,7 +15,7 @@ import { Alert, Badge, Button, EmptyState, KpiCard, Page, PageHeader, ProgressBa
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/qs/queries";
 import { notifyError, notifySuccess } from "@/lib/qs/notify";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import {
   acaoCampanha, contagens, criarCampanha, descreverPublico, FONTES, lerConfig, listarCampanhas, NIVEIS, painel,
   preverTexto, previa as pedirPrevia, salvarRitmo, STATUS_LEAD, variaveisDoCorpo,
@@ -356,7 +356,7 @@ type Aba = "campanhas" | "modelos" | "ritmo";
 export default function DisparosPage({ setor }: { setor: SetorDisparo }) {
   const { currentUser } = useQsAuth();
   const ehAdmin = currentUser?.role === "admin";
-  const podeModelo = ehAdmin || currentUser?.role === "gestor";
+  const podeModelo = ehAdmin || coordena(currentUser, "comercial");
   const [aba, setAba] = useState<Aba>("campanhas");
   const [cfg, setCfg] = useState<ConfigDisparo | null>(null);
   const [erro, setErro] = useState<string | null>(null);

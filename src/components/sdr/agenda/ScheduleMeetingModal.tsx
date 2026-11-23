@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import { notifySuccess, notifyError } from "@/lib/qs/notify";
 import { createMeeting, reagendarReuniao, gerarSalaMeet, salvarEmailDoLead, avisarBitrixDaSala, transferirLeadProCloser, vincularCardAoBitrix, somenteDigitos } from "@/lib/qs/meetings";
 import { fetchAllRows } from "@/lib/qs/queries";
@@ -66,7 +66,7 @@ export default function ScheduleMeetingModal({
   reschedule,
 }: ScheduleMeetingModalProps) {
   const { currentUser } = useQsAuth();
-  const isManager = currentUser?.role === "admin" || currentUser?.role === "gestor";
+  const isManager = coordena(currentUser, "comercial");
   const remarcando = !!reschedule;
 
   const [leads, setLeads] = useState<Lead[]>([]);

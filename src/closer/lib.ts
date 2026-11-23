@@ -13,10 +13,11 @@ import type { SdrUser } from "@/components/sdr/types";
 
 // ── Quem abre a área ────────────────────────────────────────────────────────
 /** O closer cai direto aqui; admin e gestor do Comercial abrem pelo menu (#closer). */
-export function podeAbrirAreaCloser(u: Pick<SdrUser, "role" | "setores"> | null | undefined): boolean {
+export function podeAbrirAreaCloser(u: Pick<SdrUser, "role" | "setores" | "coordena"> | null | undefined): boolean {
   if (!u) return false;
   if (u.role === "closer" || u.role === "admin") return true;
-  return u.role === "gestor" && (!u.setores?.length || u.setores.includes("comercial"));
+  // 0413: co-coordenador do Comercial também.
+  return (u.role === "gestor" && (!u.setores?.length || u.setores.includes("comercial"))) || (u.coordena ?? []).includes("comercial");
 }
 export const ehHashDoCloser = () => /^#\/?closer(\/|$)/.test(window.location.hash);
 export function abrirAreaCloser() { window.location.hash = "#closer"; }

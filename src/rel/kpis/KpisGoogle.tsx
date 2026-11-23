@@ -4,7 +4,7 @@
 // admin/gestor do Rel: a Places API foi cortada em 03/11/2026 (custo).
 // -----------------------------------------------------------------------------
 import { useEffect, useState } from "react";
-import { useQsAuth, setoresDe } from "@/contexts/QsAuthContext";
+import { useQsAuth, coordena } from "@/contexts/QsAuthContext";
 import { lerGoogle, salvarGoogleManual, type Google } from "../lib/kpis";
 import { Aviso, Botao, Entrada } from "../ui";
 
@@ -26,7 +26,7 @@ function Estrelas({ nota }: { nota: number }) {
 
 export default function KpisGoogle() {
   const { currentUser } = useQsAuth();
-  const pode = currentUser?.role === "admin" || (currentUser?.role === "gestor" && setoresDe(currentUser).includes("relacionamento"));
+  const pode = coordena(currentUser, "relacionamento");
   const [g, setG] = useState<Google | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [editando, setEditando] = useState(false);

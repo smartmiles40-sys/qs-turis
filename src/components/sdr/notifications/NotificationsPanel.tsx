@@ -335,7 +335,7 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
     if (!currentUser) return;
     setLoading(true);
 
-    const seeAll = canSeeAllData(currentUser.role);
+    const seeAll = canSeeAllData(currentUser);
     const ownerId = currentUser.id;
 
     const now = new Date();

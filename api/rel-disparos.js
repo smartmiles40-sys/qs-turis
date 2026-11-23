@@ -26,6 +26,7 @@ import { enviarTemplate, modelosAprovados } from './_meta.js';
 import { gravarRel } from './_relEntrada.js';
 import { quemChama, numeroDoRelacionamento, numeroConectado } from './_relWa.js';
 import { envioRealLigado, processarSemEnvio } from './_relAutomacoes.js';
+import { coordenaSetor } from './_coordena.js';
 
 const LOTE = 20;
 const PAUSA_MS = 250;
@@ -361,7 +362,7 @@ export default async function handler(req, res) {
     }
 
     if (acao === 'rodar_automacoes') {
-      if (!(u.role === 'admin' || u.role === 'gestor')) return res.status(403).json({ error: 'Só admin ou gestor roda as automações na mão.' });
+      if (!coordenaSetor(u, 'relacionamento')) return res.status(403).json({ error: 'Só admin ou gestor roda as automações na mão.' });
       const r = await rodarAutomacoes({ limiteMs: 45_000 });
       return res.status(r.erro ? 409 : 200).json(r.erro ? { error: r.erro } : r);
     }

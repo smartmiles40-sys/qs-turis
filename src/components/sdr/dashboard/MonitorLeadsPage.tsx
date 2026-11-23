@@ -99,7 +99,7 @@ export default function MonitorLeadsPage({ onOpenLead }: Props) {
   // SDR (0097): vê os NÚMEROS do time todo — a transparência é o ponto —, mas
   // a lista lead a lead só dos leads que ele recebeu (o banco também garante).
   const { currentUser } = useQsAuth();
-  const gestor = currentUser ? canSeeAllData(currentUser.role) : false;
+  const gestor = currentUser ? canSeeAllData(currentUser) : false;
   const eu = currentUser?.id ?? null;
   const [periodo, setPeriodo] = useState<PeriodoId | "custom">("fds");
   const [intervalo, setIntervalo] = useState(() => intervaloDo("fds"));

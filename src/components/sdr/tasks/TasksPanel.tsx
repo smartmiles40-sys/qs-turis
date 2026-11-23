@@ -459,7 +459,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const loadData = useCallback(async () => {
     setLoading(true);
     // Escopo da fila: SDR/closer vê só as tarefas dele; admin/gestor, as do time.
-    const queueOwnerId = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
+    const queueOwnerId = currentUser && !canSeeAllData(currentUser) ? currentUser.id : null;
     // Mas o MAPA DE LEADS não pode usar o mesmo recorte para o closer: as
     // cobranças dele ("registre o desfecho") apontam para leads que ainda são
     // do SDR que agendou. Filtrando por dono, o mapa vinha vazio e o card
@@ -541,7 +541,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const pollBusyRef = useRef(false);
   const refreshQueue = useCallback(async () => {
     if (document.hidden || pollBusyRef.current) return;
-    const queueOwnerId = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : null;
+    const queueOwnerId = currentUser && !canSeeAllData(currentUser) ? currentUser.id : null;
     try {
       const tasksP = fetchQueueTasks(queueOwnerId);   // paginado (número real, sem teto de 1000)
       const leadsP = tasksP.then(fetchLeadsDaFila);   // só os leads da fila (ver loadData)
@@ -572,7 +572,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // base (de outro SDR, do sync do Bitrix, do WhatsApp) fazia TODOS os Painéis
     // recarregarem tudo — era o que mais pesava no banco. Gestor/closer seguem
     // vendo o time (o closer cobra desfecho em lead de SDR).
-    const soMeus = currentUser && !canSeeAllData(currentUser.role) && currentUser.role !== "closer" ? currentUser.id : null;
+    const soMeus = currentUser && !canSeeAllData(currentUser) && currentUser.role !== "closer" ? currentUser.id : null;
     const filtro = soMeus ? { filter: `owner_id=eq.${soMeus}` } : {};
     const channel = supabase
       .channel("qs_fila_changes")
@@ -627,7 +627,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const [meetingCounts, setMeetingCounts] = useState<{ today: number; month: number }>({ today: 0, month: 0 });
   const [contactBreakdown, setContactBreakdown] = useState<ContactBreakdownRow[]>([]);
   const [meetingKpis, setMeetingKpis] = useState<MeetingKpis>({ agendadas: 0, realizadas: 0, agendadasHoje: 0, realizadasHoje: 0, metaAgendadas: null, metaRealizadas: null });
-  const countsScope = currentUser && !canSeeAllData(currentUser.role) ? currentUser.id : (ownerFilter || null);
+  const countsScope = currentUser && !canSeeAllData(currentUser) ? currentUser.id : (ownerFilter || null);
   const refreshCounts = useCallback(() => {
     fetchActivityCounts(countsScope).then(setDoneCounts);
     fetchMeetingCounts(countsScope).then(setMeetingCounts);
@@ -2053,7 +2053,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     filtered = filtered.filter((t) => atividadeVisivel(t, getLeadForTask(t)));
 
     // Role-based filtering: SDR only sees their own tasks
-    if (currentUser && !canSeeAllData(currentUser.role)) {
+    if (currentUser && !canSeeAllData(currentUser)) {
       filtered = filtered.filter((t) => t.owner_id === currentUser.id);
     }
 
@@ -2461,7 +2461,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     // A MESMA regra da lista (25/09): aqui só passava re_contato, e o closer via
     // 32 cobranças vencidas na lista com o contador de atrasadas marcando 0.
     let base = tasks.filter((t) => tarefaVisivelNaFila(t, leadsMap.get(t.lead_id)?.status));
-    if (currentUser && !canSeeAllData(currentUser.role)) {
+    if (currentUser && !canSeeAllData(currentUser)) {
       base = base.filter((t) => t.owner_id === currentUser.id);
     }
     base = base.filter((t) => new Date(t.scheduled_at).getTime() <= endTodayMs);
@@ -2597,7 +2597,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   // Ligações e mensagens por usuário (hoje). Admin sem unidade selecionada vê a
   // linha de cada SDR ativo (mesmo com 0); SDR (ou admin filtrado numa unidade)
   // vê só a própria linha.
-  const isTeamView = !!currentUser && canSeeAllData(currentUser.role) && !ownerFilter;
+  const isTeamView = !!currentUser && canSeeAllData(currentUser) && !ownerFilter;
   const contactRows = (() => {
     const byOwner = new Map(contactBreakdown.map((r) => [r.ownerId ?? "—", r]));
     const nameOf = (id: string): string =>

@@ -13,6 +13,7 @@
 // -----------------------------------------------------------------------------
 import { rest } from './_supabaseAdmin.js';
 import { quemChama } from './_relWa.js';
+import { coordenaSetor } from './_coordena.js';
 
 async function lerConfig() {
   const r = await rest('rel_config?select=valor&chave=eq.google&limit=1').catch(() => null);
@@ -26,7 +27,7 @@ async function gravarConfig(valor) {
   });
 }
 
-const podeConfigurar = (u) => u.role === 'admin' || (u.role === 'gestor' && Array.isArray(u.setores) && u.setores.includes('relacionamento'));
+const podeConfigurar = (u) => coordenaSetor(u, 'relacionamento');
 
 export default async function handler(req, res) {
   const u = await quemChama(req);
