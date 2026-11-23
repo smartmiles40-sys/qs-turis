@@ -7,7 +7,7 @@
 // -----------------------------------------------------------------------------
 import { supabase } from "@/lib/supabase";
 import type { PublicoRel } from "@/lib/qs/disparos";
-import type { AdaptadorFluxo } from "@/mkt/automacoes/EditorFluxo";
+import type { AdaptadorFluxo, ErroDoBloco } from "@/mkt/automacoes/EditorFluxo";
 import type { ResultadoSimulacao } from "@/mkt/automacoes/Simulacao";
 import { novoId, noPadrao, type Acao, type Fluxo, type Grafo, type No } from "@/mkt/automacoes/tipos";
 import type { EstatBloco, ModeloMkt } from "@/mkt/automacoes/api";
@@ -70,6 +70,7 @@ export function adaptadorRel(extra: Partial<AdaptadorFluxo> = {}, numerosTeste: 
     salvarFluxo: salvarFluxoRel,
     estatisticas: estatisticasRel,
     filtrosEstat: filtrosDoFluxo,
+    errosRecentes: errosDoFluxo,
     listarModelos: () => chamar<{ modelos?: ModeloMkt[]; aviso?: string }>({ acao: "rel_fluxo_modelos" }),
     listarUsuarios: usuariosRel,
     // "Destino" vem da viagem do cliente — dá pra usar {{destino}} e testar na Condição.
@@ -98,6 +99,20 @@ export function adaptadorRel(extra: Partial<AdaptadorFluxo> = {}, numerosTeste: 
     voltarRotulo: "Fluxos",
     ...extra,
   };
+}
+
+/** Erros dos últimos 7 dias, por bloco (o editor mostra no próprio bloco, como no n8n). */
+async function errosDoFluxo(fluxoId: string): Promise<ErroDoBloco[]> {
+  const desde = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const { data } = await supabase.from("rel_fluxo_eventos")
+    .select("no_id,detalhe,criado_em,rel_fluxo_execucoes(telefone,nome)")
+    .eq("fluxo_id", fluxoId).eq("tipo", "erro").gte("criado_em", desde)
+    .order("criado_em", { ascending: false }).limit(200);
+  type Linha = { no_id: string | null; detalhe: string | null; criado_em: string; rel_fluxo_execucoes: { telefone: string | null; nome: string | null } | null };
+  return ((data ?? []) as unknown as Linha[]).filter((l) => l.no_id).map((l) => ({
+    no_id: l.no_id!, detalhe: l.detalhe, criado_em: l.criado_em,
+    quem: l.rel_fluxo_execucoes ? l.rel_fluxo_execucoes.nome || (l.rel_fluxo_execucoes.telefone ? `…${l.rel_fluxo_execucoes.telefone.slice(-4)}` : null) : null,
+  }));
 }
 
 /** "Números de:" no editor — cada disparo do fluxo + só os testes. */

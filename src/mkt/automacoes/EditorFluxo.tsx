@@ -26,7 +26,7 @@ import {
   type Acao, type Fluxo, type Grafo, type Ligacao, type No, type Saida, type TipoNo, type CampoPersonalizado,
 } from "./tipos";
 import { acao, estatisticas, lerFluxo, listarCampos, listarFluxos, listarModelos, listarUsuarios, salvarFluxo, type EstatBloco, type ModeloMkt } from "./api";
-import { Aviso, Botao, COR, COR_SUAVE, Carregando, Chip, Modal } from "./ui";
+import { Botao, COR, Carregando, Chip, Modal } from "./ui";
 import PainelBloco from "./PainelBloco";
 import Simulacao, { type ResultadoSimulacao } from "./Simulacao";
 import RelatorioFluxo from "./RelatorioFluxo";
@@ -59,6 +59,8 @@ const topoDe = (no: No) => (COM_PREVIA.includes(no.tipo) ? TOPO_PREVIA : TOPO);
  * onde o fluxo vem e pra onde vai (rel_fluxos + número do Rel); sem adaptador,
  * é o Marketing de sempre.
  */
+export interface ErroDoBloco { no_id: string; detalhe: string | null; criado_em: string; quem: string | null }
+
 export interface AdaptadorFluxo {
   lerFluxo: (id: string) => Promise<Fluxo | null>;
   listarFluxos: () => Promise<Fluxo[]>;
@@ -69,6 +71,8 @@ export interface AdaptadorFluxo {
   filtrosEstat?: (fluxoId: string) => Promise<{ id: string; rotulo: string }[]>;
   /** Recorte já escolhido ao abrir (ex.: clicou no disparo no Histórico). */
   filtroInicial?: string | null;
+  /** 23/11: erros recentes por bloco (aparecem NO bloco, como no n8n). */
+  errosRecentes?: (fluxoId: string) => Promise<ErroDoBloco[]>;
   listarModelos: () => Promise<{ modelos?: ModeloMkt[]; erro?: string; aviso?: string }>;
   listarUsuarios: () => Promise<{ id: string; name: string }[]>;
   listarCampos: () => Promise<CampoPersonalizado[]>;
@@ -305,6 +309,9 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
   const [stats, setStats] = useState<Awaited<ReturnType<typeof estatisticas>>>(new Map());
   const [filtro, setFiltro] = useState<string | null>(adaptador?.filtroInicial ?? null);
   const [opcoesFiltro, setOpcoesFiltro] = useState<{ id: string; rotulo: string }[]>([]);
+  const [erros, setErros] = useState<Map<string, ErroDoBloco[]>>(new Map());
+  // Menu do botão direito: onde abriu (na tela) e onde o bloco nasce (no papel).
+  const [menuCtx, setMenuCtx] = useState<{ x: number; y: number; px: number; py: number } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [simulacao, setSimulacao] = useState<ResultadoSimulacao | null>(null);
   const [ligando, setLigando] = useState<{ de: string; saida: string; x: number; y: number } | null>(null);
@@ -353,7 +360,15 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
   // 0415: números ao vivo (30 s) e no recorte escolhido ("Números de:").
   useEffect(() => {
     let vivo = true;
-    const ler = () => void api.estatisticas(fluxoId, filtro).then((st) => { if (vivo) setStats(st); }).catch(() => null);
+    const ler = () => {
+      void api.estatisticas(fluxoId, filtro).then((st) => { if (vivo) setStats(st); }).catch(() => null);
+      if (api.errosRecentes) void api.errosRecentes(fluxoId).then((lista) => {
+        if (!vivo) return;
+        const m = new Map<string, ErroDoBloco[]>();
+        for (const e of lista) m.set(e.no_id, [...(m.get(e.no_id) ?? []), e]);
+        setErros(m);
+      }).catch(() => null);
+    };
     ler();
     const t = setInterval(ler, 30_000);
     return () => { vivo = false; clearInterval(t); };
@@ -422,8 +437,8 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
     };
   }
 
-  function adicionar(tipo: TipoNo) {
-    const c = centroDaTela();
+  function adicionar(tipo: TipoNo, onde?: { x: number; y: number }) {
+    const c = onde ?? centroDaTela();
     const no = noPadrao(tipo, Math.max(10, Math.round(c.x)), Math.max(10, Math.round(c.y)));
     mudarGrafo((g) => ({ ...g, nos: [...g.nos, no] }));
     setSel(no.id);
@@ -803,10 +818,43 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
   const selSet = new Set(selecao);
   return (
     <div>
-      {barra}{paleta}{ajudaIg}{listaProblemas}
-      <div className="flex gap-3" style={{ height: "calc(calc(100vh/var(--qs-zoom,1)) - 230px)", minHeight: 460 }}>
+      {barra}{ajudaIg}{listaProblemas}
+      <div className="relative flex gap-3" style={{ height: "calc(calc(100vh/var(--qs-zoom,1)) - 230px)", minHeight: 460 }}>
         <div ref={telaRef} className="mkt-card flex-1 overflow-auto relative" style={{ background: "color-mix(in srgb, var(--ink) 3%, var(--bg))", cursor: arrasto.current?.tipo === "quadro" ? "grabbing" : "default" }}
-          onPointerDown={pegarQuadro}>
+          onPointerDown={(e) => { if (menuCtx) setMenuCtx(null); pegarQuadro(e); }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            const el = telaRef.current; const p = pontoNoPapel(e.clientX, e.clientY);
+            if (!el || !p) return;
+            const r = el.getBoundingClientRect(); const k = escalaTela();
+            setMenuCtx({ x: (e.clientX - r.left) / k + el.scrollLeft, y: (e.clientY - r.top) / k + el.scrollTop, px: p.px, py: p.py });
+          }}>
+          {menuCtx && (
+            <div className="absolute z-30 min-w-[210px] rounded-lg py-1 text-[13px] shadow-lg" style={{ left: menuCtx.x, top: menuCtx.y, background: "var(--card)", border: "1px solid var(--line)" }}
+              onPointerDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
+              <div className="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>Adicionar bloco</div>
+              {(canal === "instagram" ? TIPOS_NOVOS_IG : TIPOS_NOVOS).map((t) => (
+                <button key={t} type="button" className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-black/5" style={{ color: "var(--ink)" }}
+                  onClick={() => { adicionar(t, { x: menuCtx.px, y: menuCtx.py }); setMenuCtx(null); }}>
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: COR_TIPO[t] }} />{ROTULO_TIPO[t]}
+                </button>
+              ))}
+              {selecao.length > 1 && (
+                <>
+                  <div className="my-1 border-t" style={{ borderColor: "var(--line)" }} />
+                  <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-black/5" onClick={() => { duplicar(selecao); setMenuCtx(null); }}>Duplicar {selecao.length} selecionados</button>
+                  <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-black/5" onClick={() => { if (copiar(selecao)) notifySuccess("Copiados. Ctrl+V cola (aqui ou noutro fluxo)."); setMenuCtx(null); }}>Copiar {selecao.length} selecionados</button>
+                  <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-black/5" style={{ color: "#DC2626" }} onClick={() => { setMenuCtx(null); if (window.confirm(`Apagar ${selecao.length} blocos?`)) apagarBlocos(selecao); }}>Apagar {selecao.length} selecionados</button>
+                </>
+              )}
+              <div className="mt-1 border-t px-3 pt-1.5 pb-1 text-[11px]" style={{ borderColor: "var(--line)", color: "var(--ink3)" }}>Ctrl+Z desfaz · Ctrl+C/V copia · Delete apaga</div>
+            </div>
+          )}
+          {grafo.nos.length <= 1 && !menuCtx && (
+            <div className="pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 rounded-full px-4 py-1.5 text-[12.5px]" style={{ background: "var(--card)", color: "var(--ink3)", border: "1px solid var(--line)" }}>
+              Clique com o botão direito no quadro para adicionar um bloco
+            </div>
+          )}
           <div ref={papelRef} style={{ width: PAPEL.w, height: PAPEL.h, transform: `scale(${zoom})`, transformOrigin: "0 0", position: "relative" }}>
             <svg width={PAPEL.w} height={PAPEL.h} style={{ position: "absolute", inset: 0 }}>
               {grafo.ligacoes.map((l) => {
@@ -848,9 +896,15 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
               const temProblema = problemas.some((p) => p.noId === no.id && p.grave);
               const topo = topoDe(no);
               const nBotoes = saidas.filter((x) => ehBotaoDoBalao(no, x)).length;
+              const errosNo = erros.get(no.id) ?? [];
               return (
                 <div key={no.id} data-no-id={no.id} className="absolute select-none"
-                  style={{ left: no.x, top: no.y, width: LARGURA, background: "var(--card)", borderRadius: 16, boxShadow: "0 1px 3px rgba(0,0,0,.07)", border: `${marcado ? 2 : 1}px solid ${marcado ? AZUL : temProblema ? "#DC2626" : "var(--line)"}` }}>
+                  style={{ left: no.x, top: no.y, width: LARGURA, background: "var(--card)", borderRadius: 16, boxShadow: "0 1px 3px rgba(0,0,0,.07)", border: `${marcado || errosNo.length ? 2 : 1}px solid ${marcado ? AZUL : temProblema || errosNo.length ? "#DC2626" : "var(--line)"}` }}>
+                  {errosNo.length > 0 && (
+                    <button type="button" className="absolute -right-2.5 -top-2.5 z-10 flex h-6 min-w-6 items-center justify-center gap-0.5 rounded-full px-1.5 text-[11px] font-bold text-white"
+                      style={{ background: "#DC2626" }} title={`${errosNo.length} erro(s) nos últimos 7 dias — clique pra ver\n\n${errosNo.slice(0, 3).map((e) => `• ${e.detalhe}`).join("\n")}`}
+                      onPointerDown={(e) => e.stopPropagation()} onClick={() => setSel(no.id)}>⚠ {errosNo.length}</button>
+                  )}
                   <div className="px-3 cursor-grab active:cursor-grabbing" style={{ height: topo }} onPointerDown={(e) => pegarBloco(e, no)}>
                     <CabecalhoBloco no={no} canal={canal} st={st} />
                     {COM_PREVIA.includes(no.tipo) ? (
@@ -910,33 +964,29 @@ export default function EditorFluxo({ fluxoId, onVoltar, adaptador }: { fluxoId:
             </div>
           )}
         </div>
+        <div className="absolute bottom-3 left-3 z-20 flex items-center gap-1 rounded-lg px-1 py-0.5 shadow-sm" style={{ background: "var(--card)", border: "1px solid var(--line)" }}>
+          <button type="button" className="px-2 text-[15px]" aria-label="Diminuir" onClick={() => setZoom((z) => Math.max(0.4, +(z - 0.1).toFixed(1)))}>−</button>
+          <span className="text-[12px]" style={{ color: "var(--ink3)" }}>{Math.round(zoom * 100)}%</span>
+          <button type="button" className="px-2 text-[15px]" aria-label="Aumentar" onClick={() => setZoom((z) => Math.min(1.6, +(z + 0.1).toFixed(1)))}>+</button>
+        </div>
         {noSel ? (
-          <aside className="mkt-card w-[380px] shrink-0 overflow-y-auto p-4">{painel}</aside>
-        ) : (
-          <aside className="mkt-card w-[280px] shrink-0 overflow-y-auto p-4 text-[12.5px] space-y-2" style={{ color: "var(--ink2)" }}>
-            <strong style={{ color: "var(--ink)" }}>Como usar</strong>
-            <p>Arraste o bloco pelo topo. Para ligar, puxe a bolinha da saída até outro bloco. Clique numa seta para apagar.</p>
-            {api.ajuda ?? <>
-            <p>Texto, botões e perguntas só saem com a <b>janela de 24 h aberta</b> (a pessoa escreveu nas últimas 24 h). {canal === "instagram" ? "No Instagram não existe Template: o fluxo só começa quando a pessoa comenta, manda DM ou abre o link." : <>Fluxo que começa pela LP deve começar por um <b>Template</b>.</>}</p>
-            <Aviso>Os números em cima de cada bloco são quantas pessoas passaram por ele (desde a criação).</Aviso>
-            <div style={{ background: COR_SUAVE }} className="rounded-lg p-2">Os gatilhos (palavra-chave, link, anúncio…) ficam nas outras abas e apontam para este fluxo.</div>
-            </>}
-            <details>
-              <summary className="cursor-pointer font-semibold" style={{ color: "var(--ink)" }}>Atalhos</summary>
-              <ul className="mt-1 space-y-0.5">
-                <li><b>Arrastar no vazio</b>: move o quadro</li>
-                <li><b>Shift + arrastar no vazio</b>: seleciona vários</li>
-                <li><b>Shift + clique</b>: junta/tira da seleção</li>
-                <li><b>Ctrl+A</b>: seleciona tudo</li>
-                <li><b>Ctrl+C / Ctrl+V</b>: copia e cola (até noutro fluxo)</li>
-                <li><b>Ctrl+D</b>: duplica</li>
-                <li><b>Delete</b>: apaga bloco ou seta</li>
-                <li><b>Ctrl+Z / Ctrl+Shift+Z</b>: desfaz / refaz</li>
-              </ul>
-            </details>
-            {publicado && <Aviso>Fluxo publicado: o que você muda fica como <b>rascunho</b> e só vale depois de <b>Publicar</b>. Quem já está no fluxo não sente nada.</Aviso>}
+          <aside className="mkt-card w-[380px] shrink-0 overflow-y-auto p-4">
+            {(erros.get(noSel.id) ?? []).length > 0 && (
+              <div className="mb-3 rounded-lg p-3 text-[12.5px]" style={{ background: "color-mix(in srgb, #DC2626 9%, var(--card))", border: "1px solid color-mix(in srgb, #DC2626 35%, var(--card))" }}>
+                <div className="mb-1.5 font-semibold" style={{ color: "#B91C1C" }}>⚠ Erros neste bloco (últimos 7 dias)</div>
+                <ul className="space-y-1.5">
+                  {(erros.get(noSel.id) ?? []).slice(0, 8).map((e, k) => (
+                    <li key={k} style={{ color: "var(--ink)" }}>
+                      <span className="tabular-nums" style={{ color: "var(--ink3)" }}>{new Date(e.criado_em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}{e.quem ? ` · ${e.quem}` : ""}</span>
+                      <span className="block">{e.detalhe || "Erro sem detalhe"}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {painel}
           </aside>
-        )}
+        ) : null}
       </div>
       <Simulacao resultado={simulacao} grafo={grafo} onFechar={() => setSimulacao(null)} />
       {relatorioModal}

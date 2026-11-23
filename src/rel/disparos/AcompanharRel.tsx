@@ -3,15 +3,14 @@
 // ACOMPANHAR OS DISPAROS (0412, 23/11/2026) — pedido do Bruno: "mandei teste e
 // não chegou; queria algo pra acompanhar os disparos".
 //   1. O que está travando (env da Vercel, simulação, número, token) em cima.
-//   2. Testes recentes: quem mandou, pra quem, por qual número, e o MOTIVO do erro
-//      — ou o recibo (enviado → entregue → lido).
+//   2. (23/11) Testes recentes SAÍRAM daqui: o erro aparece no próprio bloco do fluxo.
 //   3. Funil por número (hoje e 7 dias): enviadas → entregues → lidas → clicaram.
 //   4. Disparos em andamento (na fila, pausados com o motivo).
 //   5. Últimos envios, um por linha.
 // Atualiza sozinho a cada 15 s. Dados: acao 'rel_acompanhar' (api/_relDisparoOficial.js).
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState } from "react";
-import { Aviso, Botao, Etiqueta, Vazio } from "@/rel/ui";
+import { Aviso, Etiqueta, Vazio } from "@/rel/ui";
 import { chamar, type EstadoRel, type NumeroDisparo } from "./oficialRel";
 
 interface Funil { phone_number_id: string | null; enviados: number; entregues: number; lidos: number; clicaram: number; responderam: number; erros: number; pulados: number; na_fila: number; simulados: number }
@@ -22,9 +21,6 @@ interface Dados { semTabela: boolean; numeros: NumeroDisparo[]; semana: Funil[];
 
 const hora = (iso: string | null) => (iso ? new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
 const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : "—");
-const ROTULO_RECIBO: Record<string, { t: string; tom: "neutro" | "rel" | "aviso" | "erro" }> = {
-  sent: { t: "saiu (aguardando entregar)", tom: "neutro" }, delivered: { t: "entregue", tom: "rel" }, read: { t: "lido", tom: "rel" }, failed: { t: "a Meta não entregou", tom: "erro" },
-};
 const ROTULO_ENVIO: Record<string, { t: string; tom: "neutro" | "rel" | "aviso" | "erro" }> = {
   enviado: { t: "enviado", tom: "neutro" }, entregue: { t: "entregue", tom: "rel" }, lido: { t: "lido", tom: "rel" }, respondeu: { t: "respondeu", tom: "rel" },
   erro: { t: "erro", tom: "erro" }, pulado: { t: "pulado", tom: "aviso" },
@@ -58,34 +54,6 @@ export default function AcompanharRel({ est }: { est: EstadoRel | null }) {
         </Aviso>
       )}
       {erro && <Aviso tom="erro">{erro}</Aviso>}
-      {d?.semTabela && <Aviso>O registro dos testes ainda não foi ligado no banco (migração 0412). O resto da tela funciona.</Aviso>}
-
-      <section className="space-y-2">
-        <div className="flex items-center gap-2">
-          <h2 className="mr-auto text-[15px] font-bold" style={{ color: "var(--ink)" }}>Testes recentes</h2>
-          <Botao variante="fantasma" onClick={ler}>Atualizar</Botao>
-        </div>
-        {!d ? <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>
-          : !d.testes.length ? <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Nenhum teste registrado ainda. Os próximos “Mandar teste” aparecem aqui, com o motivo quando falhar.</p>
-          : (
-            <ul className="divide-y rounded-xl border" style={{ borderColor: "var(--line)" }}>
-              {d.testes.map((t) => {
-                const rec = t.status ? ROTULO_RECIBO[t.status] : null;
-                return (
-                  <li key={t.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 p-3 text-[13px]" style={{ borderColor: "var(--line)" }}>
-                    <span className="w-[92px] shrink-0 tabular-nums" style={{ color: "var(--ink3)" }}>{hora(t.criado_em)}</span>
-                    <span className="min-w-0 flex-1" style={{ color: "var(--ink)" }}>
-                      <b>{t.origem === "fluxo" ? "Fluxo" : t.modelo_nome || "Disparo"}</b> pra {t.telefone ?? "?"} · por {nomeDo(t.phone_number_id)}
-                      <span style={{ color: "var(--ink3)" }}>{t.user_nome ? ` · ${t.user_nome.split(" ")[0]}` : ""}</span>
-                      {t.erro && <span className="mt-0.5 block" style={{ color: "var(--err-ink)" }}>{t.erro}</span>}
-                    </span>
-                    {t.ok ? <Etiqueta tom={rec?.tom ?? "neutro"}>{rec?.t ?? "saiu"}</Etiqueta> : <Etiqueta tom="erro">não saiu</Etiqueta>}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-      </section>
 
       <section className="space-y-2">
         <div className="flex items-center gap-2">
