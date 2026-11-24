@@ -42,7 +42,12 @@ function vigiar5xx(res, rota, marcar) {
   res.json = (corpo) => {
     if (res.statusCode >= 500 && !res.__sentryJaFoi) {
       const msg = corpo && typeof corpo === 'object' ? String(corpo.error || corpo.erro || corpo.message || '') : '';
-      Sentry.captureMessage(`${rota} respondeu ${res.statusCode}${msg ? `: ${msg.slice(0, 200)}` : ''}`, 'error');
+      // Agrupa por rota + status (sem isso, todo 5xx de toda rota cai num problema só, "res.json").
+      Sentry.captureMessage(`${rota} respondeu ${res.statusCode}${msg ? `: ${msg.slice(0, 200)}` : ''}`, {
+        level: 'error',
+        fingerprint: ['resposta-5xx', rota, String(res.statusCode)],
+        tags: { 'http.status_code': String(res.statusCode) },
+      });
       marcar();
     }
     return json(corpo);
