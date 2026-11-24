@@ -12,9 +12,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import {
-  ACOMPANHAMENTOS, FASES, SERVICOS, TIPOS_DOC, TIPOS_VIAGEM, adicionarPassageiro, hojeSP, carregarViagem, dataBR, linkBitrix,
+  ACOMPANHAMENTOS, FASES, SERVICOS, TIPOS_VIAGEM, adicionarPassageiro, hojeSP, carregarViagem, dataBR, linkBitrix,
   listarEquipeRel, listarPassageiros, listarTarefas, removerPassageiro, resumoDaVenda, salvarViagem,
-  type Passageiro, type Tarefa, type TipoDocumento, type TipoViagem, type Trecho, type Viagem, type ViagemInput,
+  type Passageiro, type Tarefa, type TipoViagem, type Trecho, type Viagem, type ViagemInput,
 } from "../lib/viagens";
 import { buscarClientes, formatarTelefone, type Cliente } from "../lib/clientes";
 import { conversasDoCliente, type Conversa } from "../lib/whatsapp";
@@ -32,7 +32,7 @@ import { RevisaoViagem } from "./TrechosViagem";
 import { conferirViagens, diaLocal, mapaDasNoites, type Analise } from "../lib/problemas";
 import { codigoDe, resumirVoos } from "../lib/statusViagem";
 import { carregarComponentes, documentosDaViagem, oQueFalta, pagamentoDaViagem, type Componente, type DocResumo, type ResumoPagamento } from "../lib/componentes";
-import { estadoDocumento, estadoPassaporte, noitesEntre, prontidaoDaViagem, seloEmbarque, type EstadoPront } from "../lib/prontidao";
+import { noitesEntre, prontidaoDaViagem, seloEmbarque, type EstadoPront } from "../lib/prontidao";
 import { gruposDaViagem, type Grupo } from "../lib/grupos";
 import { TOM_FASE } from "./ViagensDoCliente";
 import { BotaoPedirOutroSetor, BotaoPedirPagamento, PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
@@ -46,19 +46,12 @@ import { BotaoSubirVenda } from "@/venda/SubirVenda";
 import TudoDaViagem from "./TudoDaViagem";
 import { SeloDaViagem } from "@/prioridades/SeloPrioridade";
 import VoosDaViagem from "./VoosDaViagem";
+import PassageirosDaViagem from "./PassageirosDaViagem";
+import EmissaoFutura, { pendenciasDeEmissao } from "./EmissaoFutura";
 import RoteiroCartoes, { type InfoVoo } from "./RoteiroCartoes";
 import { correcaoDisponivel, correcoesDaViagem, type Correcao } from "../lib/correcoes";
 import { conferidosDoHistorico, jaAconteceu } from "../lib/conferencia";
 import "./viagem-ficha.css";
-
-function Linha({ rotulo, children }: { rotulo: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-3 py-1.5">
-      <dt className="text-[12px] sm:w-36 flex-shrink-0" style={{ color: "var(--ink3)" }}>{rotulo}</dt>
-      <dd className="text-[14px] min-w-0 break-words" style={{ color: "var(--ink)" }}>{children || <span style={{ color: "var(--ink3)" }}>—</span>}</dd>
-    </div>
-  );
-}
 
 const moeda = (n: number | null) => (n == null ? "" : n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }));
 
@@ -234,7 +227,6 @@ function Prontidao({ p, carregando, children }: { p: ReturnType<typeof prontidao
   );
 }
 
-const iniciais = (n: string) => n.trim().split(/\s+/).filter(Boolean).map((x) => x[0]).slice(0, 2).join("").toUpperCase();
 const PAPEL_VAZIO = new Map<string, InfoVoo>();
 
 export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConversa, onAbrirExpedicao }: {
@@ -260,6 +252,8 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   // o conferente (lib/problemas.ts): riscos + os trechos que a linha do tempo desenha
   const [analise, setAnalise] = useState<Analise | null>(null);
   const [aba, setAba] = useState<"dia" | "tipo">("dia");
+  // 24/11 (Bruno): a ficha em abas — Viagem · Passageiros · Emissão futura (nada repetido entre elas)
+  const [tela, setTela] = useState<"viagem" | "pax" | "emissao">("viagem");
   // pra prontidão e a lateral (o TudoDaViagem e a Jornada carregam os seus)
   const [comps, setComps] = useState<Componente[] | null>(null);
   const [docs, setDocs] = useState<DocResumo[] | null>(null);
@@ -306,7 +300,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   }, [chaveConf]);
   // alerta clicado → mostra o dia a dia pra ele achar o trecho
   useEffect(() => {
-    const ir = () => setAba("dia");
+    const ir = () => { setTela("viagem"); setAba("dia"); };
     window.addEventListener("rel-ir-trecho", ir);
     return () => window.removeEventListener("rel-ir-trecho", ir);
   }, []);
@@ -347,7 +341,9 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
       hoteis: trechos.filter((t) => t.tipo === "hospedagem").map((t) => ({ nome: tituloTrecho(t), noites: nNoites(t) })),
       noitesSemHotel: [...noites.semHotel].filter((d) => d >= hojeDia).length,
       passeios: trechos.filter((t) => t.tipo === "passeio" && !passou(t)).map((t) => ({ nome: tituloTrecho(t), comVoucher: !!t.documento_id })),
-      itens: (comps ?? []).filter((c) => c.fonte === "venda").map((c) => ({ tipo: c.tipo, status: c.status, nome: c.nome })),
+      // itens do closer mandam; os lançados à mão pelo Rel (Emissão futura) só somam
+      itens: (comps ?? []).filter((c) => c.fonte === "venda" && c.negocio_id).map((c) => ({ tipo: c.tipo, status: c.status, nome: c.nome })),
+      avulsos: (comps ?? []).filter((c) => c.fonte === "venda" && !c.negocio_id).map((c) => ({ tipo: c.tipo, status: c.status })),
       docs: docs ?? [],
       passageiros: pass.filter((p) => p.cliente).map((p) => ({ nome: p.cliente!.nome, passaporte: p.cliente!.passaporte, passaporte_validade: p.cliente!.passaporte_validade })),
       qtdVendida: v?.qtd_passageiros ?? null,
@@ -376,6 +372,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   const noites = noitesEntre(v.data_embarque, v.data_retorno);
   const nPax = v.qtd_passageiros || pass.length || v.passageiros;
   const carregandoPront = !analise || comps === null || docs === null;
+  const nEmissao = carregandoPront ? 0 : pendenciasDeEmissao(comps, pront.quadros);
 
   // a rota: pelos voos que valem (cidade de saída → paradas → chegada); sem voo, o que o Bitrix diz
   const rota = (() => {
@@ -397,6 +394,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   const textoTarefa = (t?: Tarefa) => (!t ? "Nada agendado" : t.feita_em ? `feita em ${new Date(t.feita_em).toLocaleDateString("pt-BR")}` : t.prazo ? dataBR(t.prazo) : "sem prazo");
 
   const irPara = (id: string, _abrirDocs = false) => {
+    setTela(id === "vf-docs" ? "pax" : "viagem");
     setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
   };
 
@@ -464,7 +462,8 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
               <span className="vf-sub">Ir para:</span>
               <button type="button" className="vf-link" onClick={() => irPara("vf-voos")}>Voos e check-ins</button>
               <button type="button" className="vf-link" onClick={() => irPara("vf-tudo")}>Itens da venda</button>
-              <button type="button" className="vf-link" onClick={() => irPara("vf-arquivos", true)}>Arquivos e documentos</button>
+              <button type="button" className="vf-link" onClick={() => irPara("vf-arquivos", true)}>Arquivos da viagem</button>
+              <button type="button" className="vf-link" onClick={() => irPara("vf-docs")}>Documentos dos passageiros</button>
             </div>
           </div>
         )}
@@ -487,180 +486,153 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
 
       {erro && <Aviso tom="erro">{erro}</Aviso>}
 
-      {/* 24/11 (Bruno): O que pode dar errado ACIMA da prontidão, com o "O que falta" (antes no Tudo da viagem) junto */}
-      <AlertasViagem problemas={analise?.problemas ?? null} faltas={faltas} />
-
-      {/* ── Prontidão (lib/prontidao.ts): só os quadrinhos do que a venda tem + a % da revisão da IA ── */}
-      <Prontidao p={pront} carregando={carregandoPront}>
-        <ConformidadeViagem viagemId={v.id} versao={versao} onRevisado={revisou} />
-      </Prontidao>
-
-      {/* 24/11 (Bruno): a Esteira saiu da ficha (segue na tela Minhas atividades). Fica a Revisão — é ela que
-          marca REVISADO no quadro de partidas; antes só a expedição tinha ("0 de 564", 19/10) */}
-      {ativa && (
-        <section className="rel-card p-4 flex flex-wrap items-center justify-between gap-3">
-          <span className="text-[13px]" style={{ color: "var(--ink2)" }}><b style={{ color: "var(--ink)" }}>Revisão</b> · passageiros, documentos, voos e reservas conferidos</span>
-          <RevisaoViagem viagemId={v.id} equipe={equipe} />
-        </section>
-      )}
-
-      <div className="vf-cols">
-        {/* ── Coluna principal: o roteiro ── */}
-        <main className="vf-main">
-          <section className="vf-card" aria-label="Roteiro">
-            <div className="vf-rot__top">
-              <h2 className="vf-h2">Roteiro</h2>
-              <div className="vf-toggle" role="tablist" aria-label="Ver o roteiro">
-                {([["dia", "Dia a dia"], ["tipo", "Por tipo"]] as const).map(([k, r]) => (
-                  <button key={k} type="button" role="tab" aria-selected={aba === k} onClick={() => setAba(k)}>{r}</button>
-                ))}
-              </div>
-            </div>
-            {ativa && <ConferirVoos key={versao} viagemId={v.id} onMudou={() => { mudouTrecho(); void carregar(); }} />}
-            {analise && v.fase === "em_viagem" && <AgoraEProximo trechos={analise.trechos} />}
-            <RoteiroCartoes viagemId={v.id} trechos={analise ? analise.trechos : null} problemas={analise?.problemas ?? []} voos={infoVoos}
-              quadros={carregandoPront ? [] : pront.quadros} dataIda={v.data_embarque} dataVolta={v.data_retorno} ativa={ativa} modo={aba}
-              onMudou={revisou} onAnexar={() => irPara("vf-arquivos", true)} conferidos={conferidos} correcao={correcaoDisponivel(v)} />
-            {analise && analise.trechos.length > 0 && (
-              <details className="mt-4 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
-                <summary className="cursor-pointer text-[13px] font-semibold" style={{ color: "var(--muted)" }}>Linha do tempo completa (noites, dias livres, trechos fora das datas)</summary>
-                <div className="mt-3">
-                  <LinhaDoTempo viagemId={v.id} trechos={analise.trechos} problemas={analise.problemas} dataIda={v.data_embarque} dataVolta={v.data_retorno} ativa={ativa} onMudou={mudouTrecho} />
-                </div>
-              </details>
-            )}
-          </section>
-
-          {/* 30/10 (0227): os voos que valem, voo interno sim/não, check-ins e a correção manual pelo supervisor */}
-          <div id="vf-voos"><VoosDaViagem v={v} trechos={analise ? analise.trechos : null} onMudou={revisou} /></div>
-        </main>
-
-        {/* ── Coluna lateral ── */}
-        <aside className="vf-aside">
-          <section className="vf-card vf-card--aside" aria-label="Quem viaja">
-            <div className="flex justify-between items-center gap-2">
-              <h2 className="vf-h2 vf-h2--sm">Quem viaja</h2>
-              {ativa && <button type="button" className="vf-link" onClick={() => setAddPass(true)}>+ Passageiro</button>}
-            </div>
-            {pass.length === 0 && <p className="vf-sub">Nenhum passageiro com ficha.</p>}
-            {pass.map((p) => {
-              const c = p.cliente;
-              if (!c) return null;
-              const pp = estadoPassaporte(c, v.data_retorno || v.data_embarque, hojeSP());
-              return (
-                <div key={p.id} className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2 justify-between">
-                    <button type="button" className="vf-pessoa text-left" onClick={() => onAbrirCliente(c.id)}>
-                      <span className="vf-ini" aria-hidden>{iniciais(c.nome)}</span>
-                      <span className="flex flex-col min-w-0">
-                        <b className="truncate">{c.nome}</b>
-                        <span className="vf-sub">{formatarTelefone(c.telefone) || "sem telefone"}{c.id === v.cliente_id ? " · comprou" : ""}{p.bitrix_deal_id ? ` · card #${p.bitrix_deal_id}` : ""}</span>
-                      </span>
-                    </button>
-                    {c.id !== v.cliente_id && ativa && (
-                      <button type="button" className="vf-link" style={{ color: "var(--danger)" }} title="Tirar da viagem" aria-label={`Tirar ${c.nome} da viagem`}
-                        onClick={() => { if (window.confirm(`Tirar ${c.nome} desta viagem?`)) void acao(() => removerPassageiro(p.id)); }}>×</button>
-                    )}
-                  </div>
-                  <div className="vf-caixa">
-                    <span className="vf-sub">Passaporte{c.passaporte ? ` ${c.passaporte}` : ""}</span>
-                    <b className={`vf-tx-${pp.estado}`}>{pp.texto}</b>
-                  </div>
-                </div>
-              );
-            })}
-          </section>
-
-          <section className="vf-card vf-card--aside" aria-label="Requisitos de entrada">
-            <div className="flex justify-between items-baseline gap-2 flex-wrap">
-              <h2 className="vf-h2 vf-h2--sm">Requisitos de entrada</h2>
-              <span className="vf-rot">{venda.para || v.destino || "destino"} · via Sherpa</span>
-            </div>
-            <div className="vf-lin"><span>Situação</span><b className="vf-tx-neutro">Não ligado</b></div>
-            <RequisitosEntrada destino={venda.para || v.destino} />
-          </section>
-
-          <section className="vf-card vf-card--aside" aria-label="Documentos">
-            <h2 className="vf-h2 vf-h2--sm">Documentos</h2>
-            {docs === null ? <div className="h-10 rounded-lg animate-pulse" style={{ background: "var(--surface-2)" }} />
-              : docs.length === 0 ? <p className="vf-sub">Nenhum documento enviado nesta viagem.</p>
-              : docs.map((d, i) => {
-                const e = estadoDocumento(d.status);
-                const dono = pessoas.length > 1 ? pessoas.find((p) => p.id === d.cliente_id)?.nome.split(" ")[0] : null;
-                return (
-                  <div key={i} className="vf-lin vf-lin--borda">
-                    <span style={{ color: "var(--text)" }}>{TIPOS_DOC[d.tipo as TipoDocumento] ?? d.tipo}{dono ? ` · ${dono}` : ""}</span>
-                    <span className={`vf-pill vf-pill--${e.estado}`}>{e.rotulo}</span>
-                  </div>
-                );
-              })}
-            <button type="button" className="vf-link self-start" onClick={() => irPara("vf-arquivos", true)}>Gerenciar arquivos</button>
-          </section>
-
-          <section className="vf-card vf-card--aside" aria-label="Relacionamento">
-            <h2 className="vf-h2 vf-h2--sm">Relacionamento</h2>
-            {/* 0219: os grupos do WhatsApp ligados a esta viagem ou à expedição dela */}
-            <div className="vf-lin">
-              <span>Grupo do WhatsApp</span>
-              {grupos === null ? <b>…</b> : grupos.length === 0
-                ? <button type="button" className="vf-link" title="Em Grupos: abra o grupo → dados do grupo → Viagem" onClick={() => { window.location.hash = "#rel/grupos"; }}>Não ligado</button>
-                : <span className="flex flex-col items-end">{grupos.map((g) => (
-                  <button key={g.jid} type="button" className="vf-link text-right" onClick={() => { window.location.hash = `#rel/grupos/${encodeURIComponent(g.jid)}`; }}>
-                    {g.nome || "Grupo sem nome"}{(g.nao_lidas ?? 0) > 0 ? ` (${g.nao_lidas})` : ""}
-                  </button>))}</span>}
-            </div>
-            {/* 0184: preferências da pessoa — fácil de preencher e cobradas perto do embarque */}
-            <details>
-              <summary className="vf-lin cursor-pointer"><span>Preferências</span><b>{v.necessidades ? "ver e editar" : "anotar"}</b></summary>
-              <div className="pt-2"><PreferenciasViagem key={`${v.id}${versao}`} viagemId={v.id} necessidades={v.necessidades} diasParaEmbarque={v.dias_para_embarque} ativa={ativa} equipe={equipe} /></div>
-            </details>
-            <div className="vf-lin"><span>Boas-vindas de volta</span><b>{textoTarefa(boasVindas)}</b></div>
-            <div className="vf-lin"><span>Recompra / indicação</span><b>{textoTarefa(recompra)}</b></div>
-            <div className="vf-lin" style={{ alignItems: "flex-start" }}>
-              <span>Recado do Comercial</span>
-              <b className="text-[13px] whitespace-pre-wrap" style={{ fontWeight: v.observacoes ? 500 : 600 }}>{v.observacoes || "Nada anotado"}</b>
-            </div>
-            {v.cliente_id && (conversa
-              ? <button type="button" className="vf-btn vf-btn--wa" onClick={() => onAbrirConversa(conversa.id)}>Abrir conversa no WhatsApp</button>
-              : <button type="button" className="vf-btn" style={{ width: "100%", justifyContent: "center" }} onClick={() => onAbrirCliente(v.cliente_id!)}>Falar com o cliente (ficha)</button>)}
-          </section>
-
-          <RevisaoIaViagem key={versao} viagemId={v.id} onRevisado={revisou} />
-
-          {/* 0176: o que o closer consolidou (itens, plano de pagamento, preferências). Sem venda consolidada não aparece nada. */}
-          <FichaFechamentoResumo viagemId={v.id} />
-        </aside>
+      {/* 24/11 (Bruno): abas — "tem muita coisa mas não está visual, e sem informação repetida" */}
+      <div className="vf-abas" role="tablist" aria-label="Partes da viagem">
+        {([
+          ["viagem", "Viagem", null, false],
+          ["pax", "Passageiros", pass.filter((p) => p.cliente).length, false],
+          ["emissao", "Emissão futura", nEmissao, nEmissao > 0],
+        ] as const).map(([k, r, n, alerta]) => (
+          <button key={k} type="button" role="tab" id={`vf-aba-${k}`} aria-selected={tela === k} aria-controls={`vf-painel-${k}`} onClick={() => setTela(k)}>
+            {r}{n != null && <span className={`vf-abas__n${alerta ? " vf-abas__n--alerta" : ""}`}>{n}</span>}
+          </button>
+        ))}
       </div>
 
-      {/* 0208: itens da venda por tipo (aéreo, hotel, seguro, expedição…), o que falta e as próximas datas */}
-      <div id="vf-tudo"><TudoDaViagem v={v} pass={pass} versao={versao} onMudou={revisou} onAbrirExpedicao={onAbrirExpedicao} /></div>
+      {tela === "viagem" && (
+        <div id="vf-painel-viagem" role="tabpanel" aria-labelledby="vf-aba-viagem" className="flex flex-col gap-5">
+          {/* O que pode dar errado ACIMA da prontidão, com o "O que falta" junto */}
+          <AlertasViagem problemas={analise?.problemas ?? null} faltas={faltas} />
 
-      {/* 03/11: o envio e a revisão (Aprovar / Recusar no cartão) à vista; com a prontidão
-          incompleta, o topo vira "soltar arquivo" + "Ajustar a venda" (o mesmo Editar viagem) */}
-      <section id="vf-arquivos" className="vf-card flex flex-col gap-3" aria-label="Arquivos da viagem">
-        <h2 className="vf-h2">Arquivos da viagem</h2>
-        <DocumentosPainel pessoas={pessoas} viagemId={v.id} onMudou={() => setVersao((n) => n + 1)}
-          ficha={{ incompleto: !carregandoPront && pront.quadros.some((q) => q.estado === "atencao" || q.estado === "falta"), onAjustarVenda: () => setEditando(true) }} />
-        <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
-          <ArquivosViagem viagemId={v.id} pessoas={pessoas} versao={versao} />
-        </div>
-      </section>
+          {/* ── Prontidão (lib/prontidao.ts): só os quadrinhos do que a venda tem + a % da revisão da IA ── */}
+          <Prontidao p={pront} carregando={carregandoPront}>
+            <ConformidadeViagem viagemId={v.id} versao={versao} onRevisado={revisou} />
+          </Prontidao>
 
-      <details className="vf-mais">
-        <summary>Dados da venda e histórico <span>{v.origem === "bitrix" ? "veio do Bitrix" : "lançada no QS"}</span></summary>
-        <div className="vf-mais__corpo">
-          <dl>
-            <Linha rotulo="Ida × volta">{v.data_embarque ? `${dataBR(v.data_embarque)} × ${dataBR(v.data_retorno) || "—"}` : ""}</Linha>
-            <Linha rotulo="De → para">{venda.de || venda.para || v.destino ? `${venda.de || "—"} → ${venda.para || v.destino || "—"}` : ""}</Linha>
-            <Linha rotulo="Venda">{[dataBR(v.data_venda), venda.closer && `por ${venda.closer}`].filter(Boolean).join(" ")}</Linha>
-            <Linha rotulo="Passageiros">{v.qtd_passageiros ? `${v.qtd_passageiros} vendido(s) · ${v.passageiros} com ficha` : `${v.passageiros} com ficha`}</Linha>
-            {v.expedicao && <Linha rotulo="Expedição">{v.expedicao}</Linha>}
-            <Linha rotulo="Valor">{moeda(v.valor)}</Linha>
-            <Linha rotulo="Necessidades">{v.necessidades ?? ""}</Linha>
-          </dl>
-          <HistoricoViagem viagemId={v.id} equipe={equipe} versao={versao} />
+          {/* a Revisão marca REVISADO no quadro de partidas */}
+          {ativa && (
+            <section className="rel-card p-4 flex flex-wrap items-center justify-between gap-3">
+              <span className="text-[13px]" style={{ color: "var(--ink2)" }}><b style={{ color: "var(--ink)" }}>Revisão</b> · passageiros, documentos, voos e reservas conferidos</span>
+              <RevisaoViagem viagemId={v.id} equipe={equipe} />
+            </section>
+          )}
+
+          <div className="vf-cols">
+            {/* ── Coluna principal: o roteiro ── */}
+            <main className="vf-main">
+              <section className="vf-card" aria-label="Roteiro">
+                <div className="vf-rot__top">
+                  <h2 className="vf-h2">Roteiro</h2>
+                  <div className="vf-toggle" role="tablist" aria-label="Ver o roteiro">
+                    {([["dia", "Dia a dia"], ["tipo", "Por tipo"]] as const).map(([k, r]) => (
+                      <button key={k} type="button" role="tab" aria-selected={aba === k} onClick={() => setAba(k)}>{r}</button>
+                    ))}
+                  </div>
+                </div>
+                {ativa && <ConferirVoos key={versao} viagemId={v.id} onMudou={() => { mudouTrecho(); void carregar(); }} />}
+                {analise && v.fase === "em_viagem" && <AgoraEProximo trechos={analise.trechos} />}
+                <RoteiroCartoes viagemId={v.id} trechos={analise ? analise.trechos : null} problemas={analise?.problemas ?? []} voos={infoVoos}
+                  quadros={carregandoPront ? [] : pront.quadros} dataIda={v.data_embarque} dataVolta={v.data_retorno} ativa={ativa} modo={aba}
+                  onMudou={revisou} onAnexar={() => irPara("vf-arquivos", true)} conferidos={conferidos} correcao={correcaoDisponivel(v)} />
+                {analise && analise.trechos.length > 0 && (
+                  <details className="mt-4 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+                    <summary className="cursor-pointer text-[13px] font-semibold" style={{ color: "var(--muted)" }}>Linha do tempo completa (noites, dias livres, trechos fora das datas)</summary>
+                    <div className="mt-3">
+                      <LinhaDoTempo viagemId={v.id} trechos={analise.trechos} problemas={analise.problemas} dataIda={v.data_embarque} dataVolta={v.data_retorno} ativa={ativa} onMudou={mudouTrecho} />
+                    </div>
+                  </details>
+                )}
+              </section>
+
+              {/* 30/10 (0227): os voos que valem, voo interno sim/não, check-ins e a correção manual pelo supervisor */}
+              <div id="vf-voos"><VoosDaViagem v={v} trechos={analise ? analise.trechos : null} onMudou={revisou} /></div>
+            </main>
+
+            {/* ── Lateral: a relação com o cliente (quem viaja e documentos foram pra aba Passageiros) ── */}
+            <aside className="vf-aside">
+              <section className="vf-card vf-card--aside" aria-label="Relacionamento">
+                <h2 className="vf-h2 vf-h2--sm">Relacionamento</h2>
+                {/* 0219: os grupos do WhatsApp ligados a esta viagem ou à expedição dela */}
+                <div className="vf-lin">
+                  <span>Grupo do WhatsApp</span>
+                  {grupos === null ? <b>…</b> : grupos.length === 0
+                    ? <button type="button" className="vf-link" title="Em Grupos: abra o grupo → dados do grupo → Viagem" onClick={() => { window.location.hash = "#rel/grupos"; }}>Não ligado</button>
+                    : <span className="flex flex-col items-end">{grupos.map((g) => (
+                      <button key={g.jid} type="button" className="vf-link text-right" onClick={() => { window.location.hash = `#rel/grupos/${encodeURIComponent(g.jid)}`; }}>
+                        {g.nome || "Grupo sem nome"}{(g.nao_lidas ?? 0) > 0 ? ` (${g.nao_lidas})` : ""}
+                      </button>))}</span>}
+                </div>
+                {/* 0184: preferências da pessoa — fácil de preencher e cobradas perto do embarque */}
+                <details>
+                  <summary className="vf-lin cursor-pointer"><span>Preferências</span><b>{v.necessidades ? "ver e editar" : "anotar"}</b></summary>
+                  <div className="pt-2"><PreferenciasViagem key={`${v.id}${versao}`} viagemId={v.id} necessidades={v.necessidades} diasParaEmbarque={v.dias_para_embarque} ativa={ativa} equipe={equipe} /></div>
+                </details>
+                <div className="vf-lin"><span>Boas-vindas de volta</span><b>{textoTarefa(boasVindas)}</b></div>
+                <div className="vf-lin"><span>Recompra / indicação</span><b>{textoTarefa(recompra)}</b></div>
+                <div className="vf-lin" style={{ alignItems: "flex-start" }}>
+                  <span>Recado do Comercial</span>
+                  <b className="text-[13px] whitespace-pre-wrap" style={{ fontWeight: v.observacoes ? 500 : 600 }}>{v.observacoes || "Nada anotado"}</b>
+                </div>
+                {v.cliente_id && (conversa
+                  ? <button type="button" className="vf-btn vf-btn--wa" onClick={() => onAbrirConversa(conversa.id)}>Abrir conversa no WhatsApp</button>
+                  : <button type="button" className="vf-btn" style={{ width: "100%", justifyContent: "center" }} onClick={() => onAbrirCliente(v.cliente_id!)}>Falar com o cliente (ficha)</button>)}
+              </section>
+
+              <RevisaoIaViagem key={versao} viagemId={v.id} onRevisado={revisou} />
+
+              {/* 0176: o que o closer consolidou (itens, plano de pagamento, preferências). Sem venda consolidada não aparece nada. */}
+              <FichaFechamentoResumo viagemId={v.id} />
+            </aside>
+          </div>
+
+          {/* 0208: itens da venda por tipo (aéreo, hotel, seguro, expedição…) e as próximas datas */}
+          <div id="vf-tudo"><TudoDaViagem v={v} pass={pass} versao={versao} onMudou={revisou} onAbrirExpedicao={onAbrirExpedicao} /></div>
+
+          {/* vouchers, bilhetes, apólices — os arquivos DA VIAGEM (os documentos das pessoas estão na aba Passageiros) */}
+          <section id="vf-arquivos" className="vf-card flex flex-col gap-3" aria-label="Arquivos da viagem">
+            <h2 className="vf-h2">Arquivos da viagem</h2>
+            <ArquivosViagem viagemId={v.id} pessoas={pessoas} versao={versao} />
+          </section>
+
+          {/* os dados da venda já estão no cabeçalho — aqui fica só o histórico */}
+          <details className="vf-mais">
+            <summary>Histórico da viagem <span>{v.origem === "bitrix" ? "veio do Bitrix" : "lançada no QS"}</span></summary>
+            <div className="vf-mais__corpo">
+              <HistoricoViagem viagemId={v.id} equipe={equipe} versao={versao} />
+            </div>
+          </details>
         </div>
-      </details>
+      )}
+
+      {tela === "pax" && (
+        <div id="vf-painel-pax" role="tabpanel" aria-labelledby="vf-aba-pax" className="flex flex-col gap-5">
+          <PassageirosDaViagem pass={pass} compradorId={v.cliente_id} qtdVendida={v.qtd_passageiros} dataReferencia={v.data_retorno || v.data_embarque}
+            docs={docs} ativa={ativa} onAbrirCliente={onAbrirCliente} onAdicionar={() => setAddPass(true)}
+            onRemover={(p) => { if (window.confirm(`Tirar ${p.cliente?.nome ?? "esta pessoa"} desta viagem?`)) void acao(() => removerPassageiro(p.id)); }} />
+
+          {/* envio e revisão (Aprovar / Recusar) dos documentos de cada pessoa */}
+          <section id="vf-docs" className="vf-card flex flex-col gap-3" aria-label="Documentos dos passageiros">
+            <h2 className="vf-h2">Enviar e conferir documentos</h2>
+            <DocumentosPainel pessoas={pessoas} viagemId={v.id} onMudou={() => setVersao((n) => n + 1)}
+              ficha={{ incompleto: !carregandoPront && pront.quadros.some((q) => q.estado === "atencao" || q.estado === "falta"), onAjustarVenda: () => setEditando(true) }} />
+          </section>
+
+          <section className="vf-card flex flex-col gap-3" aria-label="Requisitos de entrada">
+            <div className="flex justify-between items-baseline gap-2 flex-wrap">
+              <h2 className="vf-h2">Requisitos de entrada</h2>
+              <span className="vf-rot">{venda.para || v.destino || "destino"} · via Sherpa (não ligado)</span>
+            </div>
+            <RequisitosEntrada destino={venda.para || v.destino} />
+          </section>
+        </div>
+      )}
+
+      {tela === "emissao" && (
+        <div id="vf-painel-emissao" role="tabpanel" aria-labelledby="vf-aba-emissao">
+          <EmissaoFutura viagemId={v.id} comps={comps} quadros={pront.quadros} carregando={carregandoPront}
+            dataIda={v.data_embarque} ativa={ativa} onMudou={revisou} />
+        </div>
+      )}
 
       <EditarViagem aberto={editando} v={v} onFechar={() => setEditando(false)} onSalvo={() => { setEditando(false); void carregar(); }} />
       <AdicionarPassageiro aberto={addPass} viagemId={v.id} onFechar={() => setAddPass(false)} onAdicionado={() => { setAddPass(false); void carregar(); }} />

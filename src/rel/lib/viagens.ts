@@ -162,7 +162,9 @@ export interface Passageiro {
   viagem_id: string;
   cliente_id: string;
   bitrix_deal_id: string | null;
-  cliente: { id: string; nome: string; telefone: string | null; passaporte: string | null; passaporte_validade: string | null; nascimento: string | null } | null;
+  cliente: { id: string; nome: string; telefone: string | null; passaporte: string | null; passaporte_validade: string | null; nascimento: string | null;
+    /** 24/11: aba Passageiros da ficha */
+    cpf?: string | null; email?: string | null; parentesco?: string | null; observacoes?: string | null } | null;
 }
 
 export interface Tarefa {
@@ -422,7 +424,7 @@ export async function listarEquipeRel(): Promise<{ id: string; name: string }[]>
 export async function listarPassageiros(viagemId: string): Promise<Passageiro[]> {
   const { data, error } = await supabase
     .from("rel_viagem_passageiros")
-    .select("id, viagem_id, cliente_id, bitrix_deal_id, cliente:rel_clientes(id, nome, telefone, passaporte, passaporte_validade, nascimento)")
+    .select("id, viagem_id, cliente_id, bitrix_deal_id, cliente:rel_clientes(id, nome, telefone, passaporte, passaporte_validade, nascimento, cpf, email, parentesco, observacoes)")
     .eq("viagem_id", viagemId);
   if (error) throw error;
   return ((data ?? []) as unknown as Passageiro[]).sort((a, b) => (a.cliente?.nome || "").localeCompare(b.cliente?.nome || ""));

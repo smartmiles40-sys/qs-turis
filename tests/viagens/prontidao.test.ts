@@ -195,3 +195,9 @@ test("voo interno só aparece quando existe; Sherpa desligado não aparece", () 
 test("seguro sozinho: só o seguro, sem passaporte", () => {
   assert.deepEqual(chaves(base({ servico: "seguro", acompanhamento: "nenhum" })), ["seguro"]);
 });
+
+test("item agendado à mão pelo Rel (Emissão futura) SOMA ao que foi vendido, não troca", () => {
+  const e = base({ servico: "pacote", avulsos: [{ tipo: "seguro", status: "vendido" }] });
+  assert.deepEqual(chaves(e), ["ida", "volta", "hospedagem", "documentos", "seguro"]);
+  assert.deepEqual(chaves(base({ servico: "pacote", avulsos: [{ tipo: "seguro", status: "cancelado" }] })), ["ida", "volta", "hospedagem", "documentos"]);
+});

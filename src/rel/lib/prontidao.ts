@@ -55,6 +55,8 @@ export interface EntradaProntidao {
   passeios: { nome: string; comVoucher: boolean }[];
   /** itens da venda (qs_venda_itens): tipo + situação (vendido/emitido/cancelado) */
   itens: { tipo: string; status: string | null; nome?: string }[];
+  /** 24/11: itens lançados à mão pelo Rel (Emissão futura) — SOMAM ao que foi vendido, não trocam */
+  avulsos?: { tipo: string; status: string | null }[];
   docs: { tipo: string; status: string }[];
   passageiros: { nome: string; passaporte: string | null; passaporte_validade: string | null }[];
   qtdVendida: number | null;
@@ -93,6 +95,7 @@ export function oQueFoiVendido(e: EntradaProntidao): Set<string> {
   };
   if (itens.length) for (const t of itens) { if (t === "pacote" || t === "expedicao") doServico(t); else s.add(t); }
   else doServico(e.servico);
+  for (const a of e.avulsos ?? []) if (VIVO(a.status)) { if (a.tipo === "pacote" || a.tipo === "expedicao") doServico(a.tipo); else s.add(a.tipo); }
   if (e.voos.some((v) => v.valido && !v.cancelado)) s.add("aereo");
   if (e.hoteis.length) s.add("hospedagem");
   if (e.passeios.length) s.add("passeio");

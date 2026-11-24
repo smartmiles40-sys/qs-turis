@@ -196,3 +196,26 @@ button.vf-quadro:hover { border-color: var(--border-strong); }
 .vf-doc__dica { font-size: 11.5px; color: var(--subtle); }
 .vf-doc:hover .vf-doc__dica, .vf-doc:focus-within .vf-doc__dica, .vf-doc--aberto .vf-doc__dica { display: none; }
 @media (hover: none) { .vf-doc:hover .vf-doc__decide { display: none; } .vf-doc--aberto .vf-doc__decide, .vf-doc:focus-within .vf-doc__decide { display: flex; } }
+
+/* 24/11: abas da ficha (Viagem · Passageiros · Emissão futura) */
+.vf-abas { display: flex; gap: 4px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.vf-abas button { position: relative; flex-shrink: 0; height: 44px; padding: 0 16px; border: 0; background: transparent; font: inherit; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.vf-abas button[aria-selected="true"] { color: var(--text); }
+.vf-abas button[aria-selected="true"]::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 3px; border-radius: 3px 3px 0 0; background: var(--primary); }
+.vf-abas button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; border-radius: 8px; }
+.vf-abas__n { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; font-size: 11.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--muted); }
+.vf-abas__n--alerta { background: var(--danger-bg); color: var(--danger); }
+.vf-pax-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+@media (max-width: 420px) { .vf-pax-grid { grid-template-columns: 1fr; } }
+.vf-dados { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; margin: 0; }
+.vf-dados > div { min-width: 0; }
+.vf-dados dt { font-size: 11.5px; color: var(--muted); }
+.vf-dados dd { margin: 2px 0 0; font-size: 14px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.vf-dados dd.vf-vazio { color: var(--muted); font-weight: 500; }
+.vf-emit { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border: 1px solid var(--border); border-left-width: 4px; border-radius: 12px; padding: 12px 14px; background: var(--surface); }
+.vf-emit--falta { border-left-color: var(--danger); }
+.vf-emit--atencao { border-left-color: var(--warn, #D97706); }
+.vf-emit--ok { border-left-color: var(--ok, #16A34A); }
+.vf-emit__txt { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.vf-emit__quando { text-align: right; flex-shrink: 0; font-size: 12.5px; color: var(--muted); }
+.vf-emit__quando b { display: block; font-size: 14px; color: var(--text); }
