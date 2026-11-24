@@ -53,6 +53,34 @@ export function limparMarcaDeReload(): void {
 }
 
 /**
+ * 24/11 (Hugo não abria o QS; na anônima abria): a Vercel manda o 404 de
+ * /assets/* com "immutable, 1 ano". O navegador que pediu um arquivo na troca
+ * de versão guarda esse 404 e recarregar NÃO resolve — pede de novo e recebe o
+ * 404 guardado. `fetch(url, { cache: "reload" })` vai na rede e TROCA a entrada
+ * guardada pela resposta nova. Faz isso no arquivo do erro e em todo /assets/
+ * que a página viu falhar, antes do reload. Nunca lança; no máximo 4 s.
+ */
+export async function refrescarAssetsQuebrados(erro?: unknown): Promise<void> {
+  try {
+    const urls = new Set<string>();
+    const msg = erro instanceof Error ? erro.message : String(erro ?? "");
+    for (const m of msg.match(/https?:\/\/[^\s'"()]+\/assets\/[^\s'"()]+/g) ?? []) urls.add(m);
+    for (const e of performance.getEntriesByType("resource") as (PerformanceResourceTiming & { responseStatus?: number })[]) {
+      if (!e.name.includes("/assets/")) continue;
+      const st = e.responseStatus;
+      // responseStatus (Chrome 109+) diz o código; sem ele, 0 bytes e sem corpo = suspeito.
+      if ((typeof st === "number" && st >= 400) || (st === undefined && e.transferSize === 0 && e.decodedBodySize === 0)) urls.add(e.name);
+    }
+    if (!urls.size) return;
+    const tempo = new Promise<void>((r) => setTimeout(r, 4000));
+    await Promise.race([
+      Promise.all([...urls].map((u) => fetch(u, { cache: "reload" }).catch(() => null))).then(() => undefined),
+      tempo,
+    ]);
+  } catch { /* ignora: o reload segue de qualquer jeito */ }
+}
+
+/**
  * Igual ao `lazy()` do React, mas se o chunk sumiu (deploy novo enquanto a aba
  * estava aberta) recarrega a página uma vez em vez de mostrar tela quebrada.
  */
@@ -70,6 +98,7 @@ export function lazyPagina<T extends ComponentType<any>>(
     } catch (erro) {
       if (ehChunkSumido(erro) && !jaRecarregou()) {
         marcarReload();
+        await refrescarAssetsQuebrados(erro);
         window.location.reload();
         // A página já está indo embora: esta promise nunca resolve de propósito,
         // pra não piscar um erro no meio do recarregamento.
