@@ -1256,7 +1256,9 @@ export default function SdrDashboard() {
           // (closer_id) e o embed curto passou a devolver PGRST201, derrubando
           // este bloco inteiro de métricas do gestor.
           .select("owner_id, status, owner:qs_users!qs_meetings_owner_id_fkey(name)")
-          .not("status", "in", "(cancelada,reagendada)")
+          .not("status", "in", "(cancelada,arquivada)")
+          // Reagendamento não é agendamento novo: conta a reunião original (24/11).
+          .is("reagendado_de", null)
           .order("id");
         if (ownerId) q = q.eq("owner_id", ownerId);
         if (from) q = q.gte("created_at", from);

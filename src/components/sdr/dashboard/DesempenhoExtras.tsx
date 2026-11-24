@@ -64,7 +64,7 @@ export function useExtrasDesempenho(de: string, ate: string, sdrId: string | nul
       try {
         const [reunioes, sdrsRes, atividades, kpis, grav] = await Promise.all([
           fetchAllRows<ReuniaoRanking>((f, t) =>
-            supabase.from("qs_meetings").select("id,owner_id,status,tipo,created_at,scheduled_at,sal")
+            supabase.from("qs_meetings").select("id,owner_id,status,tipo,reagendado_de,created_at,scheduled_at,sal")
               .or(`and(created_at.gte.${ini},created_at.lt.${fim}),and(scheduled_at.gte.${ini},scheduled_at.lt.${fim})`)
               .order("id").range(f, t) as unknown as PromiseLike<{ data: ReuniaoRanking[] | null; error: { message?: string } | null }>),
           supabase.from("qs_users").select("id,name").eq("role", "sdr").eq("is_active", true).order("name"),
@@ -257,7 +257,7 @@ function BarrasDiarias({ titulo, serie, cor }: { titulo: string; serie: { dia: s
 export function EvolucaoDiaria({ de, ate, extras, sdrId }: { de: string; ate: string; extras: Extras | null; sdrId: string | null }) {
   if (!extras) return <Cartao><p className="text-[13px]" style={{ color: "var(--subtle)" }}>Carregando a evolução…</p></Cartao>;
   const doSdr = sdrId ? extras.reunioes.filter((m) => m.owner_id === sdrId) : extras.reunioes.filter((m) => extras.sdrs.some((s) => s.id === m.owner_id));
-  const marcadas = serieDiaria(doSdr.filter((m) => m.status !== "arquivada" && m.tipo !== "retomada").map((m) => m.created_at), de, ate);
+  const marcadas = serieDiaria(doSdr.filter((m) => m.status !== "arquivada" && m.tipo !== "retomada" && !m.reagendado_de).map((m) => m.created_at), de, ate);
   return (
     <Cartao className="flex flex-col gap-5">
       <h2 className="m-0 text-[17px] font-extrabold" style={{ color: "var(--text)" }}>Evolução por dia</h2>

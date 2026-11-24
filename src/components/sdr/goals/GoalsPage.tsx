@@ -72,6 +72,7 @@ async function computeGoalCurrent(goal: Goal): Promise<number> {
       .from("qs_meetings")
       .select("id", { count: "exact", head: true })
       .not("status", "in", "(cancelada,arquivada)")
+      .is("reagendado_de", null)
       .gte("created_at", from)
       .lte("created_at", to);
     if (await colunaTipoPronta()) q = q.neq("tipo", "retomada");

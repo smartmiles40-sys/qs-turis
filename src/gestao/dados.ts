@@ -253,7 +253,7 @@ export async function carregarSdr(p: Periodo): Promise<BlocoSdr> {
   const [funil, agendadas, realizadas, cotacoes, cotacoesTotal, metas, mapa] = await Promise.all([
     fetchFunil(i.deData, i.ateData),
     fetchAllRows<{ owner_id: string | null }>((de, ate) => supabase.from("qs_meetings").select("owner_id")
-      .neq("status", "arquivada").neq("tipo", "retomada").gte("created_at", i.deIso).lte("created_at", i.ateIso).order("id").range(de, ate)),
+      .neq("status", "arquivada").neq("tipo", "retomada").is("reagendado_de", null).gte("created_at", i.deIso).lte("created_at", i.ateIso).order("id").range(de, ate)),
     fetchAllRows<{ owner_id: string | null }>((de, ate) => supabase.from("qs_meetings").select("owner_id")
       .eq("status", "realizada").neq("tipo", "retomada").gte("scheduled_at", i.deIso).lte("scheduled_at", i.ateIso).order("id").range(de, ate)),
     fetchAllRows<{ owner_id: string | null }>((de, ate) => supabase.from("qs_aereo_cotacoes").select("owner_id")

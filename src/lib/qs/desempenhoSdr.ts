@@ -107,6 +107,7 @@ export interface ReuniaoRanking {
   owner_id: string | null;
   status: string;
   tipo?: string | null;
+  reagendado_de?: string | null;
   created_at: string;
   scheduled_at: string;
   sal?: string | null;
@@ -122,7 +123,7 @@ export interface LinhaRanking {
 
 /**
  * Por SDR, no intervalo [de, ate] (AAAA-MM-DD):
- *  - marcadas: reuniões CRIADAS no período (fora arquivada e retomada) — a
+ *  - marcadas: reuniões CRIADAS no período (fora arquivada, retomada e reagendamento) — a
  *    mesma regra do "Reuniões agendadas" de fetchMeetingKpis;
  *  - realizadas / SAL: reuniões COM DATA no período que viraram realizada / SAL aceito.
  * Só entram os ids de `sdrs` (quem é SDR ativo); ordena por realizadas, depois marcadas.
@@ -133,7 +134,7 @@ export function rankingPorReunioes(lista: ReuniaoRanking[], sdrs: { id: string; 
   for (const m of lista) {
     const l = m.owner_id ? mapa.get(m.owner_id) : undefined;
     if (!l || m.tipo === "retomada") continue;
-    if (m.status !== "arquivada" && dentro(m.created_at)) l.marcadas++;
+    if (m.status !== "arquivada" && !m.reagendado_de && dentro(m.created_at)) l.marcadas++;
     if (dentro(m.scheduled_at) && new Date(m.scheduled_at).getTime() <= agora.getTime()) {
       if (m.status === "realizada") l.realizadas++;
       if (m.sal === "aceito") l.sal++;

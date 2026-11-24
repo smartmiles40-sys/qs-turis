@@ -113,7 +113,7 @@ export default function DailyFlowPanel() {
           return q.range(f, t);
         }),
         fetchAllRows<any>((f, t) => {
-          let q = supabase.from("qs_meetings").select("created_at").gte("created_at", startISO).order("id");
+          let q = supabase.from("qs_meetings").select("created_at").gte("created_at", startISO).is("reagendado_de", null).order("id");
           if (own) q = q.eq("owner_id", own);
           return q.range(f, t);
         }),

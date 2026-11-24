@@ -25,3 +25,37 @@ test("linha da reunião: sem lead embutido não quebra", () => {
   assert.equal(l.bitrix_id, null);
   assert.equal(l.temperatura, null);
 });
+
+// 24/11: metas dos SDRs vêm do Dashboard (metas_config) pro QS.
+import { casarMetas, normalizarNome, mesSP } from "../../api/dashboard-sync.js";
+
+test("metas do Dashboard casam com o SDR do QS pelo começo do nome", () => {
+  assert.equal(normalizarNome("Mariana Rodrigues - SDR"), "mariana rodrigues");
+  const sdrs = [
+    { id: "y", name: "Yanca Manuella Ruivo" },
+    { id: "m", name: "Mariana" },
+    { id: "v", name: "Victor Hugo" },
+  ];
+  const pares = casarMetas([
+    { nome: "Mariana Rodrigues - SDR", agendamentos: 80, reunioes: 60 },
+    { nome: "Victor Hugo - SDR", agendamentos: 80, reunioes: 0 },
+    { nome: "Yanca Manuella", agendamentos: 70, reunioes: 50 },
+    { nome: "Fulano - SDR", agendamentos: 10, reunioes: 5 },
+  ], sdrs);
+  assert.deepEqual(pares, [
+    { owner_id: "m", reunioes: 80, reunioes_realizadas: 60 },
+    { owner_id: "v", reunioes: 80, reunioes_realizadas: null },
+    { owner_id: "y", reunioes: 70, reunioes_realizadas: 50 },
+  ]);
+});
+
+test("nome ambíguo não casa (nunca chuta)", () => {
+  const pares = casarMetas([{ nome: "Ana", agendamentos: 10, reunioes: 5 }],
+    [{ id: "1", name: "Ana Paula" }, { id: "2", name: "Ana Clara" }]);
+  assert.equal(pares.length, 0);
+});
+
+test("mês corrente no fuso de SP", () => {
+  assert.equal(mesSP(new Date("2026-12-01T02:00:00Z")), "2026-11");
+  assert.equal(mesSP(new Date("2026-12-01T04:00:00Z")), "2026-12");
+});

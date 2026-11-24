@@ -1400,7 +1400,9 @@ export async function fetchDashboardStats(
 // ── KPIs de reunião do SDR no mês (Bruno, 26/10) ─────────────────────────────
 // "Reuniões agendadas até o dia" = reuniões que o SDR MARCOU neste mês (pela
 // data em que foi criada, não pela data da reunião). "Realizadas até o dia" =
-// reuniões deste mês, até agora, que viraram realizada. Retomada fica de fora
+// reuniões deste mês, até agora, que viraram realizada. Reagendamento (linha
+// nova com reagendado_de) NÃO é agendamento novo — conta só a reunião original
+// (Bruno 24/11: "está misturando com reagendamentos"). Retomada fica de fora
 // pelo mesmo motivo do fetchMeetingCounts. Metas: qs_goals mensal, tipo
 // "reunioes" (agendadas) e "reunioes_realizadas" (só existe depois da
 // migration — antes disso a consulta volta vazia e a meta fica sem número).
@@ -1420,13 +1422,13 @@ export async function fetchMeetingKpis(ownerId?: string | null): Promise<Meeting
   try {
     const temTipo = await colunaTipoPronta();
     let qAgH = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
-      .neq("status", "arquivada").gte("created_at", dayStart.toISOString());
+      .neq("status", "arquivada").is("reagendado_de", null).gte("created_at", dayStart.toISOString());
     let qReH = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
       .eq("status", "realizada").gte("scheduled_at", dayStart.toISOString()).lte("scheduled_at", now.toISOString());
     if (temTipo) { qAgH = qAgH.neq("tipo", "retomada"); qReH = qReH.neq("tipo", "retomada"); }
     if (ownerId) { qAgH = qAgH.eq("owner_id", ownerId); qReH = qReH.eq("owner_id", ownerId); }
     let qAg = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
-      .neq("status", "arquivada")
+      .neq("status", "arquivada").is("reagendado_de", null)
       .gte("created_at", monthStart.toISOString()).lte("created_at", now.toISOString());
     let qRe = supabase.from("qs_meetings").select("id", { count: "exact", head: true })
       .eq("status", "realizada")
