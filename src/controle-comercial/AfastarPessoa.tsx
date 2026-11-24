@@ -3,8 +3,10 @@
 // "AFASTAR / DESATIVAR" da Mesa (Bruno, 28/10/2026).
 //
 //   • Ausência com data: tira a pessoa do rodízio de leads NOVOS até a data
-//     (ausente_ate, mesmo campo que o gatilho da 0099 já respeita). Pode, se
-//     quiser, também passar o que está aberto.
+//     (ausente_ate, mesmo campo que o gatilho da 0099 já respeita) e, marcado
+//     por padrão (0416, Bruno 24/11), divide igualmente os leads que ela AINDA
+//     NÃO ATENDEU entre os SDRs ativos e não afastados. O que ela já está
+//     trabalhando fica esperando ela voltar.
 //   • Desativar: is_active=false e TUDO o que está aberto sai dela —
 //     leads + atividades (+ reservas da carteira) vão "divididos no rodízio
 //     entre os ativos" (padrão) ou "tudo pra fulano"; as reuniões futuras do
@@ -32,7 +34,7 @@ export default function AfastarPessoa({ pessoa, reativar, onFechar, onFeito }: {
   const [modo, setModo] = useState<"ausencia" | "desativar">("ausencia");
   const [ate, setAte] = useState("");
   const [motivo, setMotivo] = useState("");
-  const [moverNaAusencia, setMoverNaAusencia] = useState(false);
+  const [moverNaAusencia, setMoverNaAusencia] = useState(true);
   const [destino, setDestino] = useState<"rodizio" | "pessoa">("rodizio");
   const [destinoId, setDestinoId] = useState("");
   const [reunioes, setReunioes] = useState<Record<string, string>>({});
@@ -47,8 +49,11 @@ export default function AfastarPessoa({ pessoa, reativar, onFechar, onFeito }: {
     }).catch((e: unknown) => setErro(e instanceof Error ? e.message : "não carregou"));
   }, [pessoa.id, reativar]);
 
-  const mover = modo === "desativar" || moverNaAusencia;
-  const temAberto = !!previa && (previa.leads_abertos > 0 || previa.tarefas_abertas > 0);
+  const naoAtendidos = previa?.leads_nao_atendidos ?? 0;
+  const mover = modo === "desativar" || (moverNaAusencia && naoAtendidos > 0);
+  const temAberto = !!previa && (modo === "ausencia"
+    ? naoAtendidos > 0
+    : previa.leads_abertos > 0 || previa.tarefas_abertas > 0);
   const faltamReunioes = useMemo(
     () => (previa?.reunioes_futuras ?? []).filter((r) => !reunioes[r.id]).length,
     [previa, reunioes],
@@ -108,7 +113,7 @@ export default function AfastarPessoa({ pessoa, reativar, onFechar, onFeito }: {
       rodape={<>
         <Button variant="ghost" onClick={onFechar}>Cancelar</Button>
         <Button variant={modo === "desativar" ? "destructive" : "primary"} disabled={!podeConfirmar} onClick={() => void confirmar()}>
-          {ocupado ? "Salvando…" : modo === "desativar" ? "Desativar e repassar" : "Marcar ausência"}
+          {ocupado ? "Salvando…" : modo === "desativar" ? "Desativar e repassar" : mover ? "Marcar ausência e dividir" : "Marcar ausência"}
         </Button>
       </>}>
       {!previa && !erro && <p style={{ margin: 0, color: "var(--subtle)" }}>Carregando o que está com a pessoa…</p>}
@@ -134,7 +139,7 @@ export default function AfastarPessoa({ pessoa, reativar, onFechar, onFeito }: {
 
           <div className="qs-card" style={{ padding: 12, fontSize: 13, display: "flex", flexDirection: "column", gap: 4, background: "var(--surface-2)" }}>
             <b>Está com {pessoa.nome.split(" ")[0]} agora</b>
-            <span>{previa.leads_abertos} lead(s) em aberto · {previa.tarefas_abertas} atividade(s) abertas
+            <span>{previa.leads_abertos} lead(s) em aberto{previa.leads_nao_atendidos != null ? ` (${naoAtendidos} ainda sem atendimento)` : ""} · {previa.tarefas_abertas} atividade(s) abertas
               {previa.reservas_30d ? ` · ${previa.reservas_30d} reserva(s) da carteira (30 dias)` : ""}</span>
             {(previa.reunioes_futuras.length > 0 || previa.negocios_abertos > 0) && (
               <span>{previa.reunioes_futuras.length} reunião(ões) futura(s) como closer · {previa.negocios_abertos} cartão(ões) aberto(s) no pipeline</span>
@@ -144,17 +149,17 @@ export default function AfastarPessoa({ pessoa, reativar, onFechar, onFeito }: {
           {modo === "ausencia" && temAberto && (
             <label style={{ display: "flex", gap: 8, fontSize: 13, alignItems: "flex-start" }}>
               <input type="checkbox" checked={moverNaAusencia} onChange={(e) => setMoverNaAusencia(e.target.checked)} style={{ marginTop: 3 }} />
-              <span>Também passar os leads e atividades abertas (se a ausência for longa). Sem marcar, ficam esperando a pessoa voltar.</span>
+              <span>Dividir os <b>{naoAtendidos}</b> lead(s) que {pessoa.nome.split(" ")[0]} ainda não atendeu (sem atividade feita, ligação ou WhatsApp desde que chegaram), com as atividades deles. Os que já estão em atendimento ficam com {pessoa.nome.split(" ")[0]}.</span>
             </label>
           )}
 
           {mover && temAberto && (
             <fieldset style={{ border: 0, padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-              <legend style={{ fontSize: 13, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>Pra onde vão os leads e as atividades</legend>
+              <legend style={{ fontSize: 13, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>Pra onde vão {modo === "ausencia" ? "os leads não atendidos" : "os leads e as atividades"}</legend>
               <Opcao nome="destino" marcado={destino === "rodizio"} onEscolher={() => setDestino("rodizio")}
-                titulo="Dividir no rodízio entre os ativos (padrão)"
+                titulo="Dividir igualmente entre os SDRs trabalhando (padrão)"
                 texto={previa.rodizio.length
-                  ? `Em roda, começando por quem tem menos leads: ${previa.rodizio.map((r) => `${r.nome.split(" ")[0]} (${r.leads_abertos})`).join(", ")}. Não conta como lead novo no rodízio do dia.`
+                  ? `Um para cada, em roda, começando por quem tem menos leads: ${previa.rodizio.map((r) => `${r.nome.split(" ")[0]} (${r.leads_abertos})`).join(", ")}. Quem está afastado fica de fora. Não conta como lead novo no rodízio do dia.`
                   : "Não há SDR ativo e sem ausência agora. Escolha uma pessoa."} />
               <Opcao nome="destino" marcado={destino === "pessoa"} onEscolher={() => setDestino("pessoa")} titulo="Passar tudo para uma pessoa" />
               {destino === "pessoa" && (

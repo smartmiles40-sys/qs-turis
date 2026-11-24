@@ -77,6 +77,8 @@ export const NOME_SITUACAO: Record<Situacao, string> = {
 export interface Previa {
   pessoa: { id: string; nome: string; papel: string; ativo: boolean; ausente_ate: string | null; ausente_motivo: string | null };
   leads_abertos: number; tarefas_abertas: number; reservas_30d: number; negocios_abertos: number;
+  /** 0416: abertos sem nenhum toque desde a chegada (o que a ausência passa adiante). */
+  leads_nao_atendidos?: number;
   reunioes_futuras: { id: string; em: string; ate: string | null; lead_nome: string | null; titulo: string | null }[];
   rodizio: { id: string; nome: string; leads_abertos: number }[];
   closers: { id: string; nome: string }[];
