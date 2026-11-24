@@ -83,7 +83,7 @@ export default function ServicosViagens({ onAbrirViagem, onAbrirCliente }: { onA
   const preset = (dias: number) => { setDe(hoje); setAte(somaDias(hoje, dias - 1)); };
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="w-full">
       <p className="text-[13px] mb-3" style={{ color: "var(--ink3)" }}>
         Cada serviço separado por tipo, com o que o cliente faz e quando: check-in e check-out do hotel, passeio, transfer, trem, voo.
         A hora é a <b>do lugar</b> quando o voucher traz o fuso; senão, a de Brasília.

@@ -167,7 +167,7 @@ export default function ConferirVoos({ viagemId, onAbrirViagem, onMudou }: { via
   if (erro) return <Aviso tom="erro">{erro}</Aviso>;
   if (!dados) return <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>;
   return (
-    <div className="space-y-3 max-w-5xl mx-auto">
+    <div className="space-y-3 w-full">
       <Aviso>
         Viagens (que ainda não voltaram) com voo que não bate com as datas da venda. Apague o voo errado, corrija a data,
         ou ajuste a venda pelas datas dos voos — e clique em <b>Está certo</b> pra concluir. {dados.itens.length} pra conferir.

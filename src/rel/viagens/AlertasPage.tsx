@@ -51,7 +51,7 @@ export default function AlertasPage({ onAbrirViagem, onAbrirCliente }: { onAbrir
   const tiposVisiveis = ORDEM.filter((t) => (tipo === "todos" || t === tipo) && porTipo.get(t)?.length);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-4">
+    <div className="w-full space-y-4">
       <div>
         <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Alertas</h1>
         <p className="text-[13px]" style={{ color: "var(--ink3)" }}>

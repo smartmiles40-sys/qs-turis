@@ -355,7 +355,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   // 24/11: o "O que falta" mora junto do "O que pode dar errado"
   const faltas = useMemo(() => (v && comps ? oQueFalta(v, comps, pass, pag, docs ?? []) : []), [v, comps, pass, pag, docs]);
 
-  if (erro && !v) return <div className="max-w-4xl mx-auto"><Aviso tom="erro">{erro}</Aviso></div>;
+  if (erro && !v) return <div className="w-full"><Aviso tom="erro">{erro}</Aviso></div>;
   if (!v) return <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando viagem…</p>;
 
   async function acao(fn: () => Promise<unknown>) {

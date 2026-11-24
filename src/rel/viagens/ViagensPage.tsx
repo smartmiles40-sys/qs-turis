@@ -513,7 +513,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, onAbrirPaco
   const itens = useMemo(() => (lista ? (agrupa ? agruparExpedicoes(lista) : lista.map((v) => ({ k: "viagem" as const, v }))) : null), [lista, agrupa]);
 
   return (
-    <div className={visao === "lista" ? "max-w-5xl mx-auto" : "w-full"}>
+    <div className={"w-full"}>
       <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
         <div>
           <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Viagens</h1>

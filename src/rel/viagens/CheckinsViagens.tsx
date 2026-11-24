@@ -110,7 +110,7 @@ export default function CheckinsViagens({ onAbrirViagem, onAbrirCliente }: { onA
   }
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="w-full">
       <p className="text-[13px] mb-3" style={{ color: "var(--ink3)" }}>
         Só <b>voos</b> (aéreo de verdade — hotel, seguro e passeio não entram), na ordem em que o check-in abre.
         Sem o horário da companhia, a abertura é <b>estimada em 48h antes do voo</b>.
