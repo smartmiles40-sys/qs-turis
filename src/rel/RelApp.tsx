@@ -158,8 +158,10 @@ interface Contadores {
 async function contarDonos(eu: string): Promise<{ minhasViagens: number; semDono: number }> {
   const base = () => supabase.from("rel_viagens_v").select("id", { count: "exact", head: true })
     .eq("status", "ativa").in("fase", ["antes", "em_viagem"]).in("acompanhamento", ["completo", "leve"]);
-  const [m, s] = await Promise.all([base().eq("responsavel_id", eu), base().is("responsavel_id", null)]);
-  return { minhasViagens: m.count ?? 0, semDono: s.count ?? 0 };
+  // 24/11 (Bruno): sem dono — conta as viagens do time todo
+  void eu;
+  const m = await base();
+  return { minhasViagens: m.count ?? 0, semDono: 0 };
 }
 
 async function contarChamadosVencidos(): Promise<{ chamadosVencidos: number }> {
@@ -200,9 +202,9 @@ function Inicio({ resumo, cont, nome, ir }: { resumo: ResumoDoMenu | null; cont:
         <button onClick={() => ir({ tela: "esteira" })} className="rel-card p-4 text-left transition-shadow hover:shadow-md flex items-center gap-4"
           style={{ borderColor: "var(--rel)", background: "var(--rel-soft)" }}>
           <span className="flex-1 min-w-0">
-            <span className="block text-[15px] font-bold" style={{ color: "var(--rel-ink)" }}>Minhas atividades de hoje →</span>
+            <span className="block text-[15px] font-bold" style={{ color: "var(--rel-ink)" }}>Atividades do time hoje →</span>
             <span className="block text-[12.5px] mt-0.5" style={{ color: "var(--ink2)" }}>
-              {cont?.minhasViagens ? `Etapas da Esteira das ${cont.minhasViagens} viage${cont.minhasViagens === 1 ? "m" : "ns"} que você cuida: concluir em 1 clique.` : "Você ainda não cuida de nenhuma viagem."}
+              {cont?.minhasViagens ? `Check-ins e etapas das ${cont.minhasViagens} viage${cont.minhasViagens === 1 ? "m" : "ns"} do Relacionamento: concluir em 1 clique.` : "Nenhuma viagem pra acompanhar agora."}
             </span>
           </span>
           <span className="text-3xl font-bold tabular-nums" style={{ color: "var(--rel-ink)" }}>{cont?.minhasViagens ?? "–"}</span>

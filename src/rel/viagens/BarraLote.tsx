@@ -94,7 +94,7 @@ export default function BarraLote({ filtro, lista, sel, setSel, gestor, equipe, 
     return `${n} viage${n === 1 ? "m" : "ns"} desarquivada${n === 1 ? "" : "s"}.`;
   });
 
-  const podeAtribuir = gestor && (filtro === "sem_dono" || filtro === "proximas" || filtro === "em_viagem" || filtro === "minhas");
+  const podeAtribuir = false; // 24/11 (Bruno): sem dono da viagem — o check-in é do time
   const temAcao = filtro === "classificar" || filtro === "sem_data" || (gestor && filtro === "arquivadas") || podeAtribuir;
   if (!temAcao && !ok && !ultimoLote) return null;
 

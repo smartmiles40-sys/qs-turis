@@ -16,24 +16,23 @@
 //     marcar item a item ou registrar que algo mudou;
 //   • viagem embarcando em até 30 dias sem preferências anotadas ganha o selo
 //     "faltam preferências".
+//
+// 24/11 (Bruno): sai o DONO da viagem — o check-in e as etapas são do TIME do
+// Relacionamento. Acabaram as vistas Minhas / Sem dono / Todas, o "Assumir" e
+// o "Atribuir a…": a lista é a do time inteiro.
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { ETAPA, concluirEtapa, desfazerEtapa, diasAte, type EstadoEtapa, type EtapaId, type RegistroEtapa } from "../lib/etapas";
 import { hojeSP, marcarCheckin, type Trecho, type Viagem } from "../lib/viagens";
-import { atribuirViagens } from "../lib/operacao";
 import { ehVooQueVale } from "../lib/agendaServicos";
 import { diaBR, diaLocal, horaLocal } from "../lib/problemas";
-import { podeGerirRelacionamento } from "../equipe/permissao";
 import { Aviso, Botao } from "../ui";
 import { EtapaModal, quandoTexto, COR_SITUACAO } from "./EtapasViagem";
-import DonoViagem from "./DonoViagem";
 
 export interface ItemAtividade { v: Viagem; etapas: EstadoEtapa[]; atual: EstadoEtapa | null; trechos: Trecho[]; registros: RegistroEtapa[] }
 type Grupo = "atrasadas" | "hoje" | "proximas";
-type Vista = "minhas" | "sem_dono" | "todas";
 
-const CHAVE_VISTA = "rel_atividades_vista";
 const somaDias = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 // 0359: só voo de verdade — a data do Bitrix de uma venda de hotel/seguro não é voo
 const ehVoo = (t: Trecho, v?: Viagem) => ehVooQueVale(t, v);
@@ -51,19 +50,12 @@ function grupoDe(it: ItemAtividade, hoje: string): Grupo | null {
   return null;
 }
 
-function vistaSalva(): Vista {
-  try { const v = localStorage.getItem(CHAVE_VISTA); return v === "sem_dono" || v === "todas" ? v : "minhas"; } catch { return "minhas"; }
-}
-
 export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, semPreferencias }: {
   itens: ItemAtividade[]; equipe: { id: string; name: string }[]; abrirViagem: (id: string) => void; onMudou: () => void;
   /** viagens que embarcam em até 30 dias sem nada anotado sobre a pessoa (0184) */
   semPreferencias?: Set<string>;
 }) {
   const { currentUser } = useQsAuth();
-  const gestor = podeGerirRelacionamento(currentUser);
-  const [vista, setVistaEstado] = useState<Vista>(vistaSalva);
-  const setVista = (v: Vista) => { setVistaEstado(v); setSel(new Set()); try { localStorage.setItem(CHAVE_VISTA, v); } catch { /* sem memória */ } };
   const [ver, setVer] = useState<Grupo | "todas">("todas");
   const [fazendo, setFazendo] = useState<ItemAtividade | null>(null);
   const [verFeitas, setVerFeitas] = useState(false);
@@ -72,31 +64,25 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, sem
   // "✓ Feito" mostra um aviso com DESFAZER por alguns segundos
   const [feito, setFeito] = useState<{ viagemId: string; etapa: EtapaId; texto: string; antes: RegistroEtapa | null } | null>(null);
   useEffect(() => { if (!feito) return; const t = setTimeout(() => setFeito(null), 10_000); return () => clearTimeout(t); }, [feito]);
-  // gestão: várias viagens sem dono → "Atribuir a…" de uma vez
-  const [sel, setSel] = useState<Set<string>>(new Set());
-  const [loteDono, setLoteDono] = useState("");
   const hoje = hojeSP();
   const agora = Date.now();
   const eu = currentUser?.id ?? "";
   const nomeEquipe = new Map(equipe.map((u) => [u.id, u.name.split(" ")[0]]));
 
-  const daVista = (it: ItemAtividade) => vista === "todas" || (vista === "minhas" ? it.v.responsavel_id === eu : !it.v.responsavel_id);
-  const { grupos, checkins, feitasHoje, semDono, minhas } = useMemo(() => {
+  const { grupos, checkins, feitasHoje } = useMemo(() => {
     const g: Record<Grupo, ItemAtividade[]> = { atrasadas: [], hoje: [], proximas: [] };
-    for (const it of itens) { if (!daVista(it)) continue; const k = grupoDe(it, hoje); if (k) g[k].push(it); }
+    for (const it of itens) { const k = grupoDe(it, hoje); if (k) g[k].push(it); }
     const porPrazo = (a: ItemAtividade, b: ItemAtividade) => String(a.atual?.prazo ?? a.atual?.abre).localeCompare(String(b.atual?.prazo ?? b.atual?.abre)) || String(a.v.data_embarque).localeCompare(String(b.v.data_embarque));
     (Object.keys(g) as Grupo[]).forEach((k) => g[k].sort(porPrazo));
-    const checkins = itens.filter(daVista).flatMap((it) => it.trechos
+    const checkins = itens.flatMap((it) => it.trechos
       .filter((t) => ehVoo(t, it.v) && t.checkin_em && !t.checkin_feito_em && !t.status_manual && new Date(t.checkin_em).getTime() <= agora + 24 * 3600_000 && new Date(t.partida_em).getTime() > agora)
       .map((t) => ({ it, t }))).sort((a, b) => a.t.partida_em.localeCompare(b.t.partida_em));
-    const feitasHoje = itens.filter(daVista).flatMap((it) => it.registros
+    const feitasHoje = itens.flatMap((it) => it.registros
       .filter((r) => r.concluida_em && new Date(r.concluida_em).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) === hoje)
       .map((r) => ({ it, r })));
-    // quantas viagens (com algo pra fazer agora ou nos próximos 7 dias) estão sem dono / são minhas
-    const comAtividade = itens.filter((it) => grupoDe(it, hoje));
-    return { grupos: g, checkins, feitasHoje, semDono: comAtividade.filter((it) => !it.v.responsavel_id).length, minhas: itens.filter((it) => it.v.responsavel_id === eu).length };
+    return { grupos: g, checkins, feitasHoje };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itens, vista, hoje, eu]);
+  }, [itens, hoje]);
 
   async function feitoRapido(it: ItemAtividade) {
     const e = it.atual;
@@ -124,13 +110,6 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, sem
     try { await desfazerEtapa(feito.viagemId, feito.etapa, eu, { antes: feito.antes }); setFeito(null); onMudou(); }
     catch (er) { setErro(er instanceof Error ? er.message : "Não desfez."); }
   }
-  async function atribuirLote() {
-    if (!loteDono || !sel.size) return;
-    setOcupado("lote"); setErro(null);
-    try { await atribuirViagens([...sel], loteDono); setSel(new Set()); setLoteDono(""); onMudou(); }
-    catch (er) { setErro(er instanceof Error ? er.message : "Não atribuiu."); }
-    finally { setOcupado(null); }
-  }
 
   const CONTADORES: { id: Grupo | "feitas"; rotulo: string; n: number; cor: string }[] = [
     { id: "atrasadas", rotulo: "Atrasadas", n: grupos.atrasadas.length, cor: "#DC2626" },
@@ -138,7 +117,6 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, sem
     { id: "proximas", rotulo: "Próximos 7 dias", n: grupos.proximas.length, cor: "#2563EB" },
     { id: "feitas", rotulo: "Feitas hoje", n: feitasHoje.length, cor: "#16A34A" },
   ];
-  const selecionavel = gestor && vista !== "minhas";
 
   function Linha({ it, grupo }: { it: ItemAtividade; grupo: Grupo }) {
     const e = it.atual!;
@@ -148,10 +126,6 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, sem
     const faltaPref = semPreferencias?.has(it.v.id);
     return (
       <li className="rel-card px-3 py-2.5 flex flex-wrap lg:flex-nowrap items-center gap-x-3 gap-y-2" style={{ borderLeft: `4px solid ${COR_SITUACAO[e.situacao]}`, opacity: antesDeAbrir ? 0.85 : 1 }}>
-        {selecionavel && (
-          <input type="checkbox" className="w-4 h-4 flex-shrink-0" style={{ accentColor: "var(--rel)" }} aria-label={`Selecionar ${nomeDe(it.v)}`}
-            checked={sel.has(it.v.id)} onChange={(ev) => setSel((s) => { const n = new Set(s); if (ev.target.checked) n.add(it.v.id); else n.delete(it.v.id); return n; })} />
-        )}
         <span className="w-[112px] flex-shrink-0">
           <span className="block text-[11px] font-extrabold uppercase tracking-wide" style={{ color: def.cor }}>{def.curto}</span>
           <span className="block text-[11.5px] font-semibold" style={{ color: COR_SITUACAO[e.situacao] }}>{quandoTexto(e)}</span>
@@ -163,7 +137,6 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, sem
           </span>
           {faltaPref && <span className="inline-block mt-0.5 text-[10.5px] font-bold px-1.5 py-0.5 rounded" style={{ background: "rgba(217,119,6,.12)", color: "#B45309" }}>faltam preferências</span>}
         </button>
-        <span className="flex-shrink-0"><DonoViagem viagemId={it.v.id} responsavelId={it.v.responsavel_id} equipe={equipe} onMudou={onMudou} compacto /></span>
         <span className="flex gap-1.5 flex-shrink-0">
           <Botao variante="secundario" onClick={() => setFazendo(it)} title="Abrir o checklist da etapa (marcar item a item, registrar alteração)">Checklist</Botao>
           <Botao variante={grupo === "proximas" ? "secundario" : "primario"} disabled={ocupado === it.v.id}
@@ -181,38 +154,10 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, sem
     { id: "hoje", titulo: "Para hoje", cor: "#D97706", vazio: "Nenhuma etapa para hoje." },
     { id: "proximas", titulo: "Próximos 7 dias", cor: "#2563EB", vazio: "Nada nos próximos 7 dias." },
   ];
-  const VISTAS: { id: Vista; rotulo: string; n?: number }[] = [
-    { id: "minhas", rotulo: "Minhas" },
-    { id: "sem_dono", rotulo: "Sem dono", n: semDono },
-    { id: "todas", rotulo: "Todas do time" },
-  ];
-  const totalVista = grupos.atrasadas.length + grupos.hoje.length + grupos.proximas.length + checkins.length;
+  const total = grupos.atrasadas.length + grupos.hoje.length + grupos.proximas.length + checkins.length;
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex gap-1 rel-card p-1" role="group" aria-label="De quem">
-          {VISTAS.map((x) => (
-            <button key={x.id} onClick={() => setVista(x.id)} aria-pressed={vista === x.id} className="rel-linha px-3 py-1.5 rounded-lg text-[13px] font-semibold whitespace-nowrap"
-              style={vista === x.id ? { background: "var(--rel-soft)", color: "var(--rel-ink)" } : { color: "var(--ink2)" }}>
-              {x.rotulo}{x.n ? <span className="ml-1.5 text-[11px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "rgba(220,38,38,.12)", color: "#DC2626" }}>{x.n}</span> : null}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* ninguém cuida → ninguém faz: o "sem dono" fica na cara de todo mundo até ser distribuído */}
-      {vista === "minhas" && semDono > 0 && (
-        <Aviso tom="aviso">
-          <b>{semDono} viage{semDono === 1 ? "m" : "ns"} com etapa pra fazer está{semDono === 1 ? "" : "o"} sem dono.</b>{" "}
-          {gestor ? "Distribua pro time" : "Assuma as que são suas"} —{" "}
-          <button className="underline font-semibold" onClick={() => setVista("sem_dono")}>ver as sem dono</button>.
-        </Aviso>
-      )}
-      {vista === "minhas" && minhas === 0 && (
-        <p className="text-[13px]" style={{ color: "var(--ink2)" }}>Você ainda não cuida de nenhuma viagem. Abra <b>Sem dono</b> e clique em <b>Assumir</b> nas suas — elas passam a aparecer aqui.</p>
-      )}
-
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {CONTADORES.map((c) => (
           <button key={c.id} onClick={() => (c.id === "feitas" ? setVerFeitas((x) => !x) : setVer((v) => (v === c.id ? "todas" : (c.id as Grupo))))}
@@ -232,18 +177,6 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, sem
       )}
       {erro && <Aviso tom="erro">{erro}</Aviso>}
 
-      {selecionavel && sel.size > 0 && (
-        <div className="rel-card px-3 py-2 flex flex-wrap items-center gap-2 sticky top-16 z-10" style={{ borderColor: "var(--rel)" }}>
-          <b className="text-[13px]" style={{ color: "var(--ink)" }}>{sel.size} selecionada{sel.size > 1 ? "s" : ""}</b>
-          <span className="text-[13px]" style={{ color: "var(--ink2)" }}>Atribuir a</span>
-          <select className="rel-input" style={{ width: "auto", padding: "5px 8px", fontSize: 13 }} value={loteDono} onChange={(e) => setLoteDono(e.target.value)}>
-            <option value="">escolha…</option>
-            {equipe.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-          <Botao variante="primario" disabled={!loteDono || ocupado === "lote"} onClick={() => void atribuirLote()}>{ocupado === "lote" ? "Salvando…" : "Atribuir"}</Botao>
-          <Botao variante="fantasma" onClick={() => setSel(new Set())}>Limpar</Botao>
-        </div>
-      )}
 
       {verFeitas && (
         <section className="rel-card p-3">
@@ -288,10 +221,6 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, sem
         <section key={s.id}>
           <div className="flex items-center gap-3 mb-1.5">
             <h2 className="text-[13px] font-extrabold uppercase tracking-wide" style={{ color: s.cor }}>{s.titulo} · {grupos[s.id].length}</h2>
-            {selecionavel && grupos[s.id].length > 0 && (
-              <button className="text-[12px] font-semibold underline" style={{ color: "var(--ink3)" }}
-                onClick={() => setSel((x) => { const n = new Set(x); grupos[s.id].forEach((it) => n.add(it.v.id)); return n; })}>selecionar todas</button>
-            )}
           </div>
           {grupos[s.id].length
             ? <ul className="space-y-1.5">{grupos[s.id].map((it) => <Linha key={it.v.id} it={it} grupo={s.id} />)}</ul>
@@ -299,7 +228,7 @@ export default function AtividadesRel({ itens, equipe, abrirViagem, onMudou, sem
         </section>
       ))}
 
-      {totalVista === 0 && vista === "minhas" && minhas > 0 && <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Tudo em dia nas suas viagens. 🎉</p>}
+      {total === 0 && itens.length > 0 && <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Tudo em dia nas viagens do time. 🎉</p>}
 
       {fazendo && fazendo.atual && (
         <EtapaModal viagem={fazendo.v} estado={fazendo.atual} trechos={fazendo.trechos} equipe={equipe}

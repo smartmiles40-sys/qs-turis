@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { Badge, Button } from "@/components/ui";
 import { dataBR, pendenciasViagens, SERVICOS, type FiltroViagens, type Servico } from "../lib/viagens";
 import {
-  anexarComoComponente, componentesSoltos, contarSemDonoEmbarcando, marcarRepetidas, paresRepetidos, resumoFaxina,
+  anexarComoComponente, componentesSoltos, marcarRepetidas, paresRepetidos, resumoFaxina,
   type ComponenteSolto, type ParRepetido, type ResumoFaxina,
 } from "../lib/faxina";
 import { Aviso, Modal } from "../ui";
@@ -43,12 +43,10 @@ export default function FaxinaAtalhos({ filtro, onFiltro, onTarefa, gestor, vers
   const [r, setR] = useState<ResumoFaxina | null>(null);
   const [antigo, setAntigo] = useState<{ semData: number; classificar: number; semDono: number } | null>(null);
   const [painel, setPainel] = useState<"repetidas" | "soltas" | null>(null);
-  const [semDono7, setSemDono7] = useState<number | null>(null);
   const [verTudo, setVerTudo] = useState(!!verTudoAberto);
 
   useEffect(() => {
     let vivo = true;
-    contarSemDonoEmbarcando(7).then((n) => { if (vivo) setSemDono7(n); }).catch(() => { if (vivo) setSemDono7(0); });
     resumoFaxina()
       .then((x) => {
         if (!vivo) return;
@@ -60,14 +58,12 @@ export default function FaxinaAtalhos({ filtro, onFiltro, onTarefa, gestor, vers
   }, [versao]);
 
   const chips: Chip[] = r ? [
-    { id: "sem_dono", rotulo: "Sem dono", n: r.sem_dono, tom: r.sem_dono ? "danger" : undefined },
     { id: "classificar", rotulo: "Classificar", n: r.classificar, extra: r.classificar_com_sugestao ? `${r.classificar_com_sugestao} com sugestão` : undefined, tom: r.classificar_futuras ? "warn" : undefined },
     { id: "sem_data", rotulo: "Precisa de data", n: r.sem_data, extra: r.sem_data_com_voo ? `${r.sem_data_com_voo} já têm voo` : undefined },
     { id: "repetidas", rotulo: "Repetidas?", n: r.repetidas_marcadas, extra: r.repetidas_candidatas ? `+${r.repetidas_candidatas} pares novos` : undefined, tom: r.repetidas_marcadas ? "warn" : undefined },
     { id: "sem_cliente", rotulo: "Sem cliente", n: r.sem_cliente },
     { id: "soltas", rotulo: "Vendas soltas", n: r.componentes_soltos, extra: "seguro/hotel da mesma viagem" },
   ] : antigo ? [
-    { id: "sem_dono", rotulo: "Sem dono", n: antigo.semDono, tom: antigo.semDono ? "danger" : undefined },
     { id: "classificar", rotulo: "Classificar", n: antigo.classificar, tom: antigo.classificar ? "warn" : undefined },
     { id: "sem_data", rotulo: "Precisa de data", n: antigo.semData },
     { id: "repetidas", rotulo: "Repetidas?", n: -1 },
@@ -78,14 +74,8 @@ export default function FaxinaAtalhos({ filtro, onFiltro, onTarefa, gestor, vers
 
   const plural = (n: number, um: string, varios: string) => (n === 1 ? um : varios);
   let tarefa: Tarefa | null = null;
-  if (semDono7) {
-    tarefa = {
-      texto: `${semDono7} ${plural(semDono7, "viagem embarca", "viagens embarcam")} em até 7 dias e ninguém cuida.`,
-      botao: gestor ? "Distribuir" : "Ver e assumir",
-      dica: gestor ? "Já abrimos marcadas: escolha as pessoas em “distribuir entre…”." : "Clique em Assumir nas que forem suas.",
-      fazer: () => onTarefa("sem_dono", "embarca7"),
-    };
-  } else if (r?.classificar_com_sugestao) {
+  // 24/11 (Bruno): saiu a tarefa "viagens sem dono" — o check-in é do time
+  if (r?.classificar_com_sugestao) {
     tarefa = {
       texto: `${r.classificar_com_sugestao} ${plural(r.classificar_com_sugestao, "venda a classificar já tem", "vendas a classificar já têm")} sugestão do que foi vendido${r.classificar_futuras ? ` (${r.classificar_futuras} ainda vão acontecer)` : ""}.`,
       botao: "Aplicar sugestões",
@@ -113,7 +103,7 @@ export default function FaxinaAtalhos({ filtro, onFiltro, onTarefa, gestor, vers
       <div className="qs-card px-3 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="qs-label">Faxina · próxima tarefa</span>
         <span className="flex-1 min-w-[220px] text-[13.5px]" style={{ color: "var(--text)" }}>
-          {tarefa ? tarefa.texto : semDono7 === null && !r ? "Conferindo…" : "Nada urgente na faxina agora."}
+          {tarefa ? tarefa.texto : !r && !antigo ? "Conferindo…" : "Nada urgente na faxina agora."}
           {tarefa?.dica && <span className="block text-[11.5px]" style={{ color: "var(--subtle)" }}>{tarefa.dica}</span>}
         </span>
         {tarefa && <Button size="sm" variant="primary" onClick={tarefa.fazer}>{tarefa.botao}</Button>}

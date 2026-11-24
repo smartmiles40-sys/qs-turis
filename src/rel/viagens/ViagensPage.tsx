@@ -79,8 +79,6 @@ function visaoSalva(): Visao {
 // Sem cliente, Repetidas? e Arquivadas — 0 ações humanas nessas filas desde sempre.
 // Só a rota antiga #rel/faxina ainda mostra todas (FILTROS_FAXINA).
 const FILTROS_FAXINA: { id: FiltroViagens; rotulo: string }[] = [
-  { id: "minhas", rotulo: "Minhas" },
-  { id: "sem_dono", rotulo: "Sem dono" },
   { id: "sem_data", rotulo: "Precisa de data" },
   { id: "classificar", rotulo: "Classificar" },
   { id: "sem_cliente", rotulo: "Sem cliente" },
@@ -511,7 +509,7 @@ export default function ViagensPage({ onAbrirViagem, onAbrirCliente, onAbrirPaco
   // quem tem caixinha de marcar (ações em lote, ver BarraLote)
   // sem_data: "datas pelos voos" (0208) é de todo o time; arquivar segue só da gestão (BarraLote)
   const comLote = filtro === "classificar" || filtro === "sem_data" || (gestor && ["arquivadas", "sem_dono", "proximas", "em_viagem", "minhas"].includes(filtro));
-  const comDono = ["proximas", "em_viagem", "minhas", "sem_dono"].includes(filtro);
+  const comDono = false; // 24/11 (Bruno): sem dono da viagem
   const itens = useMemo(() => (lista ? (agrupa ? agruparExpedicoes(lista) : lista.map((v) => ({ k: "viagem" as const, v }))) : null), [lista, agrupa]);
 
   return (

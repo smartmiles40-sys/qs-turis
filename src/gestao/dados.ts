@@ -167,15 +167,6 @@ async function alertaAtrasadas(): Promise<Alerta> {
     detalhe: acima.length ? `${detalhe} (total do time: ${linhas.length.toLocaleString("pt-BR")})` : undefined };
 }
 
-async function alertaViagemSemDono(): Promise<Alerta> {
-  const base: Alerta = { id: "viagem-sem-dono", setor: "rel", titulo: "Viagens que embarcam nos próximos 7 dias sem dono", n: null, tom: "danger", link: "#rel/esteira", linkRotulo: "Abrir Minhas atividades" };
-  const hoje = hojeSP();
-  const n = await contar(supabase.from("rel_viagens_v").select("id", { count: "exact", head: true })
-    .eq("status", "ativa").in("acompanhamento", ["completo", "leve"]).is("responsavel_id", null)
-    .gte("data_embarque", hoje).lte("data_embarque", somaDias(hoje, 7)));
-  return { ...base, n };
-}
-
 async function alertaConversasSemResposta(): Promise<Alerta> {
   const base: Alerta = { id: "rel-sem-resposta", setor: "rel", titulo: "Conversas do Relacionamento esperando a primeira resposta", n: null, tom: "warn", link: "#rel/atendimento", linkRotulo: "Abrir conversas" };
   const n = await contar(supabase.from("rel_wa_atendimentos").select("id", { count: "exact", head: true })
@@ -217,7 +208,7 @@ async function alertaPassageiroPendente(): Promise<Alerta> {
 export const ALERTAS: { setor: SetorGestao; carregar: () => Promise<Alerta> }[] = [
   { setor: "closer", carregar: alertaSemDesfecho },
   { setor: "closer", carregar: alertaSemMeet },
-  { setor: "rel", carregar: alertaViagemSemDono },
+  // 24/11 (Bruno): sem dono da viagem — o check-in é do time do Relacionamento
   { setor: "fin", carregar: alertaParcelas },
   { setor: "sdr", carregar: alertaAtrasadas },
   { setor: "closer", carregar: alertaReuniaoSemBitrix },
@@ -375,21 +366,17 @@ export async function carregarRel(): Promise<Numero[]> {
   const hoje = hojeSP();
   const v = () => supabase.from("rel_viagens_v").select("id", { count: "exact", head: true }).eq("status", "ativa");
   const at = () => supabase.from("rel_wa_atendimentos").select("id", { count: "exact", head: true }).is("concluido_em", null);
-  const [ativas, emViagem, emb7, emb30, faxina, abertos, semResposta] = await Promise.all([
+  const [ativas, emViagem, emb7, emb30, abertos, semResposta] = await Promise.all([
     contar(v().in("fase", ["antes", "em_viagem"])),
     contar(v().eq("fase", "em_viagem")),
     contar(v().gte("data_embarque", hoje).lte("data_embarque", somaDias(hoje, 7))),
     contar(v().gte("data_embarque", hoje).lte("data_embarque", somaDias(hoje, 30))),
-    supabase.from("rel_faxina_resumo").select("sem_dono").maybeSingle(),
     contar(at()),
     contar(at().is("primeira_resposta_em", null)),
   ]);
-  checa(faxina.error);
-  const semDono = faxina.data ? num((faxina.data as { sem_dono: number }).sem_dono) : null;
   return [
     { rotulo: "Viagens ativas", valor: int(ativas), dica: `antes do embarque ou em viagem · ${int(emViagem)} viajando agora` },
     { rotulo: "Embarques nos próximos 7 dias", valor: int(emb7), dica: `${int(emb30)} nos próximos 30 dias` },
-    { rotulo: "Viagens sem dono", valor: semDono == null ? null : int(semDono), dica: "com acompanhamento, antes ou durante a viagem", tom: semDono ? "danger" : undefined },
     { rotulo: "Atendimentos em aberto", valor: int(abertos), dica: `${int(semResposta)} ainda sem nenhuma resposta`, tom: semResposta ? "warn" : undefined },
   ];
 }

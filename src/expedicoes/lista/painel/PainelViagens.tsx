@@ -373,7 +373,7 @@ function LinhaPacote({ p }: { p: Pacote }) {
       <span className="pv-linha__t" style={p.tarefas_atrasadas ? { color: "var(--danger)", fontWeight: 700 } : undefined}>
         {p.tarefas_atrasadas ? `${plural(p.tarefas_atrasadas, "tarefa atrasada", "tarefas atrasadas")}` : p.tarefas_pendentes ? `${p.tarefas_pendentes} a fazer` : "em dia"}
       </span>
-      <span className="pv-linha__r" style={p.responsavel_nome ? undefined : { color: "var(--warn)" }}>{p.responsavel_nome ? p.responsavel_nome.split(" ")[0] : "sem dono"}</span>
+      <span className="pv-linha__r">Relacionamento</span>
     </li>
   );
 }

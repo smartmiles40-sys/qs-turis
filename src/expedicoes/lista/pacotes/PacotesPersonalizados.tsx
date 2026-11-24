@@ -145,7 +145,7 @@ function Cartao({ p }: { p: Pacote }) {
       <div className="cx-card__datas">{periodo(p)}</div>
       <span className="cx-chip" style={{ background: chip.bg, color: chip.fg }}>{p.status === "cancelada" ? "Cancelado" : quandoEmbarca(p)}</span>
       <div className="cx-card__ocl">
-        <span>{p.responsavel_nome ? `Rel: ${p.responsavel_nome.split(" ")[0]}` : "sem dono no Rel"}</span>
+        <span>Check-in: Relacionamento</span>
         <span style={p.tarefas_atrasadas ? { color: "var(--danger)", fontWeight: 600 } : undefined}>
           {p.tarefas_atrasadas ? `${p.tarefas_atrasadas} atrasada${p.tarefas_atrasadas > 1 ? "s" : ""}` : p.tarefas_pendentes ? `${p.tarefas_pendentes} pendente${p.tarefas_pendentes > 1 ? "s" : ""}` : ""}
         </span>
