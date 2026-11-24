@@ -27,7 +27,7 @@ import { Aviso } from "../ui";
 import MapaMundi, { COR_EXP, COR_PAC, MarcaTipo, type PontoMapa } from "./MapaMundi";
 import { lugaresDe } from "./destinos";
 import { conferirViagens, contar, type Analise } from "../lib/problemas";
-import { codigoDe, resumirVoos, vooDaVez } from "../lib/statusViagem";
+import { codigoDe, localizadoresDoVoo, momentoDaViagem, proximaDataDaVenda, resumirVoos, vooDaVez, type Momento, type MomentoChave } from "../lib/statusViagem";
 import { ehVooQueVale } from "../lib/agendaServicos";
 import { FILTRO_QUADRO_VAZIO, PERIODOS_VOO, lerFiltroQuadro, passaNoQuadro, quantosAtivosQuadro, somaDias, type FiltroQuadro, type LinhaFiltravel, type PeriodoVoo } from "../lib/filtroQuadro";
 // 0359: check-in só de voo de verdade (a data do Bitrix de venda de hotel não é voo); trem segue
@@ -233,26 +233,39 @@ function Quadro({ titulo, cor, partidas, onAbrirViagem }: { titulo: string; cor:
 // Pacote é onde mais tem o que cruzar: cada linha é uma venda, com o voo de ida
 // (de onde, pra onde, hora local e localizador) e a situação da checagem.
 
-type SituacaoPac = "pendente" | "revisado" | "ida" | "volta" | "voos" | "concluida";
+// 24/11 (Bruno): a SITUAÇÃO é o que está acontecendo com a pessoa AGORA
+// (momentoDaViagem em statusViagem.ts) — em voo, check-in pendente, em passeio,
+// na hospedagem… Antes da viagem, sem nada a fazer, fica a situação da checagem.
+type SituacaoPac = MomentoChave | "pendente" | "revisado" | "voos";
 const SITUACAO_PAC: Record<SituacaoPac, { texto: string; cor: string }> = {
+  em_voo: { texto: "EM VOO ✈", cor: "#7CC4FF" },
+  checkin: { texto: "CHECK-IN PENDENTE", cor: "#FFD54F" },
+  em_passeio: { texto: "EM PASSEIO", cor: "#5BE3B0" },
+  em_transfer: { texto: "EM TRANSFER", cor: "#C4B5FD" },
+  em_trem: { texto: "EM TREM", cor: "#C4B5FD" },
+  na_hospedagem: { texto: "NA HOSPEDAGEM", cor: "#F0ABFC" },
+  embarca_hoje: { texto: "EMBARCA HOJE", cor: "#7CC4FF" },
+  volta_hoje: { texto: "VIAGEM DE VOLTA", cor: "#FF8A65" },
+  em_viagem: { texto: "EM VIAGEM", cor: "#93C5FD" },
   // 30/10: voo fora das datas (ex.: Vinícius, card do Pós-Venda de mar/2026 numa viagem de jun/2027)
   voos: { texto: "VOOS A CONFERIR", cor: "#FF5252" },
   pendente: { texto: "PENDENTE CHECAGEM", cor: "#FFFFFF" },
   revisado: { texto: "REVISADO ✓", cor: "#5BE3B0" },
-  ida: { texto: "VIAGEM DE IDA", cor: "#7CC4FF" },
-  volta: { texto: "VIAGEM DE VOLTA", cor: "#FF8A65" },
   // 19/11: não sobra nenhum voo — riscada, no fim da fila
   concluida: { texto: "VIAGEM CONCLUÍDA", cor: "#6B7A82" },
 };
 
-interface LinhaPac { v: Viagem; voo: Trecho | null; situacao: SituacaoPac; alertas: { alta: number; media: number }; interno: number | null }
+interface LinhaPac {
+  v: Viagem; voo: Trecho | null; situacao: SituacaoPac; detalhe: string | null;
+  /** dia do PRÓXIMO VOO: o voo da vez; sem voo, a data da venda que ainda não passou */
+  dia: string | null; volta: boolean;
+  localizadores: string[];
+  alertas: { alta: number; media: number }; interno: number | null;
+}
 
-function situacaoPac(v: Viagem, revisada: boolean, voosErrados: boolean): SituacaoPac {
-  const hoje = hojeISO();
-  if (v.data_retorno && v.data_retorno === hoje && (v.fase === "em_viagem" || v.data_embarque !== hoje)) return "volta";
-  if (v.fase === "em_viagem" || v.data_embarque === hoje) return "ida";
-  if (voosErrados) return "voos";
-  return revisada ? "revisado" : "pendente";
+function situacaoPac(m: Momento | null, revisada: boolean, voosErrados: boolean): { situacao: SituacaoPac; detalhe: string | null } {
+  if (m) return { situacao: m.chave, detalhe: m.detalhe };
+  return { situacao: voosErrados ? "voos" : revisada ? "revisado" : "pendente", detalhe: null };
 }
 
 // 19/11 (Bruno): um filtro embaixo de cada coluna (src/rel/lib/filtroQuadro.ts),
@@ -266,14 +279,14 @@ const ESTILO_ATIVO: React.CSSProperties = { borderColor: "#FFD54F", background: 
 
 const aeroDe = (codigo?: string | null, nome?: string | null) => codigoDe(codigo, nome) || (nome || "").trim();
 
-function linhaFiltravel({ v, voo, situacao, alertas, interno }: LinhaPac): LinhaFiltravel {
+function linhaFiltravel({ v, voo, situacao, alertas, interno, dia, localizadores }: LinhaPac): LinhaFiltravel {
   return {
     cliente: v.cliente_nome || v.titulo,
     servico: v.servico,
     de: voo ? [voo.origem_codigo, voo.origem].filter(Boolean).join(" ") : "",
     para: voo ? [voo.destino_codigo, voo.destino, v.destino].filter(Boolean).join(" ") : [v.destino, v.titulo].filter(Boolean).join(" "),
-    dia: voo ? hojeDe(voo.partida_em) : v.data_embarque,
-    temLocalizador: !!voo?.localizador,
+    dia,
+    temLocalizador: localizadores.length > 0,
     interno, pax: pax(v), alertas, situacao,
   };
 }
@@ -399,13 +412,15 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
               {lista.length === 0 && (
                 <tr><td colSpan={10} className="px-4 py-6 text-[13px]" style={{ color: "#8A979E" }}>NENHUMA VENDA COM ESSES FILTROS</td></tr>
               )}
-              {lista.map(({ v, voo, situacao, alertas, interno }, i) => {
+              {lista.map(({ v, voo, situacao, detalhe, dia, volta, localizadores, alertas, interno }, i) => {
                 const s = SITUACAO_PAC[situacao];
                 const atraso = Math.min(i, 12) * 0.06;
                 const fim = situacao === "concluida";
                 const de = voo ? (aeroDe(voo.origem_codigo, voo.origem) || "—") : "—";
                 const para = voo ? (aeroDe(voo.destino_codigo, voo.destino) || v.destino || "—") : (v.destino || v.titulo);
-                const ida = fim ? "CONCLUÍDA" : voo ? (voo.fonte === "bitrix" ? dataBoard(hojeDe(voo.partida_em)) : horaDoLugar(voo.partida_em, voo.partida_fuso).texto) : dataBoard(v.data_embarque);
+                // 24/11: sem voo cadastrado, a data da venda que ainda não passou (Gabriela Sobral: a ida 04/11 já foi → mostra a volta)
+                const ida = fim ? "CONCLUÍDA" : voo ? (voo.fonte === "bitrix" ? dataBoard(hojeDe(voo.partida_em)) : horaDoLugar(voo.partida_em, voo.partida_fuso).texto) : `${volta ? "VOLTA " : ""}${dataBoard(dia)}`;
+                const loc = localizadores[0] ?? null;
                 const abrir = () => onAbrirViagem(v.id);
                 return (
                   <tr key={v.id} className="rel-quadro-linha cursor-pointer" style={{ borderTop: "1px solid #182026", ...(fim ? { opacity: 0.45, textDecoration: "line-through" } : {}) }} onClick={abrir}
@@ -416,7 +431,10 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
                     <td className="px-2 py-2 uppercase max-w-[140px] truncate" style={{ color: "#B9C4C9" }}><Flap texto={de.slice(0, 16)} atraso={atraso} /></td>
                     <td className="px-2 py-2 uppercase max-w-[160px] truncate"><Flap texto={para.slice(0, 18)} atraso={atraso} /></td>
                     <td className="px-2 py-2 whitespace-nowrap" style={{ color: "#FFD54F" }}><Flap texto={ida} atraso={atraso} /></td>
-                    <td className="px-2 py-2 whitespace-nowrap tracking-wider" style={{ color: voo?.localizador ? "#F2F2F2" : "#5C6A71" }}>{voo?.localizador ? <Flap texto={voo.localizador} atraso={atraso} /> : "——"}</td>
+                    <td className="px-2 py-2 whitespace-nowrap tracking-wider" style={{ color: loc ? "#F2F2F2" : "#5C6A71" }}
+                      title={localizadores.length > 1 ? `Um localizador por passageiro neste voo: ${localizadores.join(", ")}` : undefined}>
+                      {loc ? <><Flap texto={loc} atraso={atraso} />{localizadores.length > 1 && <span className="ml-1 text-[10.5px]" style={{ color: "#8A979E" }}>+{localizadores.length - 1}</span>}</> : "——"}
+                    </td>
                     <td className="px-2 py-2 text-center whitespace-nowrap font-bold" style={{ color: interno ? "#C4B5FD" : "#5C6A71" }}
                       aria-label={interno == null ? "sem voos" : interno ? `${interno} voos internos` : "sem voo interno"}>
                       {interno == null ? "——" : interno ? `SIM · ${interno}` : "NÃO"}
@@ -427,7 +445,10 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
                       {alertas.media > 0 && <span className="inline-block px-1.5 rounded" style={{ background: "rgba(245,158,11,.25)", color: "#FBBF24" }}>{alertas.media}</span>}
                       {!alertas.alta && !alertas.media && <span style={{ color: "#5BE3B0" }}>✓</span>}
                     </td>
-                    <td className="px-4 py-2 text-right whitespace-nowrap font-bold"><Flap texto={s.texto} atraso={atraso + 0.1} cor={s.cor} /></td>
+                    <td className="px-4 py-2 text-right whitespace-nowrap font-bold" title={detalhe ?? undefined}>
+                      <Flap texto={s.texto} atraso={atraso + 0.1} cor={s.cor} />
+                      {detalhe && <span className="block max-w-[200px] ml-auto truncate text-[10.5px] font-medium normal-case" style={{ color: "#8A979E", textDecoration: "none" }}>{detalhe}</span>}
+                    </td>
                   </tr>
                 );
               })}
@@ -557,12 +578,19 @@ export default function PainelViagens({ onAbrirViagem, onVerFila }: { onAbrirVia
       const r = resumos.get(v.id);
       const voosErrados = !!r?.inconsistencias.some((i) => !i.ignorada && i.chave.startsWith("voo_fora:"));
       const vez = r ? vooDaVez(r, relogio, v) : { voo: null, concluida: false };
-      return { v, voo: vez.voo, situacao: vez.concluida ? "concluida" as const : situacaoPac(v, !!rev.get(v.id)?.revisado_em, voosErrados), alertas: { alta: c.alta, media: c.media },
+      // 24/11: o que está acontecendo agora (hotel, passeio, check-in…) — os trechos que não são voo vêm do conferente
+      const outros = (analises?.get(v.id)?.trechos ?? []).filter((t) => t.tipo !== "voo_internacional" && t.tipo !== "voo_interno");
+      const momento = vez.concluida ? { chave: "concluida" as const, detalhe: null } : r ? momentoDaViagem(v, r, outros, relogio) : null;
+      const sit = situacaoPac(momento, !!rev.get(v.id)?.revisado_em, voosErrados);
+      const prox = vez.voo ? null : proximaDataDaVenda(v, relogio);
+      return { v, voo: vez.voo, ...sit, alertas: { alta: c.alta, media: c.media },
+        dia: vez.voo ? hojeDe(vez.voo.partida_em) : prox?.dia ?? null, volta: prox?.qual === "volta",
+        localizadores: r ? localizadoresDoVoo(vez.voo, r) : [],
         interno: r && r.voos.some((x) => x.valido) ? r.internos : null };
     })
     // concluídas saem da fila: vão pro fim
     .sort((a, b) => Number(a.situacao === "concluida") - Number(b.situacao === "concluida")
-      || (a.voo?.partida_em ?? a.v.data_embarque ?? "9999").localeCompare(b.voo?.partida_em ?? b.v.data_embarque ?? "9999")),
+      || (a.voo?.partida_em ?? a.dia ?? "9999").localeCompare(b.voo?.partida_em ?? b.dia ?? "9999")),
   [viagens, rev, analises, resumos, relogio]);
 
   const hoje = hojeISO();

@@ -186,7 +186,7 @@ export function janelaDaViagem(v: Pick<ViagemDatas, "data_embarque" | "data_reto
   return { de: somaDias(v.data_embarque, -DIAS_ANTES_EMBARQUE), ate: somaDias(volta, DIAS_DEPOIS_RETORNO) };
 }
 
-const chaveVoo = (t: TrechoVoo) => `${new Date(t.partida_em).getTime()}|${(t.numero || "").replace(/\s+/g, "").toUpperCase() || `${t.origem ?? ""}>${t.destino ?? ""}`}`;
+export const chaveVoo = (t: TrechoVoo) => `${new Date(t.partida_em).getTime()}|${(t.numero || "").replace(/\s+/g, "").toUpperCase() || `${t.origem ?? ""}>${t.destino ?? ""}`}`;
 
 export function separarVoos<T extends TrechoVoo>(v: Pick<ViagemDatas, "data_embarque" | "data_retorno" | "servico" | "aereo_vendido">, trechos: T[]): VoosDaViagem<T> {
   const todosVoos = trechos.filter(ehVoo).filter((t) => t.partida_em).sort((a, b) => a.partida_em.localeCompare(b.partida_em) || a.id.localeCompare(b.id));
@@ -423,4 +423,111 @@ export function vooDaVez<T extends TrechoVoo>(
   if (validos.length) return { voo, concluida: !voo };
   const volta = v?.data_retorno || v?.data_embarque;
   return { voo: null, concluida: !!volta && volta < diaSP(agora) };
+}
+
+// ── 24/11 (Bruno): próxima data, localizador e o MOMENTO da viagem ──────────
+
+/**
+ * "Próximo voo não atualiza a data" (caso Gabriela Sobral: pacote sem aéreo
+ * nosso, ida 04/11 já passou e o quadro seguia mostrando 04/11). Sem voo
+ * cadastrado, a próxima data é a da venda que ainda NÃO passou: o embarque,
+ * senão a volta. As duas no passado = null (viagem concluída).
+ */
+export function proximaDataDaVenda(v: Pick<ViagemDatas, "data_embarque" | "data_retorno">, agora: number): { dia: string; qual: "ida" | "volta" } | null {
+  const hoje = diaSP(agora);
+  if (v.data_embarque && v.data_embarque >= hoje) return { dia: v.data_embarque, qual: "ida" };
+  if (v.data_retorno && v.data_retorno >= hoje) return { dia: v.data_retorno, qual: "volta" };
+  return null;
+}
+
+/**
+ * Localizador do voo da vez, "sempre de acordo com o voo das pessoas que estão
+ * em viagem": junta o localizador de TODAS as cópias do mesmo voo (uma por
+ * passageiro — cada um pode ter o seu); se nenhuma cópia tem, usa o de outro
+ * voo do mesmo deslocamento (conexão, até 24h de distância), que é a mesma
+ * reserva. Nunca pega o localizador de outra perna da viagem.
+ */
+export function localizadoresDoVoo<T extends TrechoVoo>(voo: T | null, r: Pick<ResumoVoos<T>, "voos">): string[] {
+  if (!voo) return [];
+  const limpa = (x?: string | null) => (x || "").trim().toUpperCase();
+  const vivos = r.voos.filter((x) => x.t.status_manual !== "cancelado" && (x.valido || x.motivoFora?.startsWith("repetido")));
+  const k = chaveVoo(voo);
+  const mesmos = [...new Set([voo, ...vivos.filter((x) => chaveVoo(x.t) === k).map((x) => x.t)].map((t) => limpa(t.localizador)).filter(Boolean))];
+  if (mesmos.length) return mesmos;
+  const p = new Date(voo.partida_em).getTime();
+  const perto = vivos
+    .filter((x) => limpa(x.t.localizador) && Math.abs(new Date(x.t.partida_em).getTime() - p) <= CONEXAO_MAX_HORAS * H)
+    .sort((a, b) => Math.abs(new Date(a.t.partida_em).getTime() - p) - Math.abs(new Date(b.t.partida_em).getTime() - p));
+  return perto.length ? [limpa(perto[0].t.localizador)] : [];
+}
+
+export type MomentoChave =
+  | "em_voo" | "checkin" | "em_passeio" | "em_transfer" | "em_trem" | "na_hospedagem"
+  | "embarca_hoje" | "volta_hoje" | "em_viagem" | "concluida";
+
+export interface Momento { chave: MomentoChave; detalhe: string | null }
+
+/** Trecho que não é voo (hotel, passeio, transfer, trem) — o que o Painel tem em mãos. */
+export interface TrechoMomento {
+  id: string; tipo: string; partida_em: string; chegada_em?: string | null;
+  descricao?: string | null; origem?: string | null; destino?: string | null; status_manual?: string | null;
+}
+
+/** Sem horário de fim: quanto dura cada coisa (hotel sem check-out não vale). */
+const DURACAO_PADRAO_H: Record<string, number> = { passeio: 3, transfer: 1, trem: 2 };
+
+const rotuloVoo = (t: TrechoVoo) => {
+  const o = codigoDe(t.origem_codigo, t.origem), d = codigoDe(t.destino_codigo, t.destino);
+  return [t.numero?.replace(/\s+/g, ""), o && d ? `${o}→${d}` : null].filter(Boolean).join(" ") || null;
+};
+
+/**
+ * 24/11 (Bruno): "um status de tudo que está acontecendo na viagem — check-in
+ * pendente, na hospedagem, em passeio… pra acompanhar o dia a dia de cada
+ * pessoa". A ordem é a do que importa AGORA:
+ *   1. concluída (não sobra voo / a volta passou)
+ *   2. em voo (decolou e não pousou — só voo com horário)
+ *   3. check-in pendente (janela aberta, não feito) — vale antes da viagem também
+ *   4. em passeio › em transfer › em trem › na hospedagem (o que está rolando)
+ *      — venda só de hotel/passeio sem trecho: as datas da venda
+ *   5. embarca hoje / volta hoje / em viagem
+ * null = a viagem ainda não começou e não há nada pra fazer (o quadro mostra
+ * a situação da checagem: pendente, revisado, voos a conferir).
+ */
+export function momentoDaViagem<T extends TrechoVoo>(
+  v: ViagemDatas, r: ResumoVoos<T>, outros: TrechoMomento[], agora: number,
+): Momento | null {
+  const hoje = diaSP(agora);
+  if (vooDaVez(r, agora, v).concluida) return { chave: "concluida", detalhe: null };
+  const validos = r.voos.filter((x) => x.valido).map((x) => x.t)
+    .filter((t) => t.status_manual !== "voado" && t.status_manual !== "cancelado");
+
+  const voando = validos.find((t) => !semHora(t) && new Date(t.partida_em).getTime() <= agora && fimDoVoo(t) >= agora);
+  if (voando) return { chave: "em_voo", detalhe: rotuloVoo(voando) };
+
+  const checkin = validos.find((t) => estadoTrecho(t, agora) === "checkin_a_fazer");
+  if (checkin) return { chave: "checkin", detalhe: rotuloVoo(checkin) };
+
+  const rolando = (tipo: string) => outros.find((t) => {
+    if (t.tipo !== tipo || t.status_manual === "cancelado" || !t.partida_em) return false;
+    const ini = new Date(t.partida_em).getTime();
+    const fim = t.chegada_em ? new Date(t.chegada_em).getTime() : DURACAO_PADRAO_H[tipo] ? ini + DURACAO_PADRAO_H[tipo] * H : NaN;
+    return ini <= agora && agora <= fim;
+  });
+  const onde = (t: TrechoMomento) => (t.descricao || t.destino || t.origem || "").trim() || null;
+  for (const [tipo, chave] of [["passeio", "em_passeio"], ["transfer", "em_transfer"], ["trem", "em_trem"], ["hospedagem", "na_hospedagem"]] as const) {
+    const t = rolando(tipo);
+    if (t) return { chave, detalhe: onde(t) };
+  }
+  // venda só de hotel/passeio, sem o trecho cadastrado: vale o período da venda
+  const dentroDaVenda = !!v.data_embarque && hoje >= v.data_embarque && hoje <= (v.data_retorno || v.data_embarque);
+  const temTrecho = (tipo: string) => outros.some((t) => t.tipo === tipo && t.status_manual !== "cancelado");
+  if (dentroDaVenda && v.servico === "hospedagem" && !temTrecho("hospedagem")) return { chave: "na_hospedagem", detalhe: null };
+  if (dentroDaVenda && v.servico === "passeio" && !temTrecho("passeio")) return { chave: "em_passeio", detalhe: null };
+
+  if (r.fase === "cancelada" || r.fase === "sem_data") return null;
+  if (r.ida === hoje && (r.fase === "antes" || r.fase === "em_viagem")) return { chave: "embarca_hoje", detalhe: validos[0] ? rotuloVoo(validos[0]) : null };
+  if (r.volta === hoje && r.fase === "em_viagem") return { chave: "volta_hoje", detalhe: null };
+  if (r.fase === "em_viagem") return { chave: "em_viagem", detalhe: null };
+  return null;
 }
