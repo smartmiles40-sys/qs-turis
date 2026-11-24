@@ -66,6 +66,9 @@ import DadosDaPessoaNaVenda from "./DadosDaPessoaNaVenda";
 import BlocoExpedicao from "./BlocoExpedicao";
 import CampoDoTipo from "./CampoDoTipo";
 import TrechosAereo from "./TrechosAereo";
+import EmissaoDoItem from "./EmissaoDoItem";
+import { REGRAS_PADRAO, type RegraEmissao } from "@/lib/emissao";
+import { carregarRegras } from "@/lib/emissaoRegras";
 import { avisosDoAereo, dadosParaBanco, lerTrechos, precisaDeTrechos, problemasDoAereo } from "./iata";
 import ExtratoAnalise from "./ExtratoAnalise";
 import PagamentoLinhas from "./PagamentoLinhas";
@@ -102,6 +105,9 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
   const [passo, setPasso] = useState(0);
   const [pessoa, setPessoa] = useState<PessoaVenda>(pessoaVazia);
   const [itens, setItens] = useState<ItemVenda[]>([]);
+  // 24/11: regras de emissão futura (trem-bala abre 3 meses antes…)
+  const [regrasEmissao, setRegrasEmissao] = useState<RegraEmissao[]>(REGRAS_PADRAO);
+  useEffect(() => { carregarRegras().then(setRegrasEmissao).catch(() => {}); }, []);
   const [valores, setValores] = useState<Record<string, string>>({});
   const [viajantes, setViajantes] = useState<Record<string, Viajante[]>>({});
   // Quem vai junto (sem o comprador): passo 1. Sem expedição, é a lista que vai pra venda_subir (item "pivô").
@@ -825,6 +831,21 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
                       <Campo rotulo="Fornecedor / operadora (interno)" dica="Opcional. O cliente não vê.">
                         <Entrada value={i.fornecedor} onChange={(e) => mudarItem(i.k, { fornecedor: e.target.value })} />
                       </Campo>
+                      {!emitido && i.tipo !== "concierge" && (
+                        <EmissaoDoItem tipo={i.tipo} nome={i.nome} uso={i.data_inicio} dados={i.dados} regras={regrasEmissao}
+                          onDados={(d) => mudarItem(i.k, { dados: d })} />
+                      )}
+                      {i.tipo === "pacote" && (
+                        <div className="sm:col-span-2 flex flex-wrap items-center gap-2 text-[12.5px]" style={{ color: "var(--ink2)" }}>
+                          <span>O pacote tem <b>trem-bala, ingresso ou passeio</b> que só emite depois? Lance separado pra ele entrar na emissão futura:</span>
+                          {(["trem", "passeio"] as TipoItem[]).map((t) => (
+                            <button key={t} type="button" className="font-semibold underline" style={{ color: "var(--rel-ink)" }}
+                              onClick={() => setItens((l) => { const j = l.findIndex((x) => x.k === i.k); const c = [...l]; const n = itemVendaVazio(t); c.splice(j + 1, 0, { ...n, data_inicio: i.data_inicio, dados: t === "trem" ? n.dados : { ...n.dados, emite_depois: "sim" } }); return c; })}>
+                              + {TIPOS[t].emoji} {TIPOS[t].rotulo}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                   {i.tipo !== "expedicao" && (

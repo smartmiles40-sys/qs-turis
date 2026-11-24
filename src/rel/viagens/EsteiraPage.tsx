@@ -18,7 +18,8 @@ import { formatarTelefone } from "../lib/clientes";
 import { Aviso, Entrada } from "../ui";
 import { MarcaTipo } from "./MapaMundi";
 import { COR_SITUACAO, quandoTexto } from "./EtapasViagem";
-import AtividadesRel, { type ItemAtividade } from "./AtividadesRel";
+import { type ItemAtividade } from "./AtividadesRel";
+import RotinaRel from "./RotinaRel";
 import { PREF_DIAS_ANTES, preferenciasDe, preferenciasVazias } from "../lib/operacao";
 
 type Aba = "atividades" | "esteira" | "viagem";
@@ -168,7 +169,7 @@ function EmViagem({ itens, abrir }: { itens: Item[]; abrir: (id: string) => void
 
 // ── Página ──────────────────────────────────────────────────────────────────
 
-export default function EsteiraPage({ onAbrirViagem }: { onAbrirViagem: (id: string) => void }) {
+export default function EsteiraPage({ onAbrirViagem, onAbrirExpedicao }: { onAbrirViagem: (id: string) => void; onAbrirExpedicao?: (id: string) => void }) {
   const [aba, setAbaEstado] = useState<Aba>(() => { try { const a = localStorage.getItem(CHAVE_ABA); return a === "esteira" || a === "viagem" ? a : "atividades"; } catch { return "atividades"; } });
   const setAba = (a: Aba) => { setAbaEstado(a); try { localStorage.setItem(CHAVE_ABA, a); } catch { /* sem memória */ } };
   const [busca, setBusca] = useState("");
@@ -211,8 +212,8 @@ export default function EsteiraPage({ onAbrirViagem }: { onAbrirViagem: (id: str
     <div className="w-full space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Minhas atividades</h1>
-          <p className="text-[13px]" style={{ color: "var(--ink3)" }}>A Esteira do Relacionamento · pacotes, aéreos e hotéis · Passagem de bastão → Revisão → D-30 → D-7 → D-3 → Check-in → Em viagem → Retorno</p>
+          <h1 className="text-xl font-bold" style={{ color: "var(--ink)" }}>Minha rotina</h1>
+          <p className="text-[13px]" style={{ color: "var(--ink3)" }}>A fila do time, já na ordem de fazer: check-ins, emissões futuras, etapas dos pacotes (Bastão → Revisão → D-30 → D-7 → D-3 → Check-in → Em viagem → Retorno) e das expedições por grupo (Documentos D-90 → Revisão D-60 → D-30 → D-7 → D-3 → Check-in → Em viagem → Retorno)</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div style={{ width: 240 }}><Entrada value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar cliente ou destino" aria-label="Buscar" /></div>
@@ -220,7 +221,7 @@ export default function EsteiraPage({ onAbrirViagem }: { onAbrirViagem: (id: str
       </div>
 
       <div className="flex gap-1 border-b" style={{ borderColor: "var(--line)" }} role="tablist">
-        {([["atividades", `Atividades${nAtrasadas ? ` · ${nAtrasadas} atrasada${nAtrasadas > 1 ? "s" : ""}` : ""}`], ["esteira", "Esteira"], ["viagem", `Em viagem · ${nViagem}`]] as [Aba, string][]).map(([id, r]) => (
+        {([["atividades", `Rotina do dia${nAtrasadas ? ` · ${nAtrasadas} atrasada${nAtrasadas > 1 ? "s" : ""}` : ""}`], ["esteira", "Esteira"], ["viagem", `Em viagem · ${nViagem}`]] as [Aba, string][]).map(([id, r]) => (
           <button key={id} role="tab" aria-selected={aba === id} onClick={() => setAba(id)} className="px-4 py-2.5 text-[13.5px] font-semibold -mb-px"
             style={aba === id ? { color: "var(--rel-ink)", borderBottom: "2px solid var(--rel)" } : { color: "var(--ink2)", borderBottom: "2px solid transparent" }}>{r}</button>
         ))}
@@ -229,7 +230,7 @@ export default function EsteiraPage({ onAbrirViagem }: { onAbrirViagem: (id: str
       {erro && <Aviso tom="erro">{erro}</Aviso>}
       {!dados ? <div className="rel-card h-64 animate-pulse" style={{ background: "var(--card2)" }} /> : (
         <>
-          {aba === "atividades" && <AtividadesRel itens={itens} equipe={equipe} abrirViagem={onAbrirViagem} onMudou={() => void carregar()} semPreferencias={dados.semPref} />}
+          {aba === "atividades" && <RotinaRel itens={itens} equipe={equipe} abrirViagem={onAbrirViagem} abrirExpedicao={onAbrirExpedicao} onMudou={() => void carregar()} />}
           {aba === "esteira" && <Quadro itens={itens} abrir={onAbrirViagem} />}
           {aba === "viagem" && <EmViagem itens={itens} abrir={onAbrirViagem} />}
           {semData > 0 && <p className="text-[12px]" style={{ color: "var(--ink3)" }}>{semData} viagem(ns) sem data de ida não entram na esteira — ajuste a data na viagem.</p>}

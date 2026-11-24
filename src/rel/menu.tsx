@@ -51,7 +51,7 @@ export interface ItemRel {
 
 export const ITENS_REL: ItemRel[] = [
   { id: "inicio", label: "Início", icon: Icon.inicio, grupo: "topo", dica: "Resumo do dia" },
-  { id: "esteira", label: "Minhas atividades", icon: Icon.check, grupo: "topo", dica: "Etapas das viagens que você cuida" },
+  { id: "esteira", label: "Minha rotina", icon: Icon.check, grupo: "topo", dica: "A fila do dia: check-ins, emissões e etapas de pacotes e expedições" },
   { id: "atendimento", label: "Conversas", icon: Icon.chat, grupo: "atendimento", dica: "WhatsApp com os clientes" },
   { id: "grupos", label: "Grupos", icon: Icon.pessoas, grupo: "atendimento", dica: "Grupos do WhatsApp das viagens" },
   { id: "chamados", label: "Chamados", icon: Icon.chamado, grupo: "atendimento", dica: "Problemas e reclamações em andamento" },

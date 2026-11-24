@@ -449,7 +449,7 @@ export default function RelApp() {
               onAbrirConversa={abrirConversa} onAbrirViagem={abrirViagem}
               onAbrirExpedicao={(exp, tipo, pax) => ir({ tela: tipo === "pacote" ? "exp-pacotes" : "exp-expedicoes", id: pax ? `${exp}/passageiros/pax/${pax}` : exp })} />
           )}
-          {rota.tela === "esteira" && <EsteiraPage onAbrirViagem={abrirViagem} />}
+          {rota.tela === "esteira" && <EsteiraPage onAbrirViagem={abrirViagem} onAbrirExpedicao={(id) => ir({ tela: "exp-expedicoes", id })} />}
           {rota.tela === "prioridades" && <PrioridadesPage setor="relacionamento" />}
           {rota.tela === "viagens" && <ViagensPage key="viagens" onAbrirViagem={abrirViagem} onAbrirCliente={abrirCliente} onAbrirPacoteExpedicao={(id) => ir({ tela: "exp-pacotes", id })} />}
           {/* Faxina (supervisão): a mesma lista de Viagens, com todas as filas à mostra */}
