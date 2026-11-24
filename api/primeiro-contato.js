@@ -38,6 +38,7 @@
 import { findLeadByPhone } from './_wa.js';
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { dispararPrimeiroContato, normalizarCelular } from './_primeiroContato.js';
+import { comSentry } from './_sentry.js';
 
 /** motivo -> status HTTP. O que nao esta aqui e 200 (decisao, nao erro). */
 const STATUS = {
@@ -49,7 +50,7 @@ const STATUS = {
   erro: 500,
 };
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Use POST' });
@@ -110,3 +111,5 @@ async function buscarPorId(id) {
 }
 
 function safeJson(s) { try { return JSON.parse(s); } catch { return {}; } }
+
+export default comSentry(handler);

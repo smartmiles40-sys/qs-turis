@@ -18,6 +18,7 @@
 import { rest } from './_supabaseAdmin.js';
 import { lerConfig } from './_mktEmailResend.js';
 import { destinoDoClique, ehUmCliqueDoProvedor, svixConfere, traduzirEventoResend } from './_mktEmailMontar.js';
+import { comSentry } from './_sentry.js';
 
 // Corpo cru: a assinatura do Svix é sobre os bytes exatos.
 export const config = { api: { bodyParser: false } };
@@ -71,7 +72,7 @@ function html(res, estado) {
   return res.status(200).send(pagina(estado));
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   const q = req.query || {};
   const r = String(q.r || '');
   const t = String(q.t || '');
@@ -140,3 +141,5 @@ export default async function handler(req, res) {
 
   return res.status(404).json({ error: 'Não encontrado.' });
 }
+
+export default comSentry(handler);

@@ -23,6 +23,7 @@
 import { rest } from './_supabaseAdmin.js';
 import { normPhone, createInboundLead } from './_leads.js';
 import { lerConfig, origemPermitida, aplicarCors, chaveIp, texto } from './lead.js';
+import { comSentry } from './_sentry.js';
 
 // A própria página de formulário do QS (/api/whatsapp) posta pra cá.
 const ORIGEM_PROPRIA = 'https://qs-turis.vercel.app';
@@ -31,7 +32,7 @@ function safeJson(s) {
   try { return JSON.parse(s); } catch { return {}; }
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   const origin = req.headers.origin || '';
   const { origens, teto } = await lerConfig();
   const permitido = origin === ORIGEM_PROPRIA || origemPermitida(origin, origens);
@@ -90,3 +91,5 @@ export default async function handler(req, res) {
     return res.status(503).json({ ok: false, error: 'Não conseguimos registrar agora. Tente de novo em instantes.' });
   }
 }
+
+export default comSentry(handler);

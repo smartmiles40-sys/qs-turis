@@ -19,6 +19,8 @@
 // minuto por pessoa (memória da instância).
 // -----------------------------------------------------------------------------
 
+import { comSentry } from './_sentry.js';
+
 const MODELO = () => process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const MAX_RODADAS = 4;
 const ORCAMENTO_MS = 25_000; // maxDuration 30s no vercel.json
@@ -328,7 +330,7 @@ function linksCitados(resposta, links) {
   return (citados.length ? citados : todos.length <= 3 ? todos : []).slice(0, 5);
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).json({ error: 'Use POST.' });
 
@@ -398,3 +400,5 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: txt });
   }
 }
+
+export default comSentry(handler);

@@ -26,6 +26,7 @@ import { rest } from './_supabaseAdmin.js';
 import { diagAutorizado, diagnosticoMeta } from './_metaDiag.js';
 import { sincronizarPermissao, gravarPermissao, lerPermissaoLocal, permissaoVale } from './_permissaoLigacao.js';
 import { coordenaSetor } from './_coordena.js';
+import { comSentry } from './_sentry.js';
 
 /** Só admin/gestor mexe nos modelos e nas respostas prontas. */
 async function ehAdmin(userId) {
@@ -114,7 +115,7 @@ async function importarRespostasDoChatwoot() {
   }
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Use GET' });
@@ -594,3 +595,4 @@ function textoDeConfig(erro) {
   }[erro] || null;
 }
 
+export default comSentry(handler);

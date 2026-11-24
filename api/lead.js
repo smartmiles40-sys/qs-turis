@@ -33,6 +33,7 @@ import { createHash } from 'node:crypto';
 import { rest } from './_supabaseAdmin.js';
 import { normPhone } from './_leads.js';
 import { numeroReserva, numeroValido } from './_numeroReserva.js';
+import { comSentry } from './_sentry.js';
 
 // Última linha de defesa se qs_settings.lp_origins sumir ou vier corrompido.
 // Não é a fonte da verdade — a tabela é. Está aqui pra uma LP não parar de
@@ -138,7 +139,7 @@ function responder(res, numero, sdrNome, fallback) {
   return res.status(200).json({ ok: true, numero, sdr_nome: sdrNome, fallback });
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   const origin = req.headers.origin || '';
   const { origens, teto } = await lerConfig();
   const permitido = origemPermitida(origin, origens);
@@ -264,3 +265,5 @@ export default async function handler(req, res) {
     return responder(res, fallback, null, true);
   }
 }
+
+export default comSentry(handler);

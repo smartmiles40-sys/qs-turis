@@ -31,6 +31,7 @@ import { guardarMidia } from './_waMidia.js';
 import { gravarRel } from './_relEntrada.js';
 import { enviaSemNome } from './_relGruposEvo.js';
 import { quemAtende, numeroDoRelacionamento } from './_relWa.js';
+import { comSentry } from './_sentry.js';
 
 const MAX_TEXTO = 4000;
 const MAX_BYTES = 3 * 1024 * 1024; // a Vercel aceita ~4,5 MB de corpo; base64 infla 33%
@@ -188,7 +189,7 @@ async function destino({ conversaId, clienteId, telefone }, numero) {
 const janelaAberta = (ultimaEntrada) =>
   Boolean(ultimaEntrada) && Date.now() - new Date(ultimaEntrada).getTime() < 24 * 3600_000;
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   const u = await quemAtende(req);
   if (!u) return res.status(401).json({ error: 'Sem acesso ao Relacionamento.' });
 
@@ -523,3 +524,5 @@ export default async function handler(req, res) {
 
   return res.status(400).json({ error: 'Ação inválida.' });
 }
+
+export default comSentry(handler);

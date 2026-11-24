@@ -18,6 +18,7 @@
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { pulso } from './_rotinaPulso.js';
+import { comSentry } from './_sentry.js';
 
 const JANELA_MIN = 30;
 const LOTE = 500;
@@ -198,7 +199,7 @@ export async function sincronizarMetasSdr(agora = new Date()) {
   return { configurado: true, periodo, gravadas };
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return res.status(405).json({ error: 'Use GET' });
@@ -243,3 +244,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: e?.message });
   }
 }
+
+export default comSentry(handler);

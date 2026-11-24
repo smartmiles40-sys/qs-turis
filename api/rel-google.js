@@ -14,6 +14,7 @@
 import { rest } from './_supabaseAdmin.js';
 import { quemChama } from './_relWa.js';
 import { coordenaSetor } from './_coordena.js';
+import { comSentry } from './_sentry.js';
 
 async function lerConfig() {
   const r = await rest('rel_config?select=valor&chave=eq.google&limit=1').catch(() => null);
@@ -29,7 +30,7 @@ async function gravarConfig(valor) {
 
 const podeConfigurar = (u) => coordenaSetor(u, 'relacionamento');
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   const u = await quemChama(req);
   if (!u) return res.status(401).json({ error: 'Sem acesso ao Relacionamento.' });
 
@@ -59,3 +60,5 @@ export default async function handler(req, res) {
   }
   return res.status(400).json({ error: 'Ação inválida.' });
 }
+
+export default comSentry(handler);

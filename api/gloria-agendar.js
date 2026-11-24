@@ -29,10 +29,11 @@
 import { rest, insert } from './_supabaseAdmin.js';
 import { portaria, corpo, buscarLead, sessao, registrar, pausar, blocoQualificacao } from './_gloria.js';
 import { duasOpcoes, lerOpcao, marcarReuniao, emailValido, closersAtivos, ANTECEDENCIA_MIN } from './_agenda.js';
+import { comSentry } from './_sentry.js';
 
 const PERIODOS = new Set(['manha', 'tarde']);
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Use POST' });
@@ -201,3 +202,5 @@ async function marcar(req, res, { body, lead, ses, teste }) {
       : 'Marcado, mas o link da sala ainda não saiu. Confirme o dia e a hora e diga que o link chega por aqui antes da reunião. Não invente link.',
   });
 }
+
+export default comSentry(handler);

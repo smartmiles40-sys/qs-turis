@@ -17,8 +17,9 @@
 
 import { segredoConfere } from './_supabaseAdmin.js';
 import { sincronizarCatalogo } from './_bitrixSaida.js';
+import { comSentry } from './_sentry.js';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).json({ error: 'Use GET' });
   const segredo = String(process.env.CRON_SECRET || '').trim();
@@ -34,3 +35,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, erro: String(e?.message || 'falhou').slice(0, 300) });
   }
 }
+
+export default comSentry(handler);

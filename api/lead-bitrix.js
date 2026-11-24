@@ -45,8 +45,9 @@ import { vincularLeadAoBitrix, bitrixConfigurado } from './_bitrixLead.js';
 import { moverCardDaLigacao } from './_ligacaoSdr.js';
 import { porExtenso } from './_agenda.js';
 import { verificarVinculo } from './_vinculo.js';
+import { comSentry } from './_sentry.js';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Use POST' });
@@ -232,3 +233,5 @@ export default async function handler(req, res) {
 }
 
 function safeJson(s) { try { return JSON.parse(s); } catch { return {}; } }
+
+export default comSentry(handler);

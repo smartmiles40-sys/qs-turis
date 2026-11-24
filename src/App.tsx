@@ -1,4 +1,5 @@
-import { Component, Suspense, lazy, useEffect, useRef, useState, type ReactNode } from "react";
+import { Component, Suspense, lazy, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from "react";
+import * as Sentry from "@sentry/react";
 import LoginPage from "@/components/sdr/auth/LoginPage";
 import { QsAuthProvider, setoresDe, useQsAuth } from "@/contexts/QsAuthContext";
 import { ChatAppDockProvider } from "@/contexts/ChatAppDockContext";
@@ -86,6 +87,9 @@ function paginaPublica(): ReactNode | null {
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
   static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    Sentry.captureException(error, { contexts: { react: { componentStack: info.componentStack ?? "" } } });
+  }
   render() {
     if (this.state.error) {
       return (

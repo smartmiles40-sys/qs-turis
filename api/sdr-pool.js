@@ -15,6 +15,7 @@
 // operação (custo, aquecimento, risco de bloqueio), não de quem atende.
 // -----------------------------------------------------------------------------
 import { rest } from './_supabaseAdmin.js';
+import { comSentry } from './_sentry.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -116,7 +117,7 @@ function safeJson(s) {
   try { return JSON.parse(s); } catch { return {}; }
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method !== 'POST') {
@@ -210,3 +211,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, error: 'Não consegui concluir. Tente de novo.' });
   }
 }
+
+export default comSentry(handler);

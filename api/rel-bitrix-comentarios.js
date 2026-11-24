@@ -27,6 +27,7 @@ import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { bx, bitrixConfigurado } from './_bitrixLead.js';
 import { getSupabaseUserId } from './_wa.js';
 import { enviarPessoa, rodadaPessoas } from './_relPessoaBitrix.js';
+import { comSentry } from './_sentry.js';
 
 const pessoasLigado = () => String(process.env.REL_PESSOA_BITRIX_LIGADO || '').trim() === '1';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -137,7 +138,7 @@ async function lerLote(lote) {
   return comentarios;
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'POST') return pessoaEnviar(req, res);
   const segredo = String(process.env.CRON_SECRET || '').trim();
@@ -182,3 +183,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: e?.message || 'Falhou' });
   }
 }
+
+export default comSentry(handler);

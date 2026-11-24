@@ -34,6 +34,7 @@
 import { rest } from './_supabaseAdmin.js';
 import { getSupabaseUserId, assertCanAccessLead } from './_wa.js';
 import { bx, bitrixConfigurado } from './_bitrixLead.js';
+import { comSentry } from './_sentry.js';
 
 /**
  * OS CAMPOS QUE SÃO RESPOSTA DO CLIENTE — e só eles.
@@ -176,7 +177,7 @@ export async function respostasDoNegocio(bitrixId) {
   return saida;
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return res.status(405).json({ error: 'Use GET' });
@@ -269,3 +270,5 @@ export default async function handler(req, res) {
 
   return res.status(200).json({ answers, atualizado_em: agora, origem: 'bitrix' });
 }
+
+export default comSentry(handler);

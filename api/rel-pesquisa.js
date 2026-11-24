@@ -16,6 +16,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
+import { comSentry } from './_sentry.js';
 
 const TOKEN = /^[0-9a-f]{64}$/;
 const MAX_TEXTO = 2000;
@@ -34,7 +35,7 @@ async function lerPesquisa(token) {
   return r?.[0] || null;
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   // Página pública: nada aqui pode ficar em cache de CDN (a resposta muda
   // quando a pessoa responde).
   res.setHeader('Cache-Control', 'no-store');
@@ -100,3 +101,5 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: 'Não conseguimos registrar agora. Tente de novo em instantes.' });
   }
 }
+
+export default comSentry(handler);

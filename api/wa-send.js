@@ -21,6 +21,7 @@ import {
   janelaAberta, registrarSaida, resolverModeloMeta, mensagemCitada, numeroDoEnvio,
 } from './_waSaida.js';
 import { pediuParaParar } from './_waOptout.js';
+import { comSentry } from './_sentry.js';
 
 const MAX_LEN = 4000;
 // Arquivo do topo do modelo: a Vercel aceita ~4,5 MB de corpo e base64 infla 1/3.
@@ -33,7 +34,7 @@ const ERRO_MODELO = {
   'modelo-sem-nome': 'Modelo inválido.',
 };
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Use POST' });
@@ -173,3 +174,5 @@ export default async function handler(req, res) {
 function safeParse(s) {
   try { return JSON.parse(s); } catch { return {}; }
 }
+
+export default comSentry(handler);

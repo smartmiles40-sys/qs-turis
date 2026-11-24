@@ -14,7 +14,10 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@huggingface/transformers": "^4.2.0",
+    "@sentry/node": "^11.17.0",
+    "@sentry/react": "^11.17.0",
     "@supabase/supabase-js": "^2.108.2",
+    "@vercel/functions": "^3.11.3",
     "d3-geo": "^3.1.1",
     "date-fns": "^4.1.0",
     "emojibase-data": "^17.0.0",
@@ -28,6 +31,7 @@
     "world-atlas": "^2.0.2"
   },
   "devDependencies": {
+    "@sentry/vite-plugin": "^11.17.0",
     "@types/d3-geo": "^3.1.1",
     "@types/node": "^24.13.2",
     "@types/react": "^18.3.31",

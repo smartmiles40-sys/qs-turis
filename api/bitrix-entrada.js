@@ -47,6 +47,7 @@ import {
   lerCorpo, achatar, pegar, leadDoBitrix, temIdentificador, completarPeloNegocio,
   idDaAtividade, processarAtividade, juntarUtm,
 } from './_bitrixEntrada.js';
+import { comSentry } from './_sentry.js';
 
 export const EVENTOS = ['lead', 'resgate', 'primeiro-contato', 'atividade'];
 
@@ -64,7 +65,7 @@ export function autorizado(mapa, query, env = process.env) {
 const sim = (v) => /^(1|true|sim)$/i.test(String(v ?? ''));
 const q1 = (v) => (Array.isArray(v) ? v[0] : v);
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST' && req.method !== 'GET') {
     res.setHeader('Allow', 'POST, GET');
@@ -209,3 +210,5 @@ async function eventoAtividade(mapa, res) {
   if (r.movido) console.log(`[bitrix-entrada] atividade ${activityId}: negócio ${r.deal_id} → Follow-up 1`);
   return res.status(200).json({ ok: true, ...r });
 }
+
+export default comSentry(handler);

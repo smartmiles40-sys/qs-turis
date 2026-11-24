@@ -37,6 +37,7 @@ import {
 import { simularFluxo, telefoneCanonico, pausaPorRespostaManual } from './_mktAutoRegras.js';
 import { ig, enviarDm, montarMensagemIg, janelaIg, instagramLigado, renovarTokensIg, trocarPorTokenLongo } from './_mktInstagram.js';
 import { codigoDoRef, destinoDaEntrada, ehRobo } from './_mktIgRegras.js';
+import { comSentry } from './_sentry.js';
 
 const enc = encodeURIComponent;
 
@@ -55,7 +56,7 @@ function corpoJson(req) {
   try { return JSON.parse(String(req.body || '{}')); } catch { return {}; }
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   const q = req.query || {};
 
   // ── Cron ──
@@ -257,3 +258,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: e?.message || 'Falhou.' });
   }
 }
+
+export default comSentry(handler);

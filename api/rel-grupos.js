@@ -31,6 +31,7 @@ import { atualizarGrupos, gravarParticipantes, sincronizarGrupos, rodizioInfo } 
 import { acaoMais, enviarAgendadas, agendadasLigadas } from './_relGruposMais.js';
 import { gravarPrivado, varrerPrivado } from './_relGruposPrivado.js';
 import { lerConteudoGrupo, citacaoDoGrupo, textoDaCitada, desembrulhar } from './_relGruposLer.js';
+import { comSentry } from './_sentry.js';
 
 export { sincronizarGrupos };
 
@@ -285,7 +286,7 @@ async function enviarImagemNoGrupo(jid, base64, mime, caption, fileName, mediaty
 
 // ── Handler ──────────────────────────────────────────────────────────────────
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method === 'POST' && req.query?.secret !== undefined) return webhook(req, res);
 
   if (req.method === 'GET' && req.query?.cron) {
@@ -505,3 +506,5 @@ export default async function handler(req, res) {
 
   return res.status(400).json({ error: 'Ação desconhecida.' });
 }
+
+export default comSentry(handler);

@@ -40,6 +40,7 @@ import {
   tagsLimpas, tokenGoogle, CAMPOS_ARQUIVO, MIME_PASTA, MAX_PEDACO, TIPOS, linkPreview,
 } from './_mktDriveGoogle.js';
 import { sincronizar, gravarNoIndice } from './_mktDriveSync.js';
+import { comSentry } from './_sentry.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TAMANHO_MAX_ENVIO = 50 * 1024 ** 3; // 50 GB (o Google aceita até 5 TB; aqui é bom senso)
@@ -251,7 +252,7 @@ async function repassarPedaco(req, res) {
 
 // ── Handler ─────────────────────────────────────────────────────────────────
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method === 'GET') {
     const q = req.query || Object.fromEntries(new URL(req.url, 'http://x').searchParams);
     try {
@@ -474,3 +475,5 @@ export default async function handler(req, res) {
 }
 
 export const _interno = { ehDoMarketing, linhaParaTela, tipoDe };
+
+export default comSentry(handler);

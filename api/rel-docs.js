@@ -19,6 +19,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
+import { comSentry } from './_sentry.js';
 
 const BUCKET = 'rel-documentos';
 const MAX_BYTES = 15 * 1024 * 1024;
@@ -48,7 +49,7 @@ async function pedidoDoToken(token) {
 
 const expirado = (p) => new Date(p.expira_em).getTime() < Date.now();
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   const body = req.method === 'POST' ? (typeof req.body === 'string' ? safeParse(req.body) : (req.body || {})) : {};
   const token = String((req.method === 'GET' ? req.query?.token : body.token) || '').trim().toLowerCase();
@@ -165,3 +166,5 @@ export default async function handler(req, res) {
 
   return res.status(400).json({ error: 'Ação inválida.' });
 }
+
+export default comSentry(handler);

@@ -15,6 +15,7 @@
 // lead-inbound porque a lista de funis é informação interna.
 // -----------------------------------------------------------------------------
 import { segredoConfere } from './_supabaseAdmin.js';
+import { comSentry } from './_sentry.js';
 
 function base() {
   return (process.env.BITRIX_WEBHOOK_BASE || '').trim().replace(/\/+$/, '');
@@ -41,7 +42,7 @@ async function chamar(metodo, params = {}) {
   }
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   const secret = process.env.LEAD_INBOUND_SECRET;
@@ -96,3 +97,5 @@ export default async function handler(req, res) {
     return res.status(502).json({ ok: false, error: e?.message || 'falha ao falar com o Bitrix' });
   }
 }
+
+export default comSentry(handler);

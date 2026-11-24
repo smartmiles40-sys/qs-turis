@@ -56,6 +56,7 @@ import { conferirRespostas, urlSegura } from './_relDisparoRegras.js';
 import { rodadaFluxosRel, iniciarTesteRel, agendarDisparoFluxo, cancelarDisparoFluxo, modelosParaFluxo } from './_relFluxoMotor.js';
 import { simularFluxo } from './_mktAutoRegras.js';
 import { coordenaSetor } from './_coordena.js';
+import { comSentry } from './_sentry.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SETORES = ['comercial', 'relacionamento', 'marketing'];
@@ -112,7 +113,7 @@ function pacoteDaMeta(m) {
   return { name: m.nome, category: m.categoria, language: m.idioma || 'pt_BR', components };
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   // ── Cron ──
   if (req.method === 'GET') {
     // 0414: link do bloco Mensagem de um fluxo do Rel (/l/f/<execução>/<bloco>).
@@ -449,3 +450,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: e?.message || 'Falhou.' });
   }
 }
+
+export default comSentry(handler);

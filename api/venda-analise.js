@@ -29,6 +29,7 @@
 import { rest } from './_supabaseAdmin.js';
 import { getSupabaseUserId } from './_wa.js';
 import { conferirVenda, fecharAnalise, materialParaIa, textoDoExtrato, lerRespostaIa, RISCOS_IA, INSTRUCAO_IA } from './_vendaConferencia.js';
+import { comSentry } from './_sentry.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SETORES_OK = ['comercial', 'relacionamento', 'operacoes', 'operacional', 'financeiro'];
@@ -293,7 +294,7 @@ async function gravar(vendaId, analise, u, motivo) {
   }
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Use POST.' }); }
   const u = await quemPode(req).catch(() => null);
@@ -316,3 +317,5 @@ export default async function handler(req, res) {
     return res.status(e?.nosso ? e.status : 500).json({ error: e?.nosso ? e.message : 'Falhou a análise pós-venda.' });
   }
 }
+
+export default comSentry(handler);

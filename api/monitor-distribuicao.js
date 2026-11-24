@@ -17,6 +17,7 @@
 // Sem datas: últimos 7 dias (fuso de São Paulo), hoje incluído.
 // -----------------------------------------------------------------------------
 import { rest, segredoConfere } from './_supabaseAdmin.js';
+import { comSentry } from './_sentry.js';
 
 const DATA_RE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -27,7 +28,7 @@ function hojeSP(deslocDias = 0) {
   return d.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return res.status(405).json({ success: false, error: 'Use GET' });
@@ -66,3 +67,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ success: false, error: 'Falha ao montar o monitor' });
   }
 }
+
+export default comSentry(handler);

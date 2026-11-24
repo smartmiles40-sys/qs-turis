@@ -26,6 +26,7 @@ import { janelaAberta, registrarSaida, numeroDoEnvio } from './_waSaida.js';
 import { guardarMidia, rotuloDaMidia } from './_waMidia.js';
 import { pediuParaParar } from './_waOptout.js';
 import { webmParaOggBytes, ehWebm } from './_opusRemux.js';
+import { comSentry } from './_sentry.js';
 
 const MAX_BYTES = 3 * 1024 * 1024;
 
@@ -62,7 +63,7 @@ function urlDoNossoBucket(url) {
   return Boolean(base) && url.startsWith(`${base}/storage/v1/object/public/wa-midia/`);
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Use POST' });
@@ -197,3 +198,5 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: 'Não consegui enviar o arquivo. Tente de novo.' });
   }
 }
+
+export default comSentry(handler);

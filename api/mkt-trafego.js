@@ -19,6 +19,7 @@ import { getSupabaseUserId } from './_wa.js';
 import { faltaConfigurar } from './_metaAds.js';
 import { pulso } from './_rotinaPulso.js';
 import { sincronizar, agir, montarPainel, reativar } from './_mktTrafegoMotor.js';
+import { comSentry } from './_sentry.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function safeParse(s) { try { return JSON.parse(s); } catch { return {}; } }
@@ -47,7 +48,7 @@ export function podeEditar(u) {
   return ehDoMarketing(u);
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'GET') {
@@ -116,3 +117,5 @@ export default async function handler(req, res) {
     return res.status(e?.status && e.status < 500 ? e.status : 500).json({ error: String(e?.message || 'Falhou.').slice(0, 300) });
   }
 }
+
+export default comSentry(handler);

@@ -25,6 +25,7 @@
 import { rest } from './_supabaseAdmin.js';
 import { getSupabaseUserId } from './_wa.js';
 import { INSTRUCAO, MODELOS_IA, esquemaProposta, textoDoPedido, validarExtracao } from './_propostaIa.js';
+import { comSentry } from './_sentry.js';
 
 const BUCKET = 'propostas-insumos';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -124,7 +125,7 @@ async function chamarOpenAi({ modelo, campos, conteudoUsuario, prazo }) {
   return { lido, uso: { entrada: j?.usage?.prompt_tokens ?? null, saida: j?.usage?.completion_tokens ?? null, modelo: j?.model || process.env.OPENAI_MODEL || 'gpt-4o-mini' } };
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Use POST' }); }
   if (!iaLigada()) return res.status(503).json({ error: 'Montar proposta com IA pelo QS: em breve.', em_breve: true });
@@ -196,3 +197,5 @@ export default async function handler(req, res) {
     });
   }
 }
+
+export default comSentry(handler);

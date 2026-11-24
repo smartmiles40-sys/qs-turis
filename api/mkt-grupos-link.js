@@ -15,6 +15,7 @@
 
 import { rest } from './_supabaseAdmin.js';
 import { slugValido, ehRobo, conviteValido, paginaHtml } from './_mktGruposLinkRegras.js';
+import { comSentry } from './_sentry.js';
 
 const REF = /^[0-9a-f]{12}$/;
 
@@ -34,7 +35,7 @@ function html(res, status, corpo) {
   return res.status(status).send(corpo);
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.setHeader('Allow', 'GET'); return res.status(405).end(); }
   const slug = String(req.query?.slug || '').trim().toLowerCase();
   if (!slugValido(slug)) return html(res, 404, paginaHtml({ titulo: 'Link não encontrado', texto: 'Confira o endereço e tente de novo.' }));
@@ -71,3 +72,5 @@ export default async function handler(req, res) {
   if (status === 'aguarde') return html(res, 200, paginaHtml({ titulo, texto: 'Os grupos lotaram e estamos abrindo um novo. Esta página tenta de novo sozinha em 30 segundos.', recarregarEm: 30 }));
   return html(res, 200, paginaHtml({ titulo: 'Grupos lotados', texto: r?.mensagem || 'Todos os grupos deste link estão cheios. Fique de olho nas nossas redes: logo abrimos mais vagas.' }));
 }
+
+export default comSentry(handler);

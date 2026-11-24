@@ -60,6 +60,7 @@ import { montarChecklistPadrao } from './_expChecklist.js';
 import { rodarEspelho } from './_expEspelho.js';
 import { sincronizarBitrixUma, sincronizarTodas } from './_expBitrixSync.js';
 import { gerarLinkAmigo, liberarTodosAmigo, linkDoPassageiro, statusAmigo, espelhoLigado } from './_expAcesso.js';
+import { comSentry } from './_sentry.js';
 
 const PORTAL_PADRAO = 'https://sistema-expedicoes.vercel.app';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -447,7 +448,7 @@ const WEBHOOKS = {
   'onboarding-diario': onboardingDiario,
 };
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   const acao = String(req.query?.acao || '');
   try {
     if (acao === 'health') return res.status(200).json({ ok: true, service: 'qs-expedicoes', time: new Date().toISOString() });
@@ -508,3 +509,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, error: e?.message || 'Erro interno' });
   }
 }
+
+export default comSentry(handler);

@@ -28,8 +28,9 @@
 // -----------------------------------------------------------------------------
 
 import { portaria, corpo, buscarLead, devolverProTime } from './_gloria.js';
+import { comSentry } from './_sentry.js';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Use POST' });
@@ -86,3 +87,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Falha ao transferir', detalhe: e?.message });
   }
 }
+
+export default comSentry(handler);

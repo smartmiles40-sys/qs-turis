@@ -13,10 +13,14 @@
 // os leads já criados) não foi tocado.
 // -----------------------------------------------------------------------------
 
-export default async function handler(req, res) {
+import { comSentry } from './_sentry.js';
+
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   return res.status(410).json({
     error: 'A recompra não vai mais para o Comercial: o cliente fica com o Relacionamento. '
       + 'Crie a oportunidade no Pipeline de vendas do Rel (atualize a página).',
   });
 }
+
+export default comSentry(handler);

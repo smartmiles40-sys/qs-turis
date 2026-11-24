@@ -24,8 +24,9 @@
 
 import { getSupabaseUserId } from './_wa.js';
 import { rodarFilaDeToques, saudeDaFila, portaria } from './_gloria.js';
+import { comSentry } from './_sentry.js';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Use GET' });
@@ -57,3 +58,5 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: false, erro: e?.message || 'falha', saude: await saudeDaFila().catch(() => null) });
   }
 }
+
+export default comSentry(handler);

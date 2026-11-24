@@ -27,6 +27,7 @@ import { gravarRel } from './_relEntrada.js';
 import { quemChama, numeroDoRelacionamento, numeroConectado } from './_relWa.js';
 import { envioRealLigado, processarSemEnvio } from './_relAutomacoes.js';
 import { coordenaSetor } from './_coordena.js';
+import { comSentry } from './_sentry.js';
 
 const LOTE = 20;
 const PAUSA_MS = 250;
@@ -311,7 +312,7 @@ async function rodarAutomacoes({ limiteMs = 50_000 } = {}) {
 
 // ── Rota ────────────────────────────────────────────────────────────────────
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   cacheViagem.clear(); // destino/data podem ter mudado desde a última execução
   // Vercel Cron: GET com o Bearer do CRON_SECRET.
   if (req.method === 'GET') {
@@ -398,3 +399,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: e?.message || 'Falhou.' });
   }
 }
+
+export default comSentry(handler);

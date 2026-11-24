@@ -25,6 +25,7 @@
 import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { getSupabaseUserId, assertCanAccessLead } from './_wa.js';
 import { bx, bitrixConfigurado, comentarNoNegocio, passarNegocioPara, atualizarNegocioComFunil } from './_bitrixLead.js';
+import { comSentry } from './_sentry.js';
 
 // Colunas lidas do portal em 21/09/2026 (crm.dealcategory.stage.list).
 // Se alguém recriar a coluna no Bitrix, o id muda: atualizar AQUI.
@@ -258,7 +259,7 @@ export async function processarVencidas(teto = 20) {
 
 // ── Handler ──────────────────────────────────────────────────────────────────
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   // Vercel Cron: GET com o Bearer do CRON_SECRET.
   if (req.method === 'GET') {
     const segredo = String(process.env.CRON_SECRET || '').trim();
@@ -336,3 +337,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Não consegui salvar. Tente de novo.' });
   }
 }
+
+export default comSentry(handler);

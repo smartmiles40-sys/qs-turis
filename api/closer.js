@@ -89,6 +89,7 @@ import {
 import {
   ativasDaVenda, decidirEnvio, linhaParaTela, planoDaFamilia, responsavelDaLinha, resumoDosContratos, statusDasLinhas, viajanteDaLinha,
 } from './_contratoFamilia.js';
+import { comSentry } from './_sentry.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 async function quemChama(req) {
@@ -734,7 +735,7 @@ async function acaoDeContrato(acao, req, u, body) {
   return null;
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   // req.query vem da Vercel; a ponte do `vite dev` não preenche — lê da URL também.
   const acaoQ = String(req.query?.acao || new URL(req.url || '', 'http://x').searchParams.get('acao') || '');
   // Entradas SEM usuário logado (cada uma com a própria trava).
@@ -823,3 +824,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: e?.message || 'Falhou.' });
   }
 }
+
+export default comSentry(handler);

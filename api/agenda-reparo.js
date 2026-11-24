@@ -80,6 +80,7 @@ import { criarSalaDoMeet, enviarReuniaoAoBitrix } from './_agenda.js';
 import { googleConfigurado, motivoNaoConfigurado } from './_google.js';
 import { bitrixConfigurado } from './_bitrixLead.js';
 import rotaBitrixSync from './bitrix-sync.js';
+import { comSentry } from './_sentry.js';
 
 const MAX_TENTATIVAS = 5;
 /** Espera (min) antes da tentativa n+1, onde n = tentativas já feitas. */
@@ -420,7 +421,7 @@ async function tentarDesfecho(m, agora) {
 
 // ─── Rota ────────────────────────────────────────────────────────────────────
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).json({ error: 'Use GET' });
   const segredo = String(process.env.CRON_SECRET || '').trim();
@@ -443,3 +444,5 @@ export default async function handler(req, res) {
   const quebrou = saida.meet?.erro && saida.bitrix?.erro;
   return res.status(quebrou ? 500 : 200).json(saida);
 }
+
+export default comSentry(handler);

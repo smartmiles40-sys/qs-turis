@@ -15,6 +15,7 @@
 
 import crypto from 'node:crypto';
 import { processarWebhookInstagram } from './_mktInstagram.js';
+import { comSentry } from './_sentry.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -37,7 +38,7 @@ export function assinaturaConfere(raw, cabecalho, segredo) {
   return a.length === b.length && a.length > 0 && crypto.timingSafeEqual(a, b);
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method === 'GET') {
     const token = String(process.env.MKT_IG_VERIFY_TOKEN || '').trim();
     const q = req.query || {};
@@ -67,3 +68,5 @@ export default async function handler(req, res) {
   if (r?.erros?.length) console.error('[mkt-instagram] erros:', r.erros.slice(0, 5));
   return res.status(200).json({ ok: true, ...(r?.desligado ? { desligado: true } : {}) });
 }
+
+export default comSentry(handler);

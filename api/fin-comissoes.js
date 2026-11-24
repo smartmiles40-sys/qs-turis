@@ -23,6 +23,7 @@
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { getSupabaseUserId } from './_wa.js';
 import { pulso } from './_rotinaPulso.js';
+import { comSentry } from './_sentry.js';
 
 const LOTE = 500;
 
@@ -104,7 +105,7 @@ async function podeAtualizar(req) {
   return !!u?.is_active && (u.role === 'admin' || (Array.isArray(u.setores) && u.setores.includes('financeiro')));
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET' && req.method !== 'POST') {
     res.setHeader('Allow', 'GET, POST');
@@ -138,3 +139,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, error: e?.message });
   }
 }
+
+export default comSentry(handler);

@@ -31,6 +31,7 @@ import {
 import { montarEmail } from './_mktEmailMontar.js';
 import { rodar } from './_mktEmailMotor.js';
 import { UUID, limparPublico, limparPesos, emailValido, remetenteDoDominio } from './_mktEmailRegras.js';
+import { comSentry } from './_sentry.js';
 
 function temAcesso(u) {
   if (!u?.is_active) return false;
@@ -94,7 +95,7 @@ async function corpoJson(req) {
   try { return JSON.parse(req.body || '{}'); } catch { return {}; }
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   // ── Cron ──
   if (req.method === 'GET') {
     const segredo = String(process.env.CRON_SECRET || '').trim();
@@ -311,3 +312,5 @@ export default async function handler(req, res) {
     return res.status(status).json({ error: e?.details?.message || e.message || 'Falhou.' });
   }
 }
+
+export default comSentry(handler);

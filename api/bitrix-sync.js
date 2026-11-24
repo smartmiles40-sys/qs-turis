@@ -31,6 +31,7 @@ import { gravarGanhoNoBitrix, enviarReuniaoDireto } from './_bitrixSaida.js';
 import { deveLevarParaReuniao } from './_bitrixSaidaRegras.js';
 import { garantirCardDoLead, marcarFalha } from './_leadCardBitrix.js';
 import { coordenaSetor } from './_coordena.js';
+import { comSentry } from './_sentry.js';
 
 // 'primeiro-contato' (2026-07-28): o SDR conclui a 1ª atividade no QS e o negócio
 // anda sozinho de "Novo lead" para "Follow-up 1" no Bitrix. Quem decide se move é
@@ -410,7 +411,7 @@ async function podeMexerNoLead(userId, lead, leadId) {
   return { ok: false, reason: 'lead-de-outro-sdr' };
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ success: false, error: 'Use POST' });
@@ -680,3 +681,5 @@ async function levarParaReuniao(bitrixId) {
 function safeJson(s) {
   try { return JSON.parse(s); } catch { return {}; }
 }
+
+export default comSentry(handler);

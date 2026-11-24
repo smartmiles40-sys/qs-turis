@@ -23,6 +23,7 @@ import { rest } from './_supabaseAdmin.js';
 import {
   FORMATOS, faltasDoPlanejamento, textoDasFaltas, periodoValido, exportarGoogleDocs, normalizarItemIa,
 } from './_mktPlanRegras.js';
+import { comSentry } from './_sentry.js';
 
 // Upload direto vai no corpo da requisição (a Vercel corta em ~4,5 MB; base64 = +33%).
 const MAX_PDF_UPLOAD = 3 * 1024 * 1024;
@@ -256,7 +257,7 @@ async function lerPlanejamento(plan) {
 
 // ── Handler ─────────────────────────────────────────────────────────────────
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   const acao = String(req.query?.acao || '');
   try {
     if (acao === 'login') {
@@ -427,3 +428,5 @@ export default async function handler(req, res) {
     return json(res, e?.status && e.status < 500 ? e.status : 500, { erro: String(e?.message || 'Erro').slice(0, 300) });
   }
 }
+
+export default comSentry(handler);

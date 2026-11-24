@@ -32,6 +32,7 @@
 import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { procurarNegocioPorTelefone, bitrixConfigurado } from './_bitrixLead.js';
 import { rodadaRetentativa } from './_leadCardBitrix.js';
+import { comSentry } from './_sentry.js';
 
 /** Quanto tempo entre o card e a reunião ainda conta como "o mesmo evento". */
 const JANELA_MS = 48 * 60 * 60 * 1000;
@@ -56,7 +57,7 @@ function autorizadoParaRotina(req) {
 
 const sim = (v) => v === '1' || v === 'true';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   // ── CARD DO LEAD NO BITRIX: NOVA TENTATIVA (12/11/2026, 0362) ──────────────
@@ -220,3 +221,5 @@ export default async function handler(req, res) {
     leads: saida,
   });
 }
+
+export default comSentry(handler);

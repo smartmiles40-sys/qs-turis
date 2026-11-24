@@ -17,13 +17,15 @@
 //   (sem d/c, o destino é deduzido do Referer)
 // -----------------------------------------------------------------------------
 
+import { comSentry } from './_sentry.js';
+
 function texto(v, max) {
   if (v == null) return '';
   // eslint-disable-next-line no-control-regex
   return String(Array.isArray(v) ? v[0] : v).replace(/[\x00-\x1F\x7F]/g, ' ').trim().slice(0, max);
 }
 
-export default function handler(req, res) {
+function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.setHeader('Allow', 'GET, HEAD');
@@ -67,3 +69,5 @@ export default function handler(req, res) {
 </body>
 </html>`);
 }
+
+export default comSentry(handler);

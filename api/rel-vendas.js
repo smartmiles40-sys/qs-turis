@@ -14,8 +14,9 @@
 // -----------------------------------------------------------------------------
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
+import { comSentry } from './_sentry.js';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).json({ error: 'Use GET' });
   const segredo = String(process.env.CRON_SECRET || '').trim();
@@ -36,3 +37,5 @@ export default async function handler(req, res) {
   console.log(`[rel-vendas] ${JSON.stringify(saida)}`);
   return res.status(saida.erroGerar || saida.erroLembretes ? 500 : 200).json(saida);
 }
+
+export default comSentry(handler);

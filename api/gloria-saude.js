@@ -46,6 +46,7 @@ import { saudeDaFila } from './_gloria.js';
 import { CHAVE_TEMPLATE, CHAVE_TETO, abordagensDeHoje } from './_abordagem.js';
 import { ENVS_GOOGLE, ErroGoogle, envsGoogleFaltando, obterTokenGoogle } from './_google.js';
 import { calendarioPadrao } from './_googleAgenda.js';
+import { comSentry } from './_sentry.js';
 
 const TIMEOUT_MS = 6_000;
 
@@ -307,7 +308,7 @@ async function ultimosTropecos() {
 
 // ── Rota ────────────────────────────────────────────────────────────────────
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   let userId;
   try {
     userId = await getSupabaseUserId(req.headers.authorization);
@@ -344,3 +345,5 @@ export default async function handler(req, res) {
   res.setHeader('Allow', 'GET, POST');
   return res.status(405).json({ error: 'Use GET ou POST' });
 }
+
+export default comSentry(handler);

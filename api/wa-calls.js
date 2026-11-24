@@ -62,6 +62,7 @@ import {
   gravarPermissao, lerRespostaDePermissao, permissaoPorLigacaoDoCliente,
   moverParaCadenciaDePermissao,
 } from './_permissaoLigacao.js';
+import { comSentry } from './_sentry.js';
 
 // Sem isto o corpo chega parseado e a assinatura da Meta é inconferível: o HMAC
 // é sobre os BYTES, e reserializar o JSON muda espaços e ordem de chaves.
@@ -136,7 +137,7 @@ function assinaturaConfere(raw, cabecalho, segredo) {
   return { ok, motivo: ok ? null : 'digest-diferente', hexRecebido, hexEsperado };
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   // ── Handshake: a Meta chama uma vez, ao salvar a URL ──────────────────────
   if (req.method === 'GET') {
     const token = String(process.env.META_CALLS_VERIFY_TOKEN || '').trim();
@@ -448,3 +449,5 @@ export default async function handler(req, res) {
   await pulsoPendente;
   return res.status(200).json({ ok: true, gravados });
 }
+
+export default comSentry(handler);

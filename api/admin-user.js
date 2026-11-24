@@ -25,6 +25,7 @@
 import { randomBytes } from 'node:crypto';
 import { rest } from './_supabaseAdmin.js';
 import { comentarNoNegocio, bitrixConfigurado } from './_bitrixLead.js';
+import { comSentry } from './_sentry.js';
 
 // Todo id que entra em filtro do PostgREST PRECISA passar por aqui. Sem isto,
 // `qs_users?id=eq.${user.id}` aceitava o ALVO escolhido pelo cliente: um id
@@ -97,7 +98,7 @@ async function verifyCaller(accessToken) {
   return u?.id || null;
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ success: false, error: 'Use POST' });
@@ -570,3 +571,5 @@ export function montarComentarioInscricao(p, exp, anteriores) {
   ];
   return linhas.filter(Boolean).join('\n');
 }
+
+export default comSentry(handler);

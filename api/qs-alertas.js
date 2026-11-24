@@ -53,6 +53,7 @@
 
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { checarRotinas } from './_rotinaPulso.js';
+import { comSentry } from './_sentry.js';
 
 const MIN = 60_000;
 const HORA = 60 * MIN;
@@ -439,7 +440,7 @@ const CHECAGENS = {
   pessoas_sem_bitrix: checarPessoas,
 };
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).json({ error: 'Use GET' });
   const segredo = String(process.env.CRON_SECRET || '').trim();
@@ -504,3 +505,5 @@ export default async function handler(req, res) {
   console.log(`[qs-alertas] ${JSON.stringify({ alertas: saida.alertas.map((a) => a.id), enviados: saida.enviados || [], erros: saida.erros })}`);
   return res.status(200).json(saida);
 }
+
+export default comSentry(handler);

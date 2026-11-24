@@ -43,6 +43,7 @@ import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { bx, bitrixConfigurado } from './_bitrixLead.js';
 import { getSupabaseUserId } from './_wa.js';
 import { baixarArquivos, enfileirarArquivos } from './_relBitrixArquivos.js';
+import { comSentry } from './_sentry.js';
 
 const ORCAMENTO_MS = 50_000;
 const ETAPAS_VENDA = new Set(['WON', 'UC_70BW8E']);
@@ -773,7 +774,7 @@ async function quemChama(req) {
 
 function safeParse(s) { try { return JSON.parse(s); } catch { return {}; } }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (!bitrixConfigurado()) return res.status(503).json({ error: 'Falta BITRIX_WEBHOOK_BASE na Vercel.' });
 
   // Cron da Vercel
@@ -837,3 +838,5 @@ export default async function handler(req, res) {
 
 // Só para teste local (sem banco): as regras puras de leitura do Bitrix.
 export const _regras = { camposDaViagem, dadosDaPessoa, idPai, rotulos, telefoneNormal, cpfValido };
+
+export default comSentry(handler);

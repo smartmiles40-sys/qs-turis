@@ -32,6 +32,7 @@
 import { rest, segredoConfere } from './_supabaseAdmin.js';
 import { comentarNoNegocio, bitrixConfigurado } from './_bitrixLead.js';
 import { getSupabaseUserId } from './_wa.js';
+import { comSentry } from './_sentry.js';
 
 const FUSO = 'America/Sao_Paulo';
 
@@ -106,7 +107,7 @@ export function montarComentario({ dia, mensagens, nomeLead }) {
   return `${corpo}\n\n— enviado automaticamente pelo QS`;
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST' && req.method !== 'GET') {
     res.setHeader('Allow', 'POST, GET');
     return res.status(405).json({ error: 'Use POST' });
@@ -270,3 +271,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: e?.message || 'erro' });
   }
 }
+
+export default comSentry(handler);

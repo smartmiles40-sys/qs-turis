@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 import path from "path";
 import fs from "fs";
 import { pathToFileURL } from "url";
@@ -107,7 +108,22 @@ export default defineConfig(({ mode, command }) => {
   }
 
   return {
-    plugins: [react(), devApiBridge(), versaoDoBuild()],
+    plugins: [
+      react(),
+      devApiBridge(),
+      versaoDoBuild(),
+      // Source maps pro Sentry (só no build com SENTRY_AUTH_TOKEN, ou seja, na Vercel).
+      // Os .map sobem pro Sentry e são apagados do dist — o público não vê o código.
+      ...(command === "build" && process.env.SENTRY_AUTH_TOKEN
+        ? [sentryVitePlugin({
+            org: "se-tu-for-eu-vou-tecnologia",
+            project: "qs-turis-frontend",
+            authToken: process.env.SENTRY_AUTH_TOKEN,
+            sourcemaps: { filesToDeleteAfterUpload: ["./dist/**/*.map"] },
+            telemetry: false,
+          })]
+        : []),
+    ],
     // Em dev fica vazio: sem build não há version.json e o vigia não liga.
     define: {
       __QS_VERSAO__: JSON.stringify(command === "build" ? VERSAO_DO_BUILD : ""),
@@ -121,6 +137,8 @@ export default defineConfig(({ mode, command }) => {
       port: 3000,
     },
     build: {
+      // "hidden": gera os .map pro Sentry sem apontar pra eles no JS servido.
+      sourcemap: process.env.SENTRY_AUTH_TOKEN ? "hidden" : false,
       rollupOptions: {
         output: {
           // Separa as libs pesadas do código do app: carrega mais rápido e

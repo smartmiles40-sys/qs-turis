@@ -24,6 +24,7 @@
 import { rest } from './_supabaseAdmin.js';
 import { pulso } from './_rotinaPulso.js';
 import { quemChama } from './_relWa.js';
+import { comSentry } from './_sentry.js';
 
 const BUCKET = 'rel-documentos';
 const TIPOS_IA = ['passaporte', 'rg_cnh', 'visto', 'vacina', 'seguro'];
@@ -351,7 +352,7 @@ async function conferirLote(filtro) {
 
 // ── Rota ────────────────────────────────────────────────────────────────────
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   const temChave = Boolean(String(process.env.OPENAI_API_KEY || '').trim());
 
@@ -400,3 +401,5 @@ export default async function handler(req, res) {
     });
   }
 }
+
+export default comSentry(handler);

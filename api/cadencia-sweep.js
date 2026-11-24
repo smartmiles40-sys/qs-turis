@@ -44,6 +44,7 @@
 import { rest, insert, segredoConfere } from './_supabaseAdmin.js';
 import { generateCadenceTasks } from './_leads.js';
 import { bitrixConfigurado } from './_bitrixLead.js';
+import { comSentry } from './_sentry.js';
 
 const enc = encodeURIComponent;
 const ABERTOS = ['nao_iniciado', 'em_prospeccao'];
@@ -313,7 +314,7 @@ async function encerrar({ lead, regra }) {
   return true;
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).json({ error: 'Use GET' });
   const segredo = String(process.env.CRON_SECRET || '').trim();
@@ -398,3 +399,5 @@ export default async function handler(req, res) {
   // 500 só quando TUDO o que tentou falhou (aí o alerta da Vercel serve pra algo).
   return res.status(tentadas > 0 && feito.erros === tentadas ? 500 : 200).json(saida);
 }
+
+export default comSentry(handler);

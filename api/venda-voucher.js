@@ -37,6 +37,7 @@
 import { rest } from './_supabaseAdmin.js';
 import { getSupabaseUserId } from './_wa.js';
 import { LEITURA, INSTRUCAO, montarVenda } from './_vendaVoucher.js';
+import { comSentry } from './_sentry.js';
 
 const MAX_ARQUIVOS = 6;
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -171,7 +172,7 @@ async function cadastroDe(body) {
   return lista;
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Use POST.' }); }
 
@@ -200,3 +201,5 @@ export default async function handler(req, res) {
     return res.status(e?.nosso ? e.status : 500).json({ error: e?.nosso ? e.message : 'Falhou a leitura do voucher.' });
   }
 }
+
+export default comSentry(handler);

@@ -26,6 +26,7 @@ import { enviarTexto } from './_meta.js';
 import { janelaAberta, registrarSaida } from './_waSaida.js';
 import { portaria, corpo, buscarLead, sessao, registrar, pausar, ASSINATURA_IA } from './_gloria.js';
 import { rodadaVazou } from './_vazamento.js';
+import { comSentry } from './_sentry.js';
 
 const MAX_BALOES = 3;
 const MAX_LEN = 900;
@@ -53,7 +54,7 @@ async function jaMandou(leadId, texto) {
   }
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Use POST' });
@@ -260,3 +261,5 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: 'Não consegui enviar a mensagem.' });
   }
 }
+
+export default comSentry(handler);

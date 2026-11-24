@@ -38,6 +38,7 @@ import { entregarAGloria } from './_gloriaEntrada.js';
 import { conferirDuplicado, marcarComoDuplicado } from './_porteiroWhatsApp.js';
 import { findLeadByPhone } from './_wa.js';
 import { dispararPrimeiroContato, lerConfig, gatilhoDe, pularPorSerLp } from './_primeiroContato.js';
+import { comSentry } from './_sentry.js';
 
 // UUID v4 (formato geral de UUID). cadence_id/owner_id inválidos antes iam
 // direto pra querystring do PostgREST e o caller recebia o erro cru do banco.
@@ -62,7 +63,7 @@ async function cadenciaDaLista(apelido) {
   return typeof id === 'string' && UUID_RE.test(id) ? id : null;
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method === 'GET') {
     // Health check público continua mudo. COM o segredo, devolve os apelidos de
     // lista configurados — é como conferir se a URL nova está de pé antes de
@@ -316,3 +317,5 @@ export default async function handler(req, res) {
 function safeJson(s) {
   try { return JSON.parse(s); } catch { return {}; }
 }
+
+export default comSentry(handler);

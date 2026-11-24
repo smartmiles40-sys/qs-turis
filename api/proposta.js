@@ -21,6 +21,7 @@
 // -----------------------------------------------------------------------------
 
 import { rest } from './_supabaseAdmin.js';
+import { comSentry } from './_sentry.js';
 
 const TOKEN = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -72,7 +73,7 @@ async function montarVM(p) {
   };
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   // A Vercel preenche req.query; a ponte do `vite dev` não — lê da URL.
   if (!req.query) req.query = Object.fromEntries(new URL(req.url || '/', 'http://x').searchParams);
@@ -142,3 +143,5 @@ export default async function handler(req, res) {
   }
   return res.status(200).json({ ok: true });
 }
+
+export default comSentry(handler);

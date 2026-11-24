@@ -26,6 +26,7 @@ import { getSupabaseUserId, assertCanAccessLead } from './_wa.js';
 import { segredoConfere } from './_supabaseAdmin.js';
 import { corpo, buscarLead } from './_gloria.js';
 import { abordar } from './_abordagem.js';
+import { comSentry } from './_sentry.js';
 
 /**
  * O motivo cru vira frase. Cada uma dessas linhas existe porque o motivo cru
@@ -49,7 +50,7 @@ const EXPLICACAO = {
   ultima_mensagem_sem_texto: 'A última mensagem dele é áudio/imagem sem texto: ela não tem o que responder.',
 };
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Use POST' });
@@ -103,3 +104,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Falha ao abordar', detalhe: e?.message });
   }
 }
+
+export default comSentry(handler);

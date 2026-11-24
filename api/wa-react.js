@@ -25,12 +25,13 @@ import { assertCanAccessLead, getSupabaseUserId, signatureName, nomeCurto } from
 import { rest } from './_supabaseAdmin.js';
 import { enviarReacao, marcarComoLida } from './_meta.js';
 import { numeroDoEnvio } from './_waSaida.js';
+import { comSentry } from './_sentry.js';
 
 function safeParse(s) {
   try { return JSON.parse(s); } catch { return {}; }
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Use POST' });
@@ -154,3 +155,5 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: 'Não consegui registrar a reação. Tente de novo.' });
   }
 }
+
+export default comSentry(handler);

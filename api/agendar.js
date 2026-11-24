@@ -60,6 +60,7 @@ import {
   marcarLigacao,
 } from './_ligacaoSdr.js';
 import { utmDoCorpo, codigoDoCorpo, linhaDeRastro, lerLink, registrarUso, utmNoCardExistente } from './_linkAgendamento.js';
+import { comSentry } from './_sentry.js';
 
 // Mesma última linha de defesa do /api/lead: se qs_settings sumir ou vier
 // corrompido, a página não para de funcionar.
@@ -289,7 +290,7 @@ async function reuniaoQueJaExiste(leadId, agora) {
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   const origin = req.headers.origin || '';
   const { cfg, origens, teto } = await lerConfig();
   const permitido = origemPermitida(origin, origens, proprioOrigin(req));
@@ -869,3 +870,5 @@ async function compromissoPeloTelefone(telefone, agora) {
   }
   return null;
 }
+
+export default comSentry(handler);

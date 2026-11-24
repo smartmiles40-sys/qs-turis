@@ -27,6 +27,7 @@ import { rest } from './_supabaseAdmin.js';
 import { getSupabaseUserId, assertCanAccessLead } from './_wa.js';
 import { googleConfigurado, motivoNaoConfigurado } from './_google.js';
 import { executarAcaoAgenda } from './_googleAgenda.js';
+import { comSentry } from './_sentry.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACOES = new Set(['criar', 'reagendar', 'cancelar']);
@@ -37,7 +38,7 @@ const ACOES = new Set(['criar', 'reagendar', 'cancelar']);
 const PRAZO_GOOGLE_MS = 18_000;
 const TIMEOUT_CHAMADA_MS = 10_000;
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ ok: false, erro: 'Use POST' });
@@ -221,3 +222,5 @@ async function marcarErro(meetingId, motivo) {
 function safeJson(s) {
   try { return JSON.parse(s); } catch { return {}; }
 }
+
+export default comSentry(handler);

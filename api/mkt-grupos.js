@@ -34,6 +34,7 @@ import {
   ehGrupo, resolverGrupos, validarCampanha, lerGrupo, lerConversas, lerMensagens,
   montarEnvio, destinoDaCaixaPermitido, traduzirErro, digitos, semNono,
 } from './_mktGruposRegras.js';
+import { comSentry } from './_sentry.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -279,7 +280,7 @@ async function caixaReagir(b) {
   return { ok: true };
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   // ── Cron ──
   if (req.method === 'GET') {
     const segredo = String(process.env.CRON_SECRET || '').trim();
@@ -451,3 +452,5 @@ export default async function handler(req, res) {
     return res.status(e?.status === 403 ? 403 : e?.trava ? 423 : 400).json({ error: msg });
   }
 }
+
+export default comSentry(handler);

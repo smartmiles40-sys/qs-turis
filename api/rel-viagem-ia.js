@@ -40,6 +40,7 @@
 import crypto from 'node:crypto';
 import { rest } from './_supabaseAdmin.js';
 import { quemChama } from './_relWa.js';
+import { comSentry } from './_sentry.js';
 
 const BUCKET = 'rel-documentos';
 // Comprovante de pagamento não tem voo nem hotel (2 mil arquivos do Bitrix) — fica fora.
@@ -739,7 +740,7 @@ async function candidatas() {
 
 // ── Rota ────────────────────────────────────────────────────────────────────
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   const temChave = Boolean(String(process.env.OPENAI_API_KEY || '').trim());
 
@@ -791,3 +792,5 @@ export default async function handler(req, res) {
 
 // teste local das regras puras
 export const _regras = { nomeDoBilhete, mesmaPessoa, paisChave, categoriaConfirmada, comFuso, mesmoTrecho, cruzar, textoDoBitrix };
+
+export default comSentry(handler);
