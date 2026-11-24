@@ -47,6 +47,8 @@ export interface VooPront {
 export interface EntradaProntidao {
   servico: string | null;
   acompanhamento: string | null;
+  /** 0359: a venda tem aéreo (pacote "Passagem Aérea: Não inclusa" = false). null/undefined = não sabe. */
+  aereoVendido?: boolean | null;
   voos: VooPront[];
   hoteis: { nome: string; noites: number | null }[];
   noitesSemHotel: number;
@@ -62,7 +64,54 @@ export interface EntradaProntidao {
   sherpa: { exigencias: { texto: string; ok: boolean }[]; pais?: string | null } | null;
 }
 
-export interface Prontidao { quadros: Quadro[]; prontos: number; aplicaveis: number; pct: number }
+export interface Prontidao {
+  /** 24/11: só os quadrinhos do que ESTA venda tem (aéreo pede voo; hotel pede voucher…). */
+  quadros: Quadro[];
+  /** os 8, como antes (testes e quem precisar do todo) */
+  todos: Quadro[];
+  /** o que a venda tem: aereo, hospedagem, passeio, seguro, documentos */
+  vendido: string[];
+  prontos: number; aplicaveis: number; pct: number;
+}
+
+/**
+ * 24/11 (Bruno): "só apareça o que fazer pra aquele tipo de venda — cadastrou um
+ * aéreo, não faz sentido pedir passeio, hospedagem…; funcionar com base no que
+ * cada um for colocando que é aquela venda (pacote, aéreo, seguro…)".
+ * O que conta, nesta ordem: os ITENS da venda (QS); sem itens (venda antiga do
+ * Bitrix), o serviço escolhido em "O que foi vendido"; e o que já está no
+ * roteiro (voo, hotel, passeio, apólice anexada) sempre entra.
+ */
+export function oQueFoiVendido(e: EntradaProntidao): Set<string> {
+  const s = new Set<string>();
+  const itens = e.itens.filter((i) => VIVO(i.status)).map((i) => i.tipo);
+  const comAereo = e.aereoVendido !== false;
+  const doServico = (sv: string | null) => {
+    if (sv === "pacote") { if (comAereo) s.add("aereo"); s.add("hospedagem"); }
+    else if (sv === "aereo" || sv === "expedicao") s.add("aereo");
+    else if (sv === "hospedagem" || sv === "passeio" || sv === "seguro") s.add(sv);
+  };
+  if (itens.length) for (const t of itens) { if (t === "pacote" || t === "expedicao") doServico(t); else s.add(t); }
+  else doServico(e.servico);
+  if (e.voos.some((v) => v.valido && !v.cancelado)) s.add("aereo");
+  if (e.hoteis.length) s.add("hospedagem");
+  if (e.passeios.length) s.add("passeio");
+  if (e.docs.some((d) => d.tipo === "seguro")) s.add("seguro");
+  // passaporte/documentos: quem viaja de avião (ou expedição/cruzeiro)
+  if (s.has("aereo") || e.servico === "expedicao" || e.servico === "cruzeiro") s.add("documentos");
+  return s;
+}
+
+const QUADRO_PRECISA: Record<Quadro["chave"], (s: Set<string>, e: EntradaProntidao) => boolean> = {
+  ida: (s) => s.has("aereo"),
+  volta: (s) => s.has("aereo"),
+  internos: (_s, e) => e.voos.some((v) => v.valido && !v.cancelado && v.papel === "interno"),
+  hospedagem: (s) => s.has("hospedagem"),
+  passeios: (s) => s.has("passeio"),
+  documentos: (s) => s.has("documentos"),
+  entrada: (s, e) => !!e.sherpa && s.has("documentos"),
+  seguro: (s) => s.has("seguro"),
+};
 
 // ── helpers puros ───────────────────────────────────────────────────────────
 
@@ -257,9 +306,11 @@ export function prontidaoDaViagem(e: EntradaProntidao, hoje: string): Prontidao 
     else q.push({ chave: "seguro", rotulo, estado: "neutro", valor: "Não registrado", detalhe: "Venda sem acompanhamento" });
   }
 
-  const aplicaveis = q.filter((x) => x.estado !== "neutro").length;
-  const prontos = q.filter((x) => x.estado === "ok").length;
-  return { quadros: q, prontos, aplicaveis, pct: aplicaveis ? Math.round((prontos / aplicaveis) * 100) : 0 };
+  const vend = oQueFoiVendido(e);
+  const quadros = q.filter((x) => QUADRO_PRECISA[x.chave](vend, e));
+  const aplicaveis = quadros.filter((x) => x.estado !== "neutro").length;
+  const prontos = quadros.filter((x) => x.estado === "ok").length;
+  return { quadros, todos: q, vendido: [...vend], prontos, aplicaveis, pct: aplicaveis ? Math.round((prontos / aplicaveis) * 100) : 0 };
 }
 
 /** O selo do topo: "Embarca em 12 dias" / "Viajando" / "Voltou". */

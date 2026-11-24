@@ -6,7 +6,8 @@
 // tempo e pisca ele.
 // -----------------------------------------------------------------------------
 import { useState } from "react";
-import { CATEGORIA, NIVEL, contar, diaBR, type Categoria, type Nivel, type Problema } from "../lib/problemas";
+import { CATEGORIA, NIVEL, diaBR, type Categoria, type Nivel, type Problema } from "../lib/problemas";
+import type { Falta } from "../lib/componentes";
 
 /** Leva até o trecho na linha do tempo (a página troca pra aba "Dia a dia" se precisar) e pisca. */
 export function irParaTrecho(id: string) {
@@ -38,15 +39,28 @@ export function SeloNivel({ nivel, n }: { nivel: Nivel; n: number }) {
   );
 }
 
-export default function AlertasViagem({ problemas, carregando }: { problemas: Problema[] | null; carregando?: boolean }) {
+/** 24/11: o "O que falta" (componentes.oQueFalta) entra junto, no mesmo cartão. */
+const GRUPO_FALTA: Record<Falta["grupo"], string> = { venda: "Venda", emissao: "Emissão", documento: "Documentos", pagamento: "Pagamento", operacao: "Geral" };
+const NIVEL_FALTA: Record<Falta["tom"], Nivel> = { danger: "alta", warn: "media", info: "info" };
+type ItemAlerta = Pick<Problema, "nivel" | "titulo" | "detalhe" | "dia" | "trechos">;
+
+export default function AlertasViagem({ problemas, faltas = [], carregando }: { problemas: Problema[] | null; faltas?: Falta[]; carregando?: boolean }) {
   const [verInfo, setVerInfo] = useState(false);
   if (problemas === null) return <div className="rel-card h-20 animate-pulse" style={{ background: "var(--card2)" }} aria-busy={carregando} />;
-  const c = contar(problemas);
-  const visiveis = problemas.filter((p) => p.nivel !== "info" || verInfo);
-  const porCat = new Map<Categoria, Problema[]>();
-  for (const p of visiveis) porCat.set(p.categoria, [...(porCat.get(p.categoria) ?? []), p]);
+  // o mesmo aviso nos dois lados (documento a conferir, nenhum voo) aparece uma vez só
+  const jaTem = (re: RegExp) => problemas.some((p) => re.test(p.titulo));
+  const faltasUnicas = faltas.filter((f) => !(f.chave === "docs_conferir" && jaTem(/documento.*confer/i)) && !(f.chave === "sem_voo" && jaTem(/nenhum voo/i)));
+  const todos: (ItemAlerta & { grupo: string })[] = [
+    ...problemas.map((p) => ({ ...p, grupo: CATEGORIA[p.categoria as Categoria] })),
+    ...faltasUnicas.map((f) => ({ nivel: NIVEL_FALTA[f.tom], titulo: f.texto, detalhe: undefined, dia: undefined, trechos: [] as string[], grupo: GRUPO_FALTA[f.grupo] ?? "Geral" })),
+  ];
+  const c = { alta: todos.filter((x) => x.nivel === "alta").length, media: todos.filter((x) => x.nivel === "media").length, info: todos.filter((x) => x.nivel === "info").length };
+  const peso: Record<Nivel, number> = { alta: 0, media: 1, info: 2 };
+  const visiveis = todos.filter((p) => p.nivel !== "info" || verInfo).sort((a, b) => peso[a.nivel] - peso[b.nivel]);
+  const porCat = new Map<string, ItemAlerta[]>();
+  for (const p of visiveis) porCat.set(p.grupo, [...(porCat.get(p.grupo) ?? []), p]);
 
-  if (!problemas.length) {
+  if (!todos.length) {
     return (
       <div className="rel-card px-4 py-3 flex items-center gap-3" style={{ borderColor: "var(--rel)", background: "var(--rel-soft)" }}>
         <span className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold" style={{ background: "var(--rel)" }} aria-hidden>✓</span>
@@ -75,7 +89,7 @@ export default function AlertasViagem({ problemas, carregando }: { problemas: Pr
       <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
         {[...porCat.entries()].map(([cat, lista]) => (
           <div key={cat} className="min-w-0">
-            <h3 className="text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: "var(--ink3)" }}>{CATEGORIA[cat]}</h3>
+            <h3 className="text-[11px] font-bold uppercase tracking-wide mb-1" style={{ color: "var(--ink3)" }}>{cat}</h3>
             <ul className="space-y-1.5">
               {lista.map((p, i) => {
                 const x = NIVEL[p.nivel];

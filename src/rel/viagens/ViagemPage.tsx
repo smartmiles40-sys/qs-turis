@@ -12,8 +12,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import {
-  ACOMPANHAMENTOS, FASES, SERVICOS, TIPOS_DOC, TIPOS_VIAGEM, adicionarPassageiro, grupoDe, hojeSP, apagarTarefa, carregarViagem, criarTarefa, dataBR, linkBitrix,
-  listarEquipeRel, listarPassageiros, listarTarefas, marcarTarefa, removerPassageiro, resumoDaVenda, salvarViagem,
+  ACOMPANHAMENTOS, FASES, SERVICOS, TIPOS_DOC, TIPOS_VIAGEM, adicionarPassageiro, hojeSP, carregarViagem, dataBR, linkBitrix,
+  listarEquipeRel, listarPassageiros, listarTarefas, removerPassageiro, resumoDaVenda, salvarViagem,
   type Passageiro, type Tarefa, type TipoDocumento, type TipoViagem, type Trecho, type Viagem, type ViagemInput,
 } from "../lib/viagens";
 import { buscarClientes, formatarTelefone, type Cliente } from "../lib/clientes";
@@ -26,23 +26,21 @@ import ArquivosViagem from "./ArquivosViagem";
 import ConformidadeViagem, { RequisitosEntrada } from "./ConformidadeViagem";
 import AlertasViagem, { CSS_PISCA } from "./AlertasViagem";
 import LinhaDoTempo from "./LinhaDoTempo";
-import EtapasViagem from "./EtapasViagem";
 import SeletorServico from "./SeletorServico";
 import { ProximoVooDestaque } from "./ProximoVoo";
-import { temEsteira } from "../lib/etapas";
 import { RevisaoViagem } from "./TrechosViagem";
 import { conferirViagens, diaLocal, mapaDasNoites, type Analise } from "../lib/problemas";
 import { codigoDe, resumirVoos } from "../lib/statusViagem";
-import { carregarComponentes, documentosDaViagem, type Componente, type DocResumo } from "../lib/componentes";
+import { carregarComponentes, documentosDaViagem, oQueFalta, pagamentoDaViagem, type Componente, type DocResumo, type ResumoPagamento } from "../lib/componentes";
 import { estadoDocumento, estadoPassaporte, noitesEntre, prontidaoDaViagem, seloEmbarque, type EstadoPront } from "../lib/prontidao";
 import { gruposDaViagem, type Grupo } from "../lib/grupos";
 import { TOM_FASE } from "./ViagensDoCliente";
 import { BotaoPedirOutroSetor, BotaoPedirPagamento, PedidosSobre } from "@/solicitacoes/PedirOutroSetor";
 import ConferirVoos from "./ConferirVoos";
-import DonoViagem, { HistoricoViagem } from "./DonoViagem";
+import { HistoricoViagem } from "./DonoViagem";
 import PreferenciasViagem from "./PreferenciasViagem";
 import FichaFechamentoResumo from "@/closer/FichaFechamentoResumo";
-import { atribuirViagens, desarquivarViagens } from "../lib/operacao";
+import { desarquivarViagens } from "../lib/operacao";
 import { podeGerirRelacionamento } from "../equipe/permissao";
 import { BotaoSubirVenda } from "@/venda/SubirVenda";
 import TudoDaViagem from "./TudoDaViagem";
@@ -63,8 +61,6 @@ function Linha({ rotulo, children }: { rotulo: string; children: ReactNode }) {
 }
 
 const moeda = (n: number | null) => (n == null ? "" : n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }));
-// dia de São Paulo — o UTC marcava "atrasada" a partir das 21h (22/10)
-const hoje = () => hojeSP();
 
 // ── Editar ──────────────────────────────────────────────────────────────────
 
@@ -173,87 +169,6 @@ function AdicionarPassageiro({ aberto, viagemId, onFechar, onAdicionado }: { abe
   );
 }
 
-// ── Jornada ─────────────────────────────────────────────────────────────────
-
-function Jornada({ viagemId, ativa, recarregarViagem }: { viagemId: string; ativa: boolean; recarregarViagem: () => void }) {
-  const { currentUser } = useQsAuth();
-  const [tarefas, setTarefas] = useState<Tarefa[] | null>(null);
-  const [nova, setNova] = useState({ titulo: "", prazo: "" });
-  const [erro, setErro] = useState<string | null>(null);
-  const [verFeitas, setVerFeitas] = useState(false);
-
-  const carregar = useCallback(() => {
-    listarTarefas(viagemId).then(setTarefas).catch((e) => { setErro(e instanceof Error ? e.message : "Falhou."); setTarefas([]); });
-  }, [viagemId]);
-  useEffect(() => { carregar(); }, [carregar]);
-
-  async function acao(fn: () => Promise<unknown>) {
-    setErro(null);
-    try { await fn(); carregar(); recarregarViagem(); } catch (e) { setErro(e instanceof Error ? e.message : "Falhou."); }
-  }
-
-  if (!tarefas) return <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando…</p>;
-  const pendentes = tarefas.filter((t) => !t.feita_em);
-  const feitas = tarefas.filter((t) => t.feita_em);
-  const h = hoje();
-
-  return (
-    <div className="space-y-2">
-      {!ativa && <Aviso>Viagem cancelada: a jornada parou.</Aviso>}
-      {pendentes.length === 0 && ativa && <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Tudo em dia. 🎉</p>}
-      <ul className="space-y-1">
-        {pendentes.map((t) => {
-          const atrasada = !!t.prazo && t.prazo < h;
-          const hojeMesmo = t.prazo === h;
-          return (
-            <li key={t.id} className="flex items-start gap-2.5 p-2 rounded-lg" style={atrasada ? { background: "var(--err-bg)" } : undefined}>
-              <input type="checkbox" className="mt-1" checked={false} onChange={() => void acao(() => marcarTarefa(t.id, true, currentUser?.id ?? ""))} aria-label={`Marcar "${t.titulo}" como feita`} />
-              <span className="flex-1 min-w-0">
-                <span className="block text-[14px]" style={{ color: atrasada ? "var(--err-ink)" : "var(--ink)" }}>{t.titulo}</span>
-                {t.descricao && <span className="block text-[12px]" style={{ color: "var(--ink3)" }}>{t.descricao}</span>}
-              </span>
-              <span className="text-[12px] whitespace-nowrap font-semibold" style={{ color: atrasada ? "var(--err-ink)" : hojeMesmo ? "var(--warn-ink)" : "var(--ink3)" }}>
-                {t.prazo ? (atrasada ? `atrasada · ${dataBR(t.prazo)}` : hojeMesmo ? "hoje" : dataBR(t.prazo)) : "sem prazo"}
-              </span>
-              {t.referencia === "manual" && (
-                <button className="text-[12px]" style={{ color: "var(--ink3)" }} title="Apagar tarefa" onClick={() => void acao(() => apagarTarefa(t.id))}>×</button>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-
-      {ativa && (
-        <div className="flex flex-wrap gap-2 pt-1">
-          <Entrada value={nova.titulo} onChange={(e) => setNova({ ...nova, titulo: e.target.value })} placeholder="Nova tarefa (ex.: confirmar transfer)" style={{ flex: "1 1 220px" }} />
-          <Entrada type="date" value={nova.prazo} onChange={(e) => setNova({ ...nova, prazo: e.target.value })} style={{ width: 160 }} />
-          <Botao disabled={nova.titulo.trim().length < 3} onClick={() => void acao(async () => { await criarTarefa(viagemId, nova.titulo.trim(), nova.prazo || null); setNova({ titulo: "", prazo: "" }); })}>Adicionar</Botao>
-        </div>
-      )}
-
-      {feitas.length > 0 && (
-        <div className="pt-1">
-          <button className="text-[12px] font-semibold" style={{ color: "var(--ink3)" }} onClick={() => setVerFeitas((x) => !x)}>
-            {verFeitas ? "Esconder" : "Ver"} {feitas.length} feita{feitas.length > 1 ? "s" : ""}
-          </button>
-          {verFeitas && (
-            <ul className="space-y-1 mt-1">
-              {feitas.map((t) => (
-                <li key={t.id} className="flex items-center gap-2.5 px-2 py-1">
-                  <input type="checkbox" checked onChange={() => void acao(() => marcarTarefa(t.id, false, currentUser?.id ?? ""))} aria-label={`Desfazer "${t.titulo}"`} />
-                  <span className="flex-1 text-[13px] line-through" style={{ color: "var(--ink3)" }}>{t.titulo}</span>
-                  <span className="text-[11px]" style={{ color: "var(--ink3)" }}>{new Date(t.feita_em!).toLocaleDateString("pt-BR")}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-      {erro && <Aviso tom="erro">{erro}</Aviso>}
-    </div>
-  );
-}
-
 // ── Página ──────────────────────────────────────────────────────────────────
 // 03/11 (Bruno, desenho "Viagem" no Claude Design): a ficha no layout novo.
 //   topo       — nome, selos (embarque, serviço · esteira), rota/datas/pax/valor,
@@ -297,6 +212,9 @@ function Prontidao({ p, carregando, children }: { p: ReturnType<typeof prontidao
           <div style={{ width: `${carregando ? 0 : p.pct}%` }} />
         </div>
       </div>
+      {!carregando && !p.quadros.length && (
+        <p className="vf-sub">Nada a preparar pelo que foi vendido. Ajuste em Mais ações → "O que foi vendido" ou lance os itens da venda.</p>
+      )}
       <div className="vf-tiles">
         {p.quadros.map((t) => (
           <div key={t.chave} className={`vf-tile vf-tile--${t.estado}`}>
@@ -339,7 +257,6 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   const [sinalPedidos, setSinalPedidos] = useState(0);
   const [addPass, setAddPass] = useState(false);
   const [maisAcoes, setMaisAcoes] = useState(false);
-  const [assumindo, setAssumindo] = useState(false);
   // o conferente (lib/problemas.ts): riscos + os trechos que a linha do tempo desenha
   const [analise, setAnalise] = useState<Analise | null>(null);
   const [aba, setAba] = useState<"dia" | "tipo">("dia");
@@ -347,6 +264,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   const [comps, setComps] = useState<Componente[] | null>(null);
   const [docs, setDocs] = useState<DocResumo[] | null>(null);
   const [tarefas, setTarefas] = useState<Tarefa[]>([]);
+  const [pag, setPag] = useState<ResumoPagamento | null>(null);
   const [grupos, setGrupos] = useState<Grupo[] | null>(null);
   // 0227/0310: o histórico de correções — de onde sai quem conferiu cada voo
   const [hist, setHist] = useState<Correcao[]>([]);
@@ -374,6 +292,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
     carregarComponentes(id).then((r) => setComps(r.itens)).catch(() => setComps([]));
     documentosDaViagem(id).then(setDocs).catch(() => setDocs([]));
     listarTarefas(id).then(setTarefas).catch(() => setTarefas([]));
+    pagamentoDaViagem(id).then(setPag).catch(() => setPag(null));
     correcoesDaViagem(id).then(setHist).catch(() => setHist([]));
   }, [id, versao]);
   const conferidos = useMemo(() => conferidosDoHistorico(hist), [hist]);
@@ -418,7 +337,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
       return a && b ? noitesEntre(a, b) : null;
     };
     return prontidaoDaViagem({
-      servico: v?.servico ?? null, acompanhamento: v?.acompanhamento ?? null,
+      servico: v?.servico ?? null, acompanhamento: v?.acompanhamento ?? null, aereoVendido: v?.aereo_vendido ?? null,
       voos: (resumo?.voos ?? []).map((x) => ({
         id: x.t.id, papel: x.papel, valido: x.valido, cancelado: x.estado === "cancelado", semHora: x.t.fonte === "bitrix",
         localizador: x.t.localizador, partida_em: x.t.partida_em, partida_fuso: x.t.partida_fuso,
@@ -437,6 +356,9 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
     }, hojeSP());
   }, [v, analise, resumo, infoVoos, comps, docs, pass, conferidos]);
 
+  // 24/11: o "O que falta" mora junto do "O que pode dar errado"
+  const faltas = useMemo(() => (v && comps ? oQueFalta(v, comps, pass, pag, docs ?? []) : []), [v, comps, pass, pag, docs]);
+
   if (erro && !v) return <div className="max-w-4xl mx-auto"><Aviso tom="erro">{erro}</Aviso></div>;
   if (!v) return <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Carregando viagem…</p>;
 
@@ -454,8 +376,6 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   const noites = noitesEntre(v.data_embarque, v.data_retorno);
   const nPax = v.qtd_passageiros || pass.length || v.passageiros;
   const carregandoPront = !analise || comps === null || docs === null;
-  const donoNome = v.responsavel_id ? (equipe.find((u) => u.id === v.responsavel_id)?.name ?? v.responsavel_nome ?? "alguém do time").replace(/\s*\|.*$/, "") : null;
-  const souDono = !!v.responsavel_id && v.responsavel_id === currentUser?.id;
 
   // a rota: pelos voos que valem (cidade de saída → paradas → chegada); sem voo, o que o Bitrix diz
   const rota = (() => {
@@ -545,7 +465,6 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
               <button type="button" className="vf-link" onClick={() => irPara("vf-voos")}>Voos e check-ins</button>
               <button type="button" className="vf-link" onClick={() => irPara("vf-tudo")}>Itens da venda</button>
               <button type="button" className="vf-link" onClick={() => irPara("vf-arquivos", true)}>Arquivos e documentos</button>
-              <button type="button" className="vf-link" onClick={() => irPara("vf-tarefas")}>Outras tarefas</button>
             </div>
           </div>
         )}
@@ -557,22 +476,10 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
           <Quadro rotulo="Vendido por">
             <b>{[venda.closer || "closer não informado", v.data_venda && `em ${dataBR(v.data_venda)}`].filter(Boolean).join(" · ")}</b>
           </Quadro>
-          {/* 0184: o dono da viagem — sem dono, ninguém sente que a viagem é sua */}
-          <div className={`vf-quadro${donoNome ? "" : " vf-quadro--alerta"}`}>
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex flex-col gap-0.5 min-w-0">
-                <span className="vf-rot">Relacionamento</span>
-                <b>{donoNome ? (souDono ? `${donoNome} (você)` : donoNome) : "Ninguém cuidando"}</b>
-              </div>
-              {!donoNome && ativa && (
-                <button type="button" className="vf-btn vf-btn--sm vf-btn--claro" disabled={assumindo || !currentUser?.id}
-                  onClick={() => { setAssumindo(true); void acao(() => atribuirViagens([v.id], currentUser!.id)).finally(() => { setAssumindo(false); setVersao((n) => n + 1); }); }}>
-                  {assumindo ? "Assumindo…" : "Assumir"}
-                </button>
-              )}
-            </div>
-            <div className="pt-1"><DonoViagem viagemId={v.id} responsavelId={v.responsavel_id} equipe={equipe} onMudou={revisou} soTrocar /></div>
-          </div>
+          {/* 24/11 (Bruno): sai o "Relacionamento · Ninguém cuidando · Assumir" — fica o time que faz os check-ins */}
+          <Quadro rotulo="Check-in">
+            <b>Relacionamento</b>
+          </Quadro>
         </div>
       </header>
 
@@ -580,18 +487,17 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
 
       {erro && <Aviso tom="erro">{erro}</Aviso>}
 
-      {/* ── Prontidão (lib/prontidao.ts) + a % da revisão da IA, quando existe ── */}
+      {/* 24/11 (Bruno): O que pode dar errado ACIMA da prontidão, com o "O que falta" (antes no Tudo da viagem) junto */}
+      <AlertasViagem problemas={analise?.problemas ?? null} faltas={faltas} />
+
+      {/* ── Prontidão (lib/prontidao.ts): só os quadrinhos do que a venda tem + a % da revisão da IA ── */}
       <Prontidao p={pront} carregando={carregandoPront}>
         <ConformidadeViagem viagemId={v.id} versao={versao} onRevisado={revisou} />
       </Prontidao>
 
-      {/* O que pode dar errado — sempre à vista */}
-      <AlertasViagem problemas={analise?.problemas ?? null} />
-
-      {/* A esteira do Relacionamento (16/10): pacote, aéreo e cruzeiro completos; hotel/passeio só Revisão + D-3 (0148) */}
-      {ativa && temEsteira(v) && <EtapasViagem viagem={v} trechos={analise?.trechos ?? []} equipe={equipe} onMudou={revisou} />}
-      {/* Expedição não tem esteira — sem isto ela nunca podia ser marcada como revisada ("0 de 564", 19/10) */}
-      {ativa && grupoDe(v) === "expedicao" && (
+      {/* 24/11 (Bruno): a Esteira saiu da ficha (segue na tela Minhas atividades). Fica a Revisão — é ela que
+          marca REVISADO no quadro de partidas; antes só a expedição tinha ("0 de 564", 19/10) */}
+      {ativa && (
         <section className="rel-card p-4 flex flex-wrap items-center justify-between gap-3">
           <span className="text-[13px]" style={{ color: "var(--ink2)" }}><b style={{ color: "var(--ink)" }}>Revisão</b> · passageiros, documentos, voos e reservas conferidos</span>
           <RevisaoViagem viagemId={v.id} equipe={equipe} />
@@ -720,11 +626,6 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
           </section>
 
           <RevisaoIaViagem key={versao} viagemId={v.id} onRevisado={revisou} />
-
-          <section id="vf-tarefas" className="vf-card vf-card--aside" aria-label="Outras tarefas">
-            <h2 className="vf-h2 vf-h2--sm">Outras tarefas</h2>
-            <Jornada viagemId={v.id} ativa={ativa} recarregarViagem={() => { setVersao((n) => n + 1); void carregar(); }} />
-          </section>
 
           {/* 0176: o que o closer consolidou (itens, plano de pagamento, preferências). Sem venda consolidada não aparece nada. */}
           <FichaFechamentoResumo viagemId={v.id} />

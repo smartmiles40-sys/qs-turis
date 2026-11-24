@@ -16,11 +16,11 @@ const base = (x: Partial<EntradaProntidao> = {}): EntradaProntidao => ({
   servico: "pacote", acompanhamento: "completo", voos: [], hoteis: [], noitesSemHotel: 0, passeios: [], itens: [], docs: [],
   passageiros: [], qtdVendida: null, dataReferencia: "2026-11-25", sherpa: null, ...x,
 });
-const quadro = (e: EntradaProntidao, chave: string) => prontidaoDaViagem(e, HOJE).quadros.find((q) => q.chave === chave)!;
+const quadro = (e: EntradaProntidao, chave: string) => prontidaoDaViagem(e, HOJE).todos.find((q) => q.chave === chave)!;
 
 test("são sempre os 8 quadrinhos, na ordem do desenho", () => {
   const r = prontidaoDaViagem(base(), HOJE);
-  assert.deepEqual(r.quadros.map((q) => q.chave), ["ida", "volta", "internos", "hospedagem", "passeios", "documentos", "entrada", "seguro"]);
+  assert.deepEqual(r.todos.map((q) => q.chave), ["ida", "volta", "internos", "hospedagem", "passeios", "documentos", "entrada", "seguro"]);
 });
 
 test("pacote com ida e volta emitidas E conferidas: ok com o LOC e a hora local", () => {
@@ -64,11 +64,11 @@ test("pacote sem nenhum voo: ida e volta FALTAM; voo interno fica neutro (o sist
   assert.equal(quadro(e, "internos").estado, "neutro");
 });
 
-test("hotel sozinho: aéreo não vendido é neutro e não conta na barra", () => {
+test("hotel sozinho: o aéreo nem aparece (24/11), fica só a hospedagem", () => {
   const e = base({ servico: "hospedagem", acompanhamento: "leve", hoteis: [{ nome: "Hotel Gran Vía", noites: 5 }] });
   const r = prontidaoDaViagem(e, HOJE);
-  assert.equal(r.quadros[0].estado, "neutro");
-  assert.equal(r.quadros[0].valor, "Não vendido");
+  assert.deepEqual(r.quadros.map((q) => q.chave), ["hospedagem"]);
+  assert.equal(quadro(e, "ida").valor, "Não vendido");
   assert.equal(quadro(e, "hospedagem").estado, "ok");
   assert.ok(r.aplicaveis < 8);
 });
@@ -164,4 +164,34 @@ test("helpers: hora local, duração, documento, passaporte, selo e noites", () 
   assert.equal(seloEmbarque("em_viagem", -2, "ativa").texto, "Viajando");
   assert.equal(seloEmbarque("concluida", -30, "ativa").texto, "Voltou");
   assert.equal(noitesEntre("2026-11-15", "2026-11-25"), 10);
+});
+
+// ── 24/11: só o que a venda tem ──
+const chaves = (e: EntradaProntidao) => prontidaoDaViagem(e, HOJE).quadros.map((q) => q.chave);
+
+test("venda só de aéreo: pede ida, volta e documentos — nada de hotel, passeio ou seguro", () => {
+  assert.deepEqual(chaves(base({ servico: "aereo" })), ["ida", "volta", "documentos"]);
+});
+
+test("pacote sem itens: aéreo + hospedagem + documentos; sem aéreo (Não inclusa): só hospedagem", () => {
+  assert.deepEqual(chaves(base({ servico: "pacote" })), ["ida", "volta", "hospedagem", "documentos"]);
+  assert.deepEqual(chaves(base({ servico: "pacote", aereoVendido: false })), ["hospedagem"]);
+});
+
+test("itens da venda mandam: aéreo + seguro → só esses (o serviço não soma hotel)", () => {
+  const e = base({ servico: "pacote", itens: [{ tipo: "aereo", status: "emitido" }, { tipo: "seguro", status: "vendido" }] });
+  assert.deepEqual(chaves(e), ["ida", "volta", "documentos", "seguro"]);
+});
+
+test("o que está no roteiro entra: hotel cadastrado numa venda de aéreo aparece", () => {
+  assert.deepEqual(chaves(base({ servico: "aereo", hoteis: [{ nome: "Hotel X", noites: 3 }] })), ["ida", "volta", "hospedagem", "documentos"]);
+});
+
+test("voo interno só aparece quando existe; Sherpa desligado não aparece", () => {
+  const e = base({ servico: "aereo", voos: [voo("ida", "2026-11-15T10:00:00-03:00"), voo("interno", "2026-11-18T10:00:00-03:00"), voo("volta", "2026-11-25T10:00:00-03:00")] });
+  assert.deepEqual(chaves(e), ["ida", "volta", "internos", "documentos"]);
+});
+
+test("seguro sozinho: só o seguro, sem passaporte", () => {
+  assert.deepEqual(chaves(base({ servico: "seguro", acompanhamento: "nenhum" })), ["seguro"]);
 });

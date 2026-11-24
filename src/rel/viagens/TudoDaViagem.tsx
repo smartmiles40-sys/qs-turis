@@ -18,12 +18,12 @@
 // expedição. Sem a 0208 no banco, mostra trechos e expedição e avisa.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Badge, Button, StatusDot, type Tone } from "@/components/ui";
+import { Badge, Button, type Tone } from "@/components/ui";
 import type { CampoTipo } from "@/propostas/lib";
 import {
-  STATUS_ITEM, TIPOS_LANCAVEIS, carregarComponentes, documentosDaViagem, infoDoTipo, lancarItemAvulso, oQueFalta, ordemDosTipos,
+  STATUS_ITEM, TIPOS_LANCAVEIS, carregarComponentes, infoDoTipo, lancarItemAvulso, ordemDosTipos,
   pagamentoDaViagem, proximasDatas, salvarItem,
-  type Componente, type DocResumo, type ResumoPagamento, type StatusItem,
+  type Componente, type ResumoPagamento, type StatusItem,
 } from "../lib/componentes";
 import { SERVICOS, dataBR, horaDoLugar, type Passageiro, type Viagem } from "../lib/viagens";
 import { usePode } from "../equipe/usePode";
@@ -265,16 +265,13 @@ function ItemModal({ viagemId, item, aberto, onFechar, onSalvo }: {
 
 // ── O bloco ─────────────────────────────────────────────────────────────────
 
-const TOM_GRUPO: Record<string, string> = { venda: "Venda", emissao: "Emissão", documento: "Documentos", pagamento: "Pagamento", operacao: "Relacionamento" };
-
-export default function TudoDaViagem({ v, pass, versao, onMudou, onAbrirExpedicao }: {
+export default function TudoDaViagem({ v, versao, onMudou, onAbrirExpedicao }: {
   v: Viagem; pass: Passageiro[]; versao: number; onMudou: () => void; onAbrirExpedicao?: (id: string, tipo: string | null) => void;
 }) {
   const podeEditar = usePode("relacionamento.editar_viagens") === true;
   const [comps, setComps] = useState<Componente[] | null>(null);
   const [comItens, setComItens] = useState(true);
   const [pag, setPag] = useState<ResumoPagamento | null>(null);
-  const [docs, setDocs] = useState<DocResumo[]>([]);
   const [erro, setErro] = useState<string | null>(null);
   const [editando, setEditando] = useState<Componente | null>(null);
   const [lancando, setLancando] = useState(false);
@@ -284,11 +281,9 @@ export default function TudoDaViagem({ v, pass, versao, onMudou, onAbrirExpedica
       .then((r) => { setComps(r.itens); setComItens(r.comItensDaVenda); setErro(null); })
       .catch((e) => { setComps([]); setErro(e instanceof Error ? e.message : "Não carregou os componentes."); });
     pagamentoDaViagem(v.id).then(setPag).catch(() => setPag(null));
-    documentosDaViagem(v.id).then(setDocs).catch(() => setDocs([]));
   }, [v.id]);
   useEffect(() => { carregar(); }, [carregar, versao]);
 
-  const faltas = useMemo(() => (comps ? oQueFalta(v, comps, pass, pag, docs) : []), [v, comps, pass, pag, docs]);
   const datas = useMemo(() => (comps ? proximasDatas(v, comps, pag) : []), [v, comps, pag]);
   const porTipo = useMemo(() => {
     const m = new Map<string, Componente[]>();
@@ -297,7 +292,6 @@ export default function TudoDaViagem({ v, pass, versao, onMudou, onAbrirExpedica
   }, [comps]);
 
   const mudou = () => { setEditando(null); setLancando(false); carregar(); onMudou(); };
-  const urgentes = faltas.filter((f) => f.tom === "danger").length;
 
   return (
     <section className="qs-card p-4 sm:p-5" aria-label="Tudo da viagem">
@@ -305,32 +299,13 @@ export default function TudoDaViagem({ v, pass, versao, onMudou, onAbrirExpedica
         <h2 className="text-[15px] font-semibold" style={{ color: "var(--text)" }}>Tudo da viagem</h2>
         <div className="flex flex-wrap items-center gap-2">
           <Badge>{v.servico ? SERVICOS[v.servico] : "serviço a classificar"}</Badge>
-          <Badge tone={v.responsavel_id ? undefined : "warn"}>{v.responsavel_nome ? `cuida: ${v.responsavel_nome.replace(/\s*\|.*$/, "")}` : "sem dono"}</Badge>
           {pag && pag.planos > 0 && <Badge tone={pag.atrasado > 0 ? "danger" : pag.em_aberto > 0 ? "info" : "ok"}>{pag.atrasado > 0 ? "pagamento atrasado" : pag.em_aberto > 0 ? `recebido ${brl(pag.pago)} de ${brl(pag.total)}` : "pago"}</Badge>}
           {podeEditar && comItens && v.status === "ativa" && <Button size="sm" onClick={() => setLancando(true)}>+ Lançar item</Button>}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-4 mb-4">
-        {/* O que falta */}
-        <div>
-          <p className="qs-label mb-1.5">O que falta {faltas.length > 0 && <span className="qs-num">· {faltas.length}{urgentes ? ` (${urgentes} urgente${urgentes > 1 ? "s" : ""})` : ""}</span>}</p>
-          {comps === null ? (
-            <div className="h-16 rounded-lg animate-pulse" style={{ background: "var(--surface-2)" }} />
-          ) : faltas.length === 0 ? (
-            <p className="text-[13px] qs-tone-ok">{v.fase === "concluida" ? "Viagem concluída." : "Nada pendente no que o sistema consegue ver."}</p>
-          ) : (
-            <ul className="space-y-1">
-              {faltas.map((f) => (
-                <li key={f.chave} className="flex items-center gap-2 text-[13px]" style={{ color: "var(--text)" }}>
-                  <StatusDot tone={f.tom} />
-                  <span className="flex-1 min-w-0">{f.texto}</span>
-                  <span className="text-[11px] flex-shrink-0" style={{ color: "var(--subtle)" }}>{TOM_GRUPO[f.grupo]}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+      {/* 24/11 (Bruno): o "O que falta" foi pro cartão "O que pode dar errado", no topo da ficha */}
+      <div className="mb-4">
         {/* Próximas datas */}
         <div>
           <p className="qs-label mb-1.5">Próximas datas</p>

@@ -189,14 +189,12 @@ export function oQueFalta(v: Viagem, comps: Componente[], pass: Passageiro[], pa
   const f: Falta[] = [];
   const futura = v.fase === "antes" || v.fase === "em_viagem" || v.fase === "sem_data";
   if (v.status !== "ativa" || !futura) return f;
-  const opera = v.acompanhamento === "completo" || v.acompanhamento === "leve";
-
   // venda
   if (v.acompanhamento === "classificar") f.push({ chave: "servico", tom: "warn", grupo: "venda", texto: "Falta dizer o que foi vendido (serviço)" });
   if (!v.data_embarque) f.push({ chave: "data", tom: "warn", grupo: "venda", texto: "Sem data de embarque" });
   if (!v.cliente_id) f.push({ chave: "cliente", tom: "danger", grupo: "venda", texto: "Sem cliente ligado (ficha)" });
   if (/CONFERIR: possível viagem repetida/i.test(v.observacoes ?? "")) f.push({ chave: "repetida", tom: "warn", grupo: "venda", texto: "Pode ser venda repetida — conferir" });
-  if (opera && !v.responsavel_id) f.push({ chave: "dono", tom: (v.dias_para_embarque ?? 999) <= 30 ? "danger" : "warn", grupo: "operacao", texto: "Ninguém do Rel cuida desta viagem" });
+  // 24/11 (Bruno): sai o "Ninguém do Rel cuida desta viagem" — a ficha mostra o time do check-in, não um dono
 
   // emissão
   const vivos = comps.filter((c) => c.status !== "cancelado");
@@ -208,13 +206,15 @@ export function oQueFalta(v: Viagem, comps: Componente[], pass: Passageiro[], pa
   const voos = vivos.filter((c) => c.tipo === "aereo" && c.fonte === "trecho");
   const semLoc = voos.filter((c) => !c.dados.localizador && (c.data_inicio ?? "9999") >= hoje);
   if (semLoc.length) f.push({ chave: "localizador", tom: "warn", grupo: "emissao", texto: `${semLoc.length} voo${semLoc.length > 1 ? "s" : ""} sem localizador` });
-  const temAereoVendido = vivos.some((c) => c.tipo === "aereo") || v.servico === "aereo" || v.servico === "pacote";
+  const temAereoVendido = vivos.some((c) => c.tipo === "aereo") || v.servico === "aereo" || (v.servico === "pacote" && v.aereo_vendido !== false);
   if (temAereoVendido && !voos.length && v.servico !== "expedicao") f.push({ chave: "sem_voo", tom: "info", grupo: "emissao", texto: "Nenhum voo cadastrado no roteiro" });
 
   // documentos
   const volta = v.data_retorno || v.data_embarque;
   const seisMeses = volta ? (() => { const d = new Date(volta + "T12:00:00"); d.setMonth(d.getMonth() + 6); return d.toISOString().slice(0, 10); })() : null;
-  for (const p of pass) {
+  // 24/11: passaporte só pra quem viaja de avião / expedição / cruzeiro (hotel ou seguro sozinho não pede)
+  const viajaDeAviao = temAereoVendido || voos.length > 0 || v.servico === "expedicao" || v.servico === "cruzeiro";
+  for (const p of viajaDeAviao ? pass : []) {
     const c = p.cliente;
     if (!c) continue;
     if (!c.passaporte) f.push({ chave: `pp-${c.id}`, tom: "warn", grupo: "documento", texto: `${c.nome.split(" ")[0]}: sem passaporte na ficha` });
@@ -225,8 +225,7 @@ export function oQueFalta(v: Viagem, comps: Componente[], pass: Passageiro[], pa
   if (recusados) f.push({ chave: "docs_recusados", tom: "warn", grupo: "documento", texto: `${recusados} documento${recusados > 1 ? "s" : ""} recusado${recusados > 1 ? "s" : ""}` });
   const aConferir = docs.filter((d) => d.status === "recebido").length;
   if (aConferir) f.push({ chave: "docs_conferir", tom: "info", grupo: "documento", texto: `${aConferir} documento${aConferir > 1 ? "s" : ""} pra conferir` });
-  const temSeguro = vivos.some((c) => c.tipo === "seguro") || docs.some((d) => d.tipo === "seguro");
-  if (opera && !temSeguro && v.servico !== "seguro") f.push({ chave: "seguro", tom: "info", grupo: "documento", texto: "Sem seguro viagem registrado" });
+  // 24/11: seguro que não foi vendido não é pendência (só pede o que a venda tem)
 
   // pagamento
   if (pag) {
