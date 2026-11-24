@@ -43,7 +43,6 @@ import FichaFechamentoResumo from "@/closer/FichaFechamentoResumo";
 import { desarquivarViagens } from "../lib/operacao";
 import { podeGerirRelacionamento } from "../equipe/permissao";
 import { BotaoSubirVenda } from "@/venda/SubirVenda";
-import TudoDaViagem from "./TudoDaViagem";
 import { SeloDaViagem } from "@/prioridades/SeloPrioridade";
 import VoosDaViagem from "./VoosDaViagem";
 import PassageirosDaViagem from "./PassageirosDaViagem";
@@ -253,6 +252,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   const [analise, setAnalise] = useState<Analise | null>(null);
   const [aba, setAba] = useState<"dia" | "tipo">("dia");
   // 24/11 (Bruno): a ficha em abas — Viagem · Passageiros · Emissão futura (nada repetido entre elas)
+  const [ajustes, setAjustes] = useState(false);
   const [tela, setTela] = useState<"viagem" | "pax" | "emissao">("viagem");
   // pra prontidão e a lateral (o TudoDaViagem e a Jornada carregam os seus)
   const [comps, setComps] = useState<Componente[] | null>(null);
@@ -372,6 +372,8 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
   const noites = noitesEntre(v.data_embarque, v.data_retorno);
   const nPax = v.qtd_passageiros || pass.length || v.passageiros;
   const carregandoPront = !analise || comps === null || docs === null;
+  const naoBate = resumo ? resumo.inconsistencias.filter((i) => !i.ignorada).length : 0;
+  const expedicaoComp = (comps ?? []).find((c) => c.fonte === "expedicao");
   const nEmissao = carregandoPront ? 0 : pendenciasDeEmissao(comps, pront.quadros);
 
   // a rota: pelos voos que valem (cidade de saída → paradas → chegada); sem voo, o que o Bitrix diz
@@ -432,6 +434,11 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
           <div className="vf-acoes">
             {v.bitrix_deal_id && <a className="vf-btn" href={linkBitrix(v.bitrix_deal_id)} target="_blank" rel="noreferrer">Card no Bitrix #{v.bitrix_deal_id}</a>}
             <BotaoPedirPagamento deSetor="relacionamento" onCriada={() => setSinalPedidos((n) => n + 1)} alvo={{ viagemId: v.id, clienteId: v.cliente_id, sobre }} />
+            {/* 24/11 (Bruno): os Ajustes da viagem viraram um lápis — menos informação na tela */}
+            <button type="button" className="vf-btn vf-lapis" title="Ajustes da viagem: forçar status, corrigir datas, alertas e histórico" aria-label="Ajustes da viagem" onClick={() => setAjustes(true)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+              {naoBate > 0 && <span className="vf-lapis__n">{naoBate}</span>}
+            </button>
             <button type="button" className="vf-btn" aria-expanded={maisAcoes} aria-controls="vf-mais-acoes" onClick={() => setMaisAcoes((x) => !x)}>
               Mais ações
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ transform: maisAcoes ? "rotate(180deg)" : undefined }}><path d="m6 9 6 6 6-6" /></svg>
@@ -453,6 +460,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
               {/* arquivada (0184) volta pela função do banco: limpa o motivo e fica no histórico (só a gestão) */}
               {!ativa && (v.status !== "arquivada" || gestor) && <Botao onClick={() => void acao(() => (v.status === "arquivada" ? desarquivarViagens({ ids: [v.id] }) : salvarViagem(v.id, { status: "ativa" })))}>{v.status === "arquivada" ? "Desarquivar" : "Reativar"}</Botao>}
               {v.cliente_id && <Botao onClick={() => onAbrirCliente(v.cliente_id!)}>Abrir ficha do cliente</Botao>}
+              {expedicaoComp && onAbrirExpedicao && <Botao onClick={() => onAbrirExpedicao(String(expedicaoComp.dados.expedicoes_id ?? expedicaoComp.id), (expedicaoComp.dados.tipo as string | null) ?? null)}>Abrir expedição</Botao>}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[13px]">
               <span className="vf-sub">O que foi vendido:</span>
@@ -461,7 +469,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
               <span className="vf-sub">Ir para:</span>
               <button type="button" className="vf-link" onClick={() => irPara("vf-roteiro")}>Roteiro (voos e check-ins)</button>
-              <button type="button" className="vf-link" onClick={() => irPara("vf-tudo")}>Itens da venda</button>
+              <button type="button" className="vf-link" onClick={() => setTela("emissao")}>Emissão futura</button>
               <button type="button" className="vf-link" onClick={() => irPara("vf-arquivos", true)}>Arquivos da viagem</button>
               <button type="button" className="vf-link" onClick={() => irPara("vf-docs")}>Documentos dos passageiros</button>
             </div>
@@ -505,6 +513,8 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
           {/* ── Prontidão (lib/prontidao.ts): só os quadrinhos do que a venda tem + a % da revisão da IA ── */}
           <Prontidao p={pront} carregando={carregandoPront}>
             <ConformidadeViagem viagemId={v.id} versao={versao} onRevisado={revisou} />
+            {/* 24/11 (Bruno): a Revisão da IA mora junto da prontidão */}
+            <RevisaoIaViagem key={versao} viagemId={v.id} onRevisado={revisou} />
           </Prontidao>
 
           <div className="vf-cols">
@@ -534,8 +544,6 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
                 )}
               </section>
 
-              {/* 24/11: os voos moram só no Roteiro; aqui ficam os ajustes (status forçado, datas, alertas ignorados, histórico) */}
-              <div id="vf-voos"><VoosDaViagem v={v} trechos={analise ? analise.trechos : null} onMudou={revisou} /></div>
             </main>
 
             {/* ── Lateral: a relação com o cliente (quem viaja e documentos foram pra aba Passageiros) ── */}
@@ -568,16 +576,13 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
                   : <button type="button" className="vf-btn" style={{ width: "100%", justifyContent: "center" }} onClick={() => onAbrirCliente(v.cliente_id!)}>Falar com o cliente (ficha)</button>)}
               </section>
 
-              <RevisaoIaViagem key={versao} viagemId={v.id} onRevisado={revisou} />
 
               {/* 0176: o que o closer consolidou (itens, plano de pagamento, preferências). Sem venda consolidada não aparece nada. */}
               <FichaFechamentoResumo viagemId={v.id} />
             </aside>
           </div>
 
-          {/* 0208: itens da venda por tipo (aéreo, hotel, seguro, expedição…) e as próximas datas */}
-          <div id="vf-tudo"><TudoDaViagem v={v} pass={pass} versao={versao} onMudou={revisou} onAbrirExpedicao={onAbrirExpedicao} /></div>
-
+          {/* 24/11 (Bruno): saiu o "Tudo da viagem" — o Roteiro já mostra tudo; o que falta emitir está na aba Emissão futura */}
           {/* vouchers, bilhetes, apólices — os arquivos DA VIAGEM (os documentos das pessoas estão na aba Passageiros) */}
           <section id="vf-arquivos" className="vf-card flex flex-col gap-3" aria-label="Arquivos da viagem">
             <h2 className="vf-h2">Arquivos da viagem</h2>
@@ -624,6 +629,9 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
         </div>
       )}
 
+      <Modal aberto={ajustes} titulo="Ajustes da viagem" onFechar={() => setAjustes(false)} largura={760}>
+        <VoosDaViagem v={v} trechos={analise ? analise.trechos : null} onMudou={revisou} />
+      </Modal>
       <EditarViagem aberto={editando} v={v} onFechar={() => setEditando(false)} onSalvo={() => { setEditando(false); void carregar(); }} />
       <AdicionarPassageiro aberto={addPass} viagemId={v.id} onFechar={() => setAddPass(false)} onAdicionado={() => { setAddPass(false); void carregar(); }} />
     </div>

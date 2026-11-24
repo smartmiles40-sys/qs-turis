@@ -289,7 +289,11 @@ function cruzar({ viagem, passageiros, leituras, trechosAntes }) {
     if (L.seguro?.vigencia_inicio) datas.push(L.seguro.vigencia_inicio);
     const foraDaJanela = datas.filter((d) => !dentro(d));
 
-    const passageiroNovo = faltaCadastrar && l.fonte !== 'bitrix' && estranhos.length > 0 && !foraDaJanela.length;
+    // 24/11 (Bruno: "toda vez que tiver outros pax que não estão cadastrados na viagem, a IA já pega e cadastra"):
+    // nome a mais num documento DESTA viagem (datas dentro, e: a venda é pra mais gente OU o documento traz
+    // alguém que já está na viagem — o acompanhante no mesmo bilhete/apólice) = passageiro a cadastrar.
+    // Documento sem ninguém conhecido e com a venda "cheia" continua sendo alerta (pode ser de outra viagem da turma).
+    const passageiroNovo = l.fonte !== 'bitrix' && estranhos.length > 0 && !foraDaJanela.length && (faltaCadastrar || reconhecidos.length > 0);
     if (passageiroNovo) for (const n of estranhos) if (!semFicha.some((x) => mesmaPessoa(x, n))) semFicha.push(n);
     if (!passageiroNovo && l.fonte !== 'bitrix' && nomesDoc.length && nomesViagem.length && !reconhecidos.length
       && (datas.length === 0 || foraDaJanela.length === datas.length)) {
@@ -371,9 +375,7 @@ function cruzar({ viagem, passageiros, leituras, trechosAntes }) {
     avisos.push(`A viagem está sem data no QS. Pelos bilhetes: embarque ${BR(voos[0].partida_em)} e último voo ${BR(voos[voos.length - 1].partida_em)}.`);
   }
 
-  for (const n of semFicha) {
-    add('media', `Cadastrar passageiro: "${n}" aparece nos documentos e a venda é pra ${viagem.qtd_passageiros} pessoas, mas não está na ficha desta viagem.`);
-  }
+  // os nomes a cadastrar vão em `novos`: o revisar() cadastra (e só alerta o que não conseguiu)
 
   // cobertura
   const internacional = unicos.some((s) => s.categoria === 'voo_internacional') || viagem.tipo === 'expedicao';
@@ -393,7 +395,66 @@ function cruzar({ viagem, passageiros, leituras, trechosAntes }) {
     `(${['voo_internacional', 'voo_interno', 'transfer', 'trem', 'hospedagem', 'passeio'].map((k) => [k, unicos.filter((s) => s.categoria === k).length]).filter(([, n]) => n).map(([k, n]) => `${n} ${k.replace('_', ' ')}`).join(', ') || 'nenhum'})`,
     graves ? `· ${graves} ponto(s) pra conferir` : status === 'incompleta' ? `· faltam ${!temBilhete ? 'bilhetes aéreos' : 'datas da viagem'}` : '· tudo bate com a viagem',
   ].join(' ');
-  return { segmentos: unicos, divergencias, avisos, passageiros_cobertos: cob, status, resumo, internacional, temBilhete, temSeguro };
+  return { segmentos: unicos, divergencias, avisos, passageiros_cobertos: cob, status, resumo, internacional, temBilhete, temSeguro, novos: semFicha };
+}
+
+// ── Passageiro que está no documento e não na viagem (24/11) ────────────────
+const TITULOS = new Set(['MR', 'MRS', 'MS', 'MISS', 'MSTR', 'MSTER', 'CHD', 'INF', 'DR', 'SR', 'SRA', 'ADT']);
+const MINUSC = new Set(['de', 'da', 'do', 'das', 'dos', 'e']);
+/** "SILVA/JOAO PEDRO MR" → "Joao Pedro Silva"; "maria de souza" → "Maria de Souza". */
+function nomeDoBilhete(bruto) {
+  const semTitulo = (x) => x.split(/\s+/).filter((w) => w && !TITULOS.has(semAcento(w).toUpperCase())).join(' ');
+  let t = String(bruto || '').replace(/[()[\].,;:0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (t.includes('/')) { const [sob, ...resto] = t.split('/'); t = `${semTitulo(resto.join(' '))} ${semTitulo(sob)}`; }
+  const partes = semTitulo(t).split(/\s+/).filter(Boolean);
+  return partes.map((w, i) => {
+    const m = w.toLowerCase();
+    return i > 0 && MINUSC.has(m) ? m : m.charAt(0).toUpperCase() + m.slice(1);
+  }).join(' ').trim();
+}
+
+/**
+ * Cadastra na viagem quem o documento traz e a ficha não tem. Acha a pessoa na base primeiro
+ * (o nome do bilhete vem sem acento e sem o nome do meio); uma só bate → usa; nenhuma → cria a ficha;
+ * mais de uma → não chuta, volta como "conferir".
+ */
+async function cadastrarNovos(viagem, nomes, passageiros) {
+  const adicionados = [], ambiguos = [], falhas = [];
+  for (const bruto of nomes.slice(0, 8)) {
+    const nome = nomeDoBilhete(bruto);
+    const toks = nomeNorm(nome).split(' ').filter((x) => x.length > 2 && !PARTICULAS.has(x));
+    if (toks.length < 2) continue; // só um nome: não dá pra cadastrar com segurança
+    if (passageiros.some((p) => mesmaPessoa(p.nome, nome)) || adicionados.some((a) => mesmaPessoa(a.nome, nome))) continue;
+    try {
+      // acento vira coringa de 1 letra (JOAO acha João); o filtro fino é o mesmaPessoa
+      const coringa = (x) => x.toLowerCase().replace(/[aeiouc]/g, '_');
+      const [a, b] = [toks[0], toks[toks.length - 1]];
+      const cands = (await rest(`rel_clientes?select=id,nome,titular_id&mesclado_em_id=is.null&arquivado_em=is.null&nome=ilike.*${encodeURIComponent(coringa(a))}*&nome=ilike.*${encodeURIComponent(coringa(b))}*&limit=50`)) || [];
+      let bate = cands.filter((c) => mesmaPessoa(c.nome, nome));
+      if (bate.length > 1 && viagem.cliente_id) {
+        const familia = bate.filter((c) => c.id === viagem.cliente_id || c.titular_id === viagem.cliente_id);
+        if (familia.length === 1) bate = familia;
+      }
+      if (bate.length > 1) { ambiguos.push(`${nome} (${bate.length} fichas parecidas)`); continue; }
+      let clienteId = bate[0]?.id;
+      let criado = false;
+      if (!clienteId) {
+        const novo = await rest('rel_clientes', {
+          method: 'POST', prefer: 'return=representation',
+          body: { nome, observacoes: `Cadastrado pela IA: estava nos documentos da viagem "${viagem.titulo || viagem.destino || ''}" (${BR(viagem.data_embarque)}). Confira CPF, passaporte e contato.` },
+        });
+        clienteId = novo?.[0]?.id;
+        criado = true;
+      }
+      if (!clienteId) { falhas.push(nome); continue; }
+      await rest('rel_viagem_passageiros', { method: 'POST', prefer: 'resolution=ignore-duplicates,return=minimal', body: { viagem_id: viagem.id, cliente_id: clienteId } });
+      adicionados.push({ cliente_id: clienteId, nome: bate[0]?.nome || nome, criado });
+    } catch (e) {
+      console.error('[rel-viagem-ia] cadastrar passageiro', nome, e?.message);
+      falhas.push(nome);
+    }
+  }
+  return { adicionados, ambiguos, falhas };
 }
 
 /**
@@ -521,7 +582,7 @@ async function aplicarTrechos(viagemId, segmentos, existentes) {
  * lido fica de fora e o resto do caminho (cruzar, trechos, %) é o mesmo.
  */
 export async function revisar(viagemId, prazo = Date.now() + ORCAMENTO_MS, prontas = null, modelo = null) {
-  const viagem = (await rest(`rel_viagens?select=id,titulo,destino,expedicao,tipo,status,data_embarque,data_retorno,qtd_passageiros,bitrix_dados,ia_revisao&id=eq.${viagemId}&limit=1`))?.[0];
+  const viagem = (await rest(`rel_viagens?select=id,cliente_id,titulo,destino,expedicao,tipo,status,data_embarque,data_retorno,qtd_passageiros,bitrix_dados,ia_revisao&id=eq.${viagemId}&limit=1`))?.[0];
   if (!viagem) throw Object.assign(new Error('Viagem não encontrada.'), { status: 404 });
 
   const [pass, docs, ligados, trechosAntes] = await Promise.all([
@@ -590,7 +651,20 @@ export async function revisar(viagemId, prazo = Date.now() + ORCAMENTO_MS, pront
   await Promise.allSettled(tarefas);
   if (fatal) throw fatal;
 
-  const r = cruzar({ viagem, passageiros, leituras, trechosAntes: trechosAntes || [] });
+  let r = cruzar({ viagem, passageiros, leituras, trechosAntes: trechosAntes || [] });
+  // 24/11: quem está nos documentos e não na viagem entra na viagem (e na base, se não existir)
+  if (r.novos?.length && viagem.status === 'ativa') {
+    const cad = await cadastrarNovos(viagem, r.novos, passageiros);
+    if (cad.adicionados.length) {
+      for (const a of cad.adicionados) passageiros.push({ cliente_id: a.cliente_id, nome: a.nome, passaporte: null, passaporte_validade: null });
+      r = cruzar({ viagem, passageiros, leituras, trechosAntes: trechosAntes || [] }); // refaz a cobertura com eles
+      r.avisos.unshift(`A IA cadastrou na viagem: ${cad.adicionados.map((a) => `${a.nome}${a.criado ? ' (ficha nova — falta CPF, passaporte e contato)' : ''}`).join(', ')}.`);
+    }
+    for (const n of cad.ambiguos) r.divergencias.push({ gravidade: 'media', texto: `Cadastrar passageiro: ${n} — escolha a ficha certa e adicione à viagem.`, documento_id: null });
+    for (const n of cad.falhas) r.divergencias.push({ gravidade: 'media', texto: `Cadastrar passageiro: "${n}" está nos documentos e não está na viagem (a IA não conseguiu cadastrar).`, documento_id: null });
+  } else if (r.novos?.length) {
+    for (const n of r.novos) r.divergencias.push({ gravidade: 'media', texto: `Cadastrar passageiro: "${n}" está nos documentos e não está na viagem.`, documento_id: null });
+  }
   if (semTempo) r.avisos.push(`${semTempo} documento(s) ficaram pra próxima revisão (tempo esgotado).`);
   const errosLeitura = leituras.filter((l) => l.erro);
   for (const l of errosLeitura) r.divergencias.push({ gravidade: 'baixa', texto: `Não li "${l.arquivo_nome || l.tipo_cadastro}": ${l.erro}`, documento_id: l.documento_id });
@@ -716,4 +790,4 @@ export default async function handler(req, res) {
 }
 
 // teste local das regras puras
-export const _regras = { mesmaPessoa, paisChave, categoriaConfirmada, comFuso, mesmoTrecho, cruzar, textoDoBitrix };
+export const _regras = { nomeDoBilhete, mesmaPessoa, paisChave, categoriaConfirmada, comFuso, mesmoTrecho, cruzar, textoDoBitrix };

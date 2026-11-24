@@ -174,11 +174,12 @@ export default function VoosDaViagem({ v, trechos, onMudou }: { v: Viagem; trech
   return (
     // 24/11 (Bruno: "os voos aparecem em 4 lugares"): a lista de voos e os check-ins moram SÓ no Roteiro.
     // Aqui fica o que não é de um voo: alertas que não batem, status forçado, datas da viagem e o histórico.
-    <details className="rel-card p-4 space-y-3" aria-label="Ajustes da viagem" open={abertas.length > 0 || divergeDaView || undefined}>
-      <summary className="flex flex-wrap items-center justify-between gap-2 cursor-pointer">
-        <h2 className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>Ajustes da viagem <span className="text-[12.5px] font-medium" style={{ color: "var(--ink3)" }}>· status {FASES[r.fase].toLowerCase()}{r.faseManual ? " (manual)" : ""} · forçar status, corrigir datas, histórico{abertas.length ? ` · ${abertas.length} não bate` : ""}</span></h2>
-        {!disponivel && podeEditar && <span className="text-[11.5px]" style={{ color: "var(--ink3)" }}>Correção pela tela chega com a migration 0227.</span>}
-      </summary>
+    // 24/11 (Bruno): mora no LÁPIS do cabeçalho da ficha (abre num modal)
+    <div className="space-y-3" aria-label="Ajustes da viagem">
+      <p className="text-[13px]" style={{ color: "var(--ink2)" }}>
+        Status pelos voos: <b style={{ color: "var(--ink)" }}>{FASES[r.fase]}</b>{r.faseManual ? " (forçado à mão)" : ""}.
+        {!disponivel && podeEditar && " Correção pela tela chega com a migration 0227."}
+      </p>
 
       {divergeDaView && (
         <Aviso>A lista mostra esta viagem como <b>{FASES[v.fase]}</b>, mas pelos voos ela está <b>{FASES[r.fase]}</b>{!disponivel ? " (a régua nova entra com a migration 0227)" : ""}.</Aviso>
@@ -286,6 +287,6 @@ export default function VoosDaViagem({ v, trechos, onMudou }: { v: Viagem; trech
           explicacao={`Ida ${BR(v.data_embarque)} → ${BR(datas.ida || null)} · volta ${BR(v.data_retorno)} → ${BR(datas.volta || null)}. As datas ficam travadas: a sincronização do Bitrix não volta com as antigas.`}
           onFechar={() => setAcao(null)} onConfirmar={async (m) => { await corrigirDatas(v.id, datas.ida || null, datas.volta || null, m); mudou(); }} />
       )}
-    </details>
+    </div>
   );
 }

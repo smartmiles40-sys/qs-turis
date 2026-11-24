@@ -23,7 +23,7 @@
 // -----------------------------------------------------------------------------
 import { useMemo, useState, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
-import { TIPOS_TRECHO, apagarTrecho, marcarCheckin, type Trecho } from "../lib/viagens";
+import { TIPOS_TRECHO, abrirDocumentoPorId, apagarTrecho, marcarCheckin, type Trecho } from "../lib/viagens";
 import { diaLocal, horaLocal, mapaDasNoites, type Nivel, type Problema } from "../lib/problemas";
 import { codigoDe, type EstadoTrecho, type PapelVoo } from "../lib/statusViagem";
 import { duracao, diaHoraCurta, type EstadoPront, type Quadro } from "../lib/prontidao";
@@ -267,16 +267,26 @@ function Cartao({ it, info, problemas, ativa, rev, onEditar, onNovo, onAnexar, o
   const ps = ids.flatMap((id) => problemas.get(id) ?? []).filter((p, i, a) => a.findIndex((x) => x.titulo === p.titulo) === i)
     .sort((a, b) => ordemNivel[a.nivel] - ordemNivel[b.nivel]);
   const pior = ps[0]?.nivel;
-  const estadoCartao = it.falta ? "falta" : pior === "alta" ? "falta" : pior === "media" || it.badge.estado === "falta" ? "atencao" : null;
   const t = it.t;
-  const passou = it.segs ? it.segs.every((s) => info.get(s.id)?.estado === "voado") : t ? Date.parse(t.chegada_em ?? t.partida_em) < Date.now() - 86_400_000 : false;
+  const passou = !it.falta && (it.segs ? it.segs.every((s) => info.get(s.id)?.estado === "voado") : t ? Date.parse(t.chegada_em ?? t.partida_em) < Date.now() - 86_400_000 : false);
+  // 24/11 (Bruno): VERDE = já aconteceu · AMARELO = vai acontecer · VERMELHO = falta emitir ou pode ter algo errado
+  const semEmissao = !!it.falta || it.badge.estado === "falta" || /^Sem |a confirmar/i.test(it.badge.texto);
+  const cor = passou ? "ok" : semEmissao || pior === "alta" || pior === "media" ? "risco" : "futuro";
+  const badge = passou ? { texto: "Já aconteceu", estado: "ok" as const } : it.badge;
+  // o bilhete / a reserva: o arquivo de onde o trecho veio
+  const docs = [...new Set((it.segs ?? (t ? [t] : [])).map((x) => x.documento_id).filter(Boolean))] as string[];
+  const ehVooCartao = it.kind === "voo";
+  async function ver(id: string) {
+    const w = window.open("", "_blank");
+    try { const url = await abrirDocumentoPorId(id); if (w) w.location.href = url; else window.open(url, "_blank"); }
+    catch (e) { w?.close(); setErro(e instanceof Error ? e.message : "Não abriu o arquivo."); }
+  }
   async function acao(fn: () => Promise<unknown>) {
     setErro(null);
     try { await fn(); onMudou(); } catch (e) { setErro(e instanceof Error ? e.message : "Falhou."); }
   }
-  const semVoucher = t && !t.documento_id && t.tipo !== "hospedagem";
   return (
-    <article id={t ? `trecho-${t.id}` : undefined} className={`vf-item${estadoCartao ? ` vf-item--${estadoCartao}` : ""}${passou ? " vf-item--passado" : ""}`}>
+    <article id={t ? `trecho-${t.id}` : undefined} className={`vf-item vf-cor--${cor}`}>
       <div className="vf-item__top">
         <div className="vf-item__id">
           <IconeKind kind={it.falta ? (it.falta.kind === "voo" ? "voo" : "hotel") : it.kind} />
@@ -285,7 +295,7 @@ function Cartao({ it, info, problemas, ativa, rev, onEditar, onNovo, onAnexar, o
             <span className="vf-sub">{it.sub}</span>
           </div>
         </div>
-        <span className={`vf-pill vf-pill--${it.badge.estado}`}>{it.badge.texto}</span>
+        <span className={`vf-pill vf-pill--${badge.estado}`}>{badge.texto}</span>
       </div>
 
       {it.segs && (
@@ -329,12 +339,19 @@ function Cartao({ it, info, problemas, ativa, rev, onEditar, onNovo, onAnexar, o
 
       {ps.map((p, k) => <p key={k} className={`vf-prob vf-prob--${p.nivel}`}><span aria-hidden>{p.nivel === "alta" ? "⚠" : "•"}</span>{p.titulo}</p>)}
 
-      {t && ativa && (
+      {!it.falta && (
         <div className="vf-item__acoes">
-          {semVoucher && <button type="button" className="vf-btn vf-btn--sm" onClick={onAnexar}>Anexar voucher</button>}
-          <button type="button" className="vf-btn vf-btn--sm" onClick={() => onEditar(t)}>Editar</button>
-          <button type="button" className="vf-btn vf-btn--sm" style={{ color: "var(--danger)" }}
-            onClick={() => { if (window.confirm("Apagar este trecho?")) void acao(() => apagarTrecho(t.id)); }}>Apagar</button>
+          {docs.length
+            ? docs.map((id, i) => (
+              <button key={id} type="button" className="vf-btn vf-btn--sm vf-btn--claro" onClick={() => void ver(id)}>
+                {ehVooCartao ? "Ver bilhete" : "Ver reserva"}{docs.length > 1 ? ` ${i + 1}` : ""}
+              </button>))
+            : ativa
+              ? <button type="button" className="vf-btn vf-btn--sm" onClick={onAnexar}>{ehVooCartao ? "Anexar bilhete" : "Anexar reserva / voucher"}</button>
+              : <span className="vf-sub">{ehVooCartao ? "Sem bilhete anexado" : "Sem reserva anexada"}</span>}
+          {t && ativa && <button type="button" className="vf-btn vf-btn--sm" onClick={() => onEditar(t)}>Editar</button>}
+          {t && ativa && <button type="button" className="vf-btn vf-btn--sm" style={{ color: "var(--danger)" }}
+            onClick={() => { if (window.confirm("Apagar este trecho?")) void acao(() => apagarTrecho(t.id)); }}>Apagar</button>}
         </div>
       )}
       {erro && <p className="vf-tx-falta text-[12.5px]">{erro}</p>}
@@ -372,8 +389,10 @@ export default function RoteiroCartoes({ viagemId, trechos, problemas, voos, qua
     const todos: Item[] = [...cartoesDeVoo(vivos, voos, conferidos), ...lista.filter((t) => !ehVoo(t)).map(cartaoDeTrecho)];
     // o que já aconteceu sai da lista principal (bloco recolhido no fim)
     const itemPassou = (it: Item) => (it.segs ? it.segs.every(passou) : it.t ? passou(it.t) : false);
-    const aconteceu = todos.filter(itemPassou).sort((a, b) => a.quando - b.quando);
-    const out = todos.filter((it) => !itemPassou(it));
+    // 24/11 (Bruno): o que já aconteceu fica na linha do roteiro, em VERDE (antes ia pra um bloco recolhido)
+    void itemPassou;
+    const aconteceu: Item[] = [];
+    const out = [...todos];
     const contagem = contarConferidos(vivos.map((t) => ({ id: t.id, valido: true, passou: passou(t), conferido: conferidos.has(t.id) })));
     // o que a prontidão diz que FALTA vira cartão com a ação
     const q = (c: string) => quadros.find((x) => x.chave === c);
@@ -425,6 +444,11 @@ export default function RoteiroCartoes({ viagemId, trechos, problemas, voos, qua
 
   return (
     <div className="vf-secoes">
+      <div className="vf-legenda" aria-label="Legenda das cores">
+        <span><i className="vf-legenda__p vf-cor--ok" />Já aconteceu</span>
+        <span><i className="vf-legenda__p vf-cor--futuro" />Vai acontecer</span>
+        <span><i className="vf-legenda__p vf-cor--risco" />Falta emitir ou pode ter algo errado</span>
+      </div>
       {contagem.total > 0 && (
         <div className={`vf-contagem vf-contagem--${contagem.conferidos === contagem.total ? "ok" : "atencao"}`} role="status">
           <b>{contagem.conferidos} de {contagem.total} voo{contagem.total > 1 ? "s" : ""} conferido{contagem.total > 1 ? "s" : ""}</b>
@@ -445,7 +469,7 @@ export default function RoteiroCartoes({ viagemId, trechos, problemas, voos, qua
         </section>
       ))}
       {foraDeData > 0 && (
-        <p className="vf-rot">{foraDeData} voo{foraDeData > 1 ? "s" : ""} fora das datas, genérico{foraDeData > 1 ? "s" : ""} do Bitrix ou repetido{foraDeData > 1 ? "s" : ""} não {foraDeData > 1 ? "entram" : "entra"} aqui — veja em “Voos e check-ins” e na linha do tempo completa.</p>
+        <p className="vf-rot">{foraDeData} voo{foraDeData > 1 ? "s" : ""} fora das datas, genérico{foraDeData > 1 ? "s" : ""} do Bitrix ou repetido{foraDeData > 1 ? "s" : ""} não {foraDeData > 1 ? "entram" : "entra"} aqui — veja no lápis “Ajustes da viagem” e na linha do tempo completa.</p>
       )}
       {aconteceu.length > 0 && (
         <details className="vf-bloco">

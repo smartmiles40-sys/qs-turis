@@ -515,6 +515,13 @@ export async function abrirDocumento(d: Documento): Promise<string> {
   return data.signedUrl;
 }
 
+/** 24/11: "ver o bilhete / a reserva" direto do cartão do roteiro (o trecho guarda o documento_id). */
+export async function abrirDocumentoPorId(id: string): Promise<string> {
+  const { data, error } = await supabase.from("rel_documentos").select("arquivo_path").eq("id", id).maybeSingle();
+  if (error || !data?.arquivo_path) throw new Error("O arquivo deste trecho não foi encontrado.");
+  return abrirDocumento({ arquivo_path: data.arquivo_path } as Documento);
+}
+
 /** Aprovar / recusar — ou "recebido" = desfazer a revisão (volta a "a conferir"). */
 export async function revisarDocumento(id: string, status: "aprovado" | "recusado" | "recebido", userId: string, motivo?: string) {
   const desfazer = status === "recebido";
