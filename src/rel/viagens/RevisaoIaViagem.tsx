@@ -7,17 +7,12 @@
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
-  CATEGORIA_SEG, STATUS_REVISAO, carregarRevisao, revisarViagem,
-  type CategoriaSeg, type EstadoRevisao, type SegmentoIa,
+  STATUS_REVISAO, carregarRevisao, revisarViagem,
+  type CategoriaSeg, type EstadoRevisao,
 } from "../lib/viagemIa";
 import { Aviso, Botao, Etiqueta } from "../ui";
 
 const quando = (iso: string | null) => (iso ? new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "");
-/** Hora como está no documento (hora local do lugar), sem converter pro fuso do navegador. */
-function horaLocal(iso: string | null) {
-  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-  return m ? `${m[3]}/${m[2]} ${m[4]}:${m[5]}` : "";
-}
 
 const ICONE: Record<CategoriaSeg | "seguro", ReactNode> = {
   voo_internacional: <path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />,
@@ -28,41 +23,12 @@ const ICONE: Record<CategoriaSeg | "seguro", ReactNode> = {
   passeio: <><circle cx="12" cy="10" r="3" /><path d="M12 21s-7-6.5-7-11a7 7 0 0 1 14 0c0 4.5-7 11-7 11z" /></>,
   seguro: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
 };
-const COR: Record<CategoriaSeg, string> = {
-  voo_internacional: "#2563EB", voo_interno: "#0E7C6A", transfer: "#B45309", trem: "#7C3AED", hospedagem: "#BE185D", passeio: "#0369A1",
-};
 
 function Icone({ c, cor }: { c: CategoriaSeg | "seguro"; cor: string }) {
   return (
     <span className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: `${cor}1A`, color: cor }} aria-hidden="true">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{ICONE[c]}</svg>
     </span>
-  );
-}
-
-function LinhaSegmento({ s }: { s: SegmentoIa }) {
-  const cor = COR[s.categoria];
-  const titulo = s.categoria === "hospedagem" || s.categoria === "passeio"
-    ? (s.nome_local || s.destino || s.origem || CATEGORIA_SEG[s.categoria])
-    : `${s.origem || "?"} → ${s.destino || "?"}`;
-  return (
-    <li className="flex gap-3 items-start py-2">
-      <Icone c={s.categoria} cor={cor} />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className="text-[13px] font-semibold" style={{ color: "var(--ink)" }}>{titulo}</span>
-          <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded" style={{ background: `${cor}1A`, color: cor }}>{CATEGORIA_SEG[s.categoria]}</span>
-          {s.fonte_leitura === "bitrix" && <span className="text-[11px]" style={{ color: "var(--ink3)" }}>(do Bitrix)</span>}
-        </div>
-        <div className="text-[12px] mt-0.5" style={{ color: "var(--ink2)" }}>
-          {s.categoria === "hospedagem" ? <>check-in {horaLocal(s.partida_em)}{s.chegada_em && <> · check-out {horaLocal(s.chegada_em)}</>}</>
-            : <>{horaLocal(s.partida_em)}{s.chegada_em && <> → {horaLocal(s.chegada_em)}</>}</>}
-          {[s.companhia, s.numero].filter(Boolean).length > 0 && <> · {[s.companhia, s.numero].filter(Boolean).join(" ")}</>}
-          {s.localizador && <> · loc. <b className="font-mono">{s.localizador}</b></>}
-          {s.bagagem && <> · bagagem {s.bagagem}</>}
-        </div>
-      </div>
-    </li>
   );
 }
 
@@ -111,7 +77,7 @@ export default function RevisaoIaViagem({ viagemId, onRevisado }: { viagemId: st
 
       <p className="text-[12px]" style={{ color: "var(--ink3)" }}>
         A IA lê bilhetes, seguro e vouchers anexados (e os campos de voo do Bitrix), confere se é tudo desta viagem e
-        separa voo internacional, voo interno, transfer, trem e hotel. Os trechos encontrados entram em "Trechos".
+        separa voo internacional, voo interno, transfer, trem e hotel. Os trechos encontrados entram no Roteiro.
       </p>
 
       {erro && <Aviso tom="erro">{erro}{/OPENAI_API_KEY/.test(erro) && " Peça ao Bruno pra cadastrar a chave da OpenAI na Vercel."}</Aviso>}
@@ -150,11 +116,11 @@ export default function RevisaoIaViagem({ viagemId, onRevisado }: { viagemId: st
             </div>
           )}
 
-          {(r.segmentos.length > 0 || seguros.length > 0) && (
+          {/* 24/11: os voos/trechos lidos já entram no Roteiro — aqui fica só o seguro, que não tem outro lugar */}
+          {seguros.length > 0 && (
             <div>
-              <h3 className="text-[12px] font-semibold" style={{ color: "var(--ink2)" }}>O que a IA encontrou</h3>
+              <h3 className="text-[12px] font-semibold" style={{ color: "var(--ink2)" }}>Seguro lido pela IA</h3>
               <ul className="divide-y" style={{ borderColor: "var(--line2)" }}>
-                {r.segmentos.map((s, i) => <LinhaSegmento key={i} s={s} />)}
                 {seguros.map((d, i) => {
                   const sg = d.lido!.seguro!;
                   return (
@@ -170,7 +136,6 @@ export default function RevisaoIaViagem({ viagemId, onRevisado }: { viagemId: st
                   );
                 })}
               </ul>
-              <p className="text-[11px] mt-1" style={{ color: "var(--ink3)" }}>Horários como estão no documento (hora local do lugar).</p>
             </div>
           )}
 

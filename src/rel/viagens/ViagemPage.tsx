@@ -28,7 +28,7 @@ import AlertasViagem, { CSS_PISCA } from "./AlertasViagem";
 import LinhaDoTempo from "./LinhaDoTempo";
 import SeletorServico from "./SeletorServico";
 import { ProximoVooDestaque } from "./ProximoVoo";
-import { RevisaoViagem } from "./TrechosViagem";
+import { QuadroRevisao } from "./TrechosViagem";
 import { conferirViagens, diaLocal, mapaDasNoites, type Analise } from "../lib/problemas";
 import { codigoDe, resumirVoos } from "../lib/statusViagem";
 import { carregarComponentes, documentosDaViagem, oQueFalta, pagamentoDaViagem, type Componente, type DocResumo, type ResumoPagamento } from "../lib/componentes";
@@ -460,7 +460,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
             </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
               <span className="vf-sub">Ir para:</span>
-              <button type="button" className="vf-link" onClick={() => irPara("vf-voos")}>Voos e check-ins</button>
+              <button type="button" className="vf-link" onClick={() => irPara("vf-roteiro")}>Roteiro (voos e check-ins)</button>
               <button type="button" className="vf-link" onClick={() => irPara("vf-tudo")}>Itens da venda</button>
               <button type="button" className="vf-link" onClick={() => irPara("vf-arquivos", true)}>Arquivos da viagem</button>
               <button type="button" className="vf-link" onClick={() => irPara("vf-docs")}>Documentos dos passageiros</button>
@@ -475,10 +475,8 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
           <Quadro rotulo="Vendido por">
             <b>{[venda.closer || "closer não informado", v.data_venda && `em ${dataBR(v.data_venda)}`].filter(Boolean).join(" · ")}</b>
           </Quadro>
-          {/* 24/11 (Bruno): sai o "Relacionamento · Ninguém cuidando · Assumir" — fica o time que faz os check-ins */}
-          <Quadro rotulo="Check-in">
-            <b>Relacionamento</b>
-          </Quadro>
+          {/* 24/11 (Bruno): no lugar do "Check-in · Relacionamento" — quem revisou; sem revisão, o botão (confirma no meio da tela) */}
+          <QuadroRevisao viagemId={v.id} equipe={equipe} ativa={ativa} />
         </div>
       </header>
 
@@ -509,18 +507,10 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
             <ConformidadeViagem viagemId={v.id} versao={versao} onRevisado={revisou} />
           </Prontidao>
 
-          {/* a Revisão marca REVISADO no quadro de partidas */}
-          {ativa && (
-            <section className="rel-card p-4 flex flex-wrap items-center justify-between gap-3">
-              <span className="text-[13px]" style={{ color: "var(--ink2)" }}><b style={{ color: "var(--ink)" }}>Revisão</b> · passageiros, documentos, voos e reservas conferidos</span>
-              <RevisaoViagem viagemId={v.id} equipe={equipe} />
-            </section>
-          )}
-
           <div className="vf-cols">
             {/* ── Coluna principal: o roteiro ── */}
             <main className="vf-main">
-              <section className="vf-card" aria-label="Roteiro">
+              <section id="vf-roteiro" className="vf-card" aria-label="Roteiro">
                 <div className="vf-rot__top">
                   <h2 className="vf-h2">Roteiro</h2>
                   <div className="vf-toggle" role="tablist" aria-label="Ver o roteiro">
@@ -544,7 +534,7 @@ export default function ViagemPage({ id, onVoltar, onAbrirCliente, onAbrirConver
                 )}
               </section>
 
-              {/* 30/10 (0227): os voos que valem, voo interno sim/não, check-ins e a correção manual pelo supervisor */}
+              {/* 24/11: os voos moram só no Roteiro; aqui ficam os ajustes (status forçado, datas, alertas ignorados, histórico) */}
               <div id="vf-voos"><VoosDaViagem v={v} trechos={analise ? analise.trechos : null} onMudou={revisou} /></div>
             </main>
 

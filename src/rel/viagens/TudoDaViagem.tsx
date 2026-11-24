@@ -287,7 +287,8 @@ export default function TudoDaViagem({ v, versao, onMudou, onAbrirExpedicao }: {
   const datas = useMemo(() => (comps ? proximasDatas(v, comps, pag) : []), [v, comps, pag]);
   const porTipo = useMemo(() => {
     const m = new Map<string, Componente[]>();
-    for (const c of comps ?? []) m.set(c.tipo, [...(m.get(c.tipo) ?? []), c]);
+    // 24/11 (Bruno: "os voos aparecem em 4 lugares"): trecho do roteiro (voo, hotel, passeio) mora SÓ no Roteiro
+    for (const c of comps ?? []) if (c.fonte !== "trecho") m.set(c.tipo, [...(m.get(c.tipo) ?? []), c]);
     return ordemDosTipos([...m.keys()]).map((t) => ({ tipo: t, itens: m.get(t)! }));
   }, [comps]);
 

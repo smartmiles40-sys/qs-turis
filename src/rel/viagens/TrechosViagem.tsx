@@ -254,3 +254,61 @@ export function RevisaoViagem({ viagemId, equipe }: { viagemId: string; equipe: 
     </>
   );
 }
+
+/**
+ * 24/11 (Bruno): a revisão no CABEÇALHO da ficha, no lugar do "Check-in · Relacionamento".
+ * Mostra quem revisou (nome + data); sem revisão, o botão. Clicou → confirmação no meio da tela.
+ */
+export function QuadroRevisao({ viagemId, equipe, ativa }: { viagemId: string; equipe: { id: string; name: string }[]; ativa: boolean }) {
+  const { currentUser } = useQsAuth();
+  const [rev, setRev] = useState<Revisao | null | undefined>(undefined);
+  const [aberto, setAberto] = useState<"marcar" | "desfazer" | null>(null);
+  const [obs, setObs] = useState("");
+  const [erro, setErro] = useState<string | null>(null);
+  const [ocupado, setOcupado] = useState(false);
+
+  const carregar = useCallback(() => {
+    revisoesDe([viagemId]).then((m) => setRev(m.get(viagemId) ?? null)).catch(() => setRev(null));
+  }, [viagemId]);
+  useEffect(() => { carregar(); }, [carregar]);
+
+  async function gravar(revisada: boolean) {
+    setOcupado(true); setErro(null);
+    try { await marcarRevisada(viagemId, revisada, currentUser?.id ?? "", obs); setAberto(null); setObs(""); carregar(); }
+    catch (e) { setErro(e instanceof Error ? e.message : "Não salvou."); }
+    finally { setOcupado(false); }
+  }
+
+  const feita = !!rev?.revisado_em;
+  const quem = rev?.revisado_por ? (equipe.find((u) => u.id === rev.revisado_por)?.name ?? "alguém do time").replace(/\s*\|.*$/, "") : null;
+  return (
+    <div className={`vf-quadro${rev !== undefined && !feita && ativa ? " vf-quadro--alerta" : ""}`}>
+      <span className="vf-rot">Quem fez a revisão</span>
+      {rev === undefined ? <b>…</b> : feita ? (
+        <span className="flex flex-wrap items-baseline gap-x-2">
+          <b>{quem ?? "alguém do time"}</b>
+          <span className="vf-sub">em {new Date(rev!.revisado_em!).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}</span>
+          {ativa && <button type="button" className="vf-link" onClick={() => { setErro(null); setAberto("desfazer"); }}>desfazer</button>}
+        </span>
+      ) : ativa ? (
+        <button type="button" className="vf-btn vf-btn--sm vf-btn--claro self-start" onClick={() => { setErro(null); setAberto("marcar"); }}>Marcar como revisada</button>
+      ) : <b>Não revisada</b>}
+      {feita && rev?.revisao_obs && <span className="vf-sub">"{rev.revisao_obs}"</span>}
+
+      <Modal aberto={aberto === "marcar"} titulo="Revisão da viagem" onFechar={() => setAberto(null)} largura={460}
+        rodape={<><Botao variante="fantasma" onClick={() => setAberto(null)}>Cancelar</Botao><Botao variante="primario" onClick={() => void gravar(true)} disabled={ocupado}>{ocupado ? "Salvando…" : "Sim, está tudo certo"}</Botao></>}>
+        <div className="space-y-3">
+          <p className="text-[16px] font-bold" style={{ color: "var(--ink)" }}>Você confirma que está tudo certo com essa viagem?</p>
+          <p className="text-[13px]" style={{ color: "var(--ink2)" }}>Passageiros, documentos, voos, check-ins e reservas conferidos. No painel ela passa a aparecer como <b>REVISADA ✓</b>, com o seu nome.</p>
+          <Campo rotulo="Observação (opcional)"><Entrada value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ex.: tudo ok, falta só o seguro do acompanhante" /></Campo>
+          {erro && <Aviso tom="erro">{erro}</Aviso>}
+        </div>
+      </Modal>
+      <Modal aberto={aberto === "desfazer"} titulo="Desfazer a revisão" onFechar={() => setAberto(null)} largura={460}
+        rodape={<><Botao variante="fantasma" onClick={() => setAberto(null)}>Voltar</Botao><Botao variante="primario" onClick={() => void gravar(false)} disabled={ocupado}>{ocupado ? "Salvando…" : "Desfazer"}</Botao></>}>
+        <p className="text-[14px]" style={{ color: "var(--ink)" }}>A viagem volta a aparecer como <b>PENDENTE</b> no painel. Desfazer?</p>
+        {erro && <div className="mt-3"><Aviso tom="erro">{erro}</Aviso></div>}
+      </Modal>
+    </div>
+  );
+}

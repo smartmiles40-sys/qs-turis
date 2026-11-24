@@ -19,50 +19,22 @@
 // Regras: src/rel/lib/statusViagem.ts. Sem a 0227, mostra e avisa.
 // -----------------------------------------------------------------------------
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FASES, horaDoLugar, marcarCheckin, TIPOS_TRECHO, type Trecho, type Viagem } from "../lib/viagens";
-import { useQsAuth } from "@/contexts/QsAuthContext";
+import { FASES, TIPOS_TRECHO, type Trecho, type Viagem } from "../lib/viagens";
 import {
-  ROTULO_ESTADO, ROTULO_PAPEL, codigoDe, resumirVoos, semHora, textoVooInterno,
-  type EstadoTrecho, type FaseReal, type Inconsistencia, type PapelVoo,
+  codigoDe, resumirVoos,
+  type FaseReal, type Inconsistencia,
 } from "../lib/statusViagem";
 import {
-  ROTULO_ACAO, checkinDoTrecho, correcaoDisponivel, correcoesDaViagem, corrigirDatas, corrigirTrecho, desfazerCorrecao,
+  ROTULO_ACAO, correcaoDisponivel, correcoesDaViagem, corrigirDatas, corrigirTrecho, desfazerCorrecao,
   ignorarAlerta, oQueMudou, situacaoDoTrecho, statusManual, type CamposTrecho, type Correcao,
 } from "../lib/correcoes";
 import { usePode } from "../equipe/usePode";
-import { conferidosDoHistorico } from "../lib/conferencia";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "../ui";
 
-const COR_ESTADO: Record<EstadoTrecho, { bg: string; fg: string }> = {
-  a_voar: { bg: "var(--card2)", fg: "var(--ink2)" },
-  checkin_a_fazer: { bg: "var(--warn-bg)", fg: "var(--warn-ink)" },
-  checkin_feito: { bg: "var(--rel-soft)", fg: "var(--rel-ink)" },
-  voado: { bg: "var(--card2)", fg: "var(--ink3)" },
-  cancelado: { bg: "var(--err-bg)", fg: "var(--err-ink)" },
-};
 const TOM_NIVEL = { alta: "erro", media: "aviso", info: "neutro" } as const;
 const BR = (d: string | null | undefined) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : "—");
 
-function Chip({ estado }: { estado: EstadoTrecho }) {
-  const c = COR_ESTADO[estado];
-  return <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap" style={{ background: c.bg, color: c.fg }}>{ROTULO_ESTADO[estado]}</span>;
-}
-
-function Papel({ papel }: { papel: PapelVoo | null }) {
-  if (!papel) return null;
-  const interno = papel === "interno";
-  return (
-    <span className="inline-block px-1.5 py-0.5 rounded text-[10.5px] font-bold uppercase tracking-wide whitespace-nowrap"
-      style={{ background: interno ? "#EDE9FE" : "var(--card2)", color: interno ? "#5B21B6" : "var(--ink2)" }}>
-      {ROTULO_PAPEL[papel]}
-    </span>
-  );
-}
-
 const rota = (t: Trecho) => `${codigoDe(t.origem_codigo, t.origem) || t.origem || "?"} → ${codigoDe(t.destino_codigo, t.destino) || t.destino || "?"}`;
-const quando = (t: Trecho) => (semHora(t)
-  ? `${new Date(t.partida_em).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "America/Sao_Paulo" })} · sem horário`
-  : horaDoLugar(t.partida_em, t.partida_fuso, true).texto);
 
 /** "2026-11-13T20:40" na hora LOCAL do fuso (o que está no bilhete). */
 function paraLocal(iso: string | null | undefined, fuso: string | null | undefined): string {
@@ -156,7 +128,6 @@ type Acao =
   | { tipo: "datas" };
 
 export default function VoosDaViagem({ v, trechos, onMudou }: { v: Viagem; trechos: Trecho[] | null; onMudou: () => void }) {
-  const { currentUser } = useQsAuth();
   const podeEditar = usePode("relacionamento.editar_viagens") === true;
   const disponivel = correcaoDisponivel(v);
   const pode = podeEditar && disponivel;
@@ -164,7 +135,6 @@ export default function VoosDaViagem({ v, trechos, onMudou }: { v: Viagem; trech
   const [erro, setErro] = useState<string | null>(null);
   const [hist, setHist] = useState<Correcao[]>([]);
   const [verHist, setVerHist] = useState(false);
-  const [verTodosVoos, setVerTodosVoos] = useState(false);
   const [faseNova, setFaseNova] = useState<"antes" | "em_viagem" | "concluida">("antes");
   const [ate, setAte] = useState("");
   const [datas, setDatas] = useState({ ida: v.data_embarque ?? "", volta: v.data_retorno ?? "" });
@@ -187,9 +157,6 @@ export default function VoosDaViagem({ v, trechos, onMudou }: { v: Viagem; trech
 
   if (trechos === null) return <section className="rel-card p-4 text-[13px]" style={{ color: "var(--ink3)" }}>Carregando os voos…</section>;
 
-  const validos = r.voos.filter((x) => x.valido);
-  const naoValem = r.voos.filter((x) => !x.valido);
-  const lista = verTodosVoos ? r.voos : validos;
   const abertas = r.inconsistencias.filter((i) => !i.ignorada);
   const ignoradas = r.inconsistencias.filter((i) => i.ignorada);
   // a fase da tela (view) × a calculada aqui: sem a 0227 a view ainda usa a régua antiga
@@ -203,42 +170,15 @@ export default function VoosDaViagem({ v, trechos, onMudou }: { v: Viagem; trech
     if (c.acao === "trecho_conferido") { ultimaPorItem.add(c.id); continue; }
     const k = c.trecho_id ?? "viagem"; if (vistos.has(k)) continue; vistos.add(k); ultimaPorItem.add(c.id);
   }
-  const conferidos = conferidosDoHistorico(hist);
 
   return (
-    <section className="rel-card p-4 space-y-3" aria-label="Voos e check-ins da viagem">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>Voos e check-ins</h2>
+    // 24/11 (Bruno: "os voos aparecem em 4 lugares"): a lista de voos e os check-ins moram SÓ no Roteiro.
+    // Aqui fica o que não é de um voo: alertas que não batem, status forçado, datas da viagem e o histórico.
+    <details className="rel-card p-4 space-y-3" aria-label="Ajustes da viagem" open={abertas.length > 0 || divergeDaView || undefined}>
+      <summary className="flex flex-wrap items-center justify-between gap-2 cursor-pointer">
+        <h2 className="text-[15px] font-bold" style={{ color: "var(--ink)" }}>Ajustes da viagem <span className="text-[12.5px] font-medium" style={{ color: "var(--ink3)" }}>· status {FASES[r.fase].toLowerCase()}{r.faseManual ? " (manual)" : ""} · forçar status, corrigir datas, histórico{abertas.length ? ` · ${abertas.length} não bate` : ""}</span></h2>
         {!disponivel && podeEditar && <span className="text-[11.5px]" style={{ color: "var(--ink3)" }}>Correção pela tela chega com a migration 0227.</span>}
-      </div>
-
-      {/* o resumo numa olhada */}
-      <dl className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <div className="rounded-lg p-2.5" style={{ background: "var(--card2)" }}>
-          <dt className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>Status real</dt>
-          <dd className="text-[14px] font-bold" style={{ color: "var(--ink)" }}>
-            {FASES[r.fase]}{r.faseManual && <span className="ml-1.5"><Etiqueta tom="aviso">manual</Etiqueta></span>}
-          </dd>
-          <dd className="text-[11.5px]" style={{ color: "var(--ink2)" }}>
-            {r.ida ? `${BR(r.ida)} → ${BR(r.volta)}` : "sem data"}{r.faseManual && v.fase_manual_motivo ? ` · ${v.fase_manual_motivo}` : ""}
-          </dd>
-        </div>
-        <div className="rounded-lg p-2.5" style={{ background: "var(--card2)" }}>
-          <dt className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>Próximo voo</dt>
-          <dd className="text-[14px] font-bold tabular-nums" style={{ color: "var(--ink)" }}>{r.proximo ? quando(r.proximo) : validos.length ? "todos voados" : "—"}</dd>
-          <dd className="text-[11.5px]" style={{ color: "var(--ink2)" }}>{r.proximo ? rota(r.proximo) : validos.length ? "" : "sem voo cadastrado"}</dd>
-        </div>
-        <div className="rounded-lg p-2.5" style={{ background: r.temInterno ? "#F5F3FF" : "var(--card2)" }}>
-          <dt className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>Tem voo interno</dt>
-          <dd className="text-[14px] font-bold" style={{ color: r.temInterno ? "#5B21B6" : "var(--ink)" }}>{textoVooInterno(r)}</dd>
-          <dd className="text-[11.5px]" style={{ color: "var(--ink2)" }}>{r.nacionais ? `+ ${r.nacionais} nacional de conexão` : "fora a ida e a volta"}</dd>
-        </div>
-        <div className="rounded-lg p-2.5" style={{ background: r.checkinsAFazer ? "var(--warn-bg)" : "var(--card2)" }}>
-          <dt className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--ink3)" }}>Check-ins a fazer</dt>
-          <dd className="text-[14px] font-bold" style={{ color: r.checkinsAFazer ? "var(--warn-ink)" : "var(--ink)" }}>{r.checkinsAFazer || "nenhum agora"}</dd>
-          <dd className="text-[11.5px]" style={{ color: "var(--ink2)" }}>abre 48h antes de cada voo</dd>
-        </div>
-      </dl>
+      </summary>
 
       {divergeDaView && (
         <Aviso>A lista mostra esta viagem como <b>{FASES[v.fase]}</b>, mas pelos voos ela está <b>{FASES[r.fase]}</b>{!disponivel ? " (a régua nova entra com a migration 0227)" : ""}.</Aviso>
@@ -270,67 +210,6 @@ export default function VoosDaViagem({ v, trechos, onMudou }: { v: Viagem; trech
             </div>
           ))}
         </details>
-      )}
-
-      {/* linha do tempo dos voos */}
-      {r.voos.length === 0 ? (
-        <p className="text-[13px]" style={{ color: "var(--ink3)" }}>Nenhum voo cadastrado nesta viagem.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px]" style={{ minWidth: 640 }}>
-            <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wide" style={{ color: "var(--ink3)" }}>
-                <th className="py-1.5 pr-2 font-semibold">Quando (hora local)</th>
-                <th className="py-1.5 pr-2 font-semibold">Trecho</th>
-                <th className="py-1.5 pr-2 font-semibold">Papel</th>
-                <th className="py-1.5 pr-2 font-semibold">Situação</th>
-                <th className="py-1.5 font-semibold text-right">{pode ? "Corrigir" : ""}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lista.map(({ t, papel, estado, valido, motivoFora }) => (
-                <tr key={t.id} data-trecho={t.id} style={{ borderTop: "1px solid var(--line)", opacity: valido ? 1 : 0.55 }}>
-                  <td className="py-1.5 pr-2 tabular-nums whitespace-nowrap" style={{ color: "var(--ink)" }}>{quando(t)}</td>
-                  <td className="py-1.5 pr-2" style={{ color: "var(--ink)" }}>
-                    <b>{rota(t)}</b>{t.numero ? <span style={{ color: "var(--ink2)" }}> · {t.numero}</span> : null}
-                    {t.localizador ? <span style={{ color: "var(--ink3)" }}> · {t.localizador}</span> : null}
-                    {t.corrigido_em && <span className="ml-1 text-[10.5px] font-bold" style={{ color: "var(--warn-ink)" }}>corrigido à mão</span>}
-                    {conferidos.has(t.id) && <span className="ml-1 text-[10.5px] font-bold" style={{ color: "var(--rel-ink)" }}>conferido ✓ {conferidos.get(t.id)!.por ? `por ${conferidos.get(t.id)!.por!.replace(/\s*\|.*$/, "")}` : ""}</span>}
-                    {!valido && motivoFora && <span className="block text-[11px]" style={{ color: "var(--err-ink)" }}>não conta: {motivoFora}</span>}
-                    {t.status_manual_motivo && <span className="block text-[11px]" style={{ color: "var(--ink3)" }}>motivo: {t.status_manual_motivo}</span>}
-                  </td>
-                  <td className="py-1.5 pr-2"><Papel papel={papel} /></td>
-                  <td className="py-1.5 pr-2"><Chip estado={estado} /></td>
-                  <td className="py-1.5 text-right whitespace-nowrap">
-                    {(estado === "checkin_a_fazer" || estado === "checkin_feito") && (
-                      <Botao variante={estado === "checkin_a_fazer" ? "primario" : "fantasma"}
-                        // sem a 0227, o check-in continua pelo caminho antigo (sem histórico)
-                        onClick={() => void rodar(() => (disponivel ? checkinDoTrecho(t.id, estado === "checkin_a_fazer") : marcarCheckin(t.id, estado === "checkin_a_fazer", currentUser?.id ?? "")))}>
-                        {estado === "checkin_a_fazer" ? "Check-in feito" : "Desfazer check-in"}
-                      </Botao>
-                    )}
-                    {pode && (
-                      <span className="inline-flex gap-1 ml-1">
-                        <Botao variante="fantasma" onClick={() => setAcao({ tipo: "corrigir", t })}>Editar</Botao>
-                        {t.status_manual
-                          ? <Botao variante="fantasma" onClick={() => setAcao({ tipo: "situacao", t, situacao: null })}>Automático</Botao>
-                          : <>
-                              {estado !== "voado" && <Botao variante="fantasma" onClick={() => setAcao({ tipo: "situacao", t, situacao: "voado" })}>Voado</Botao>}
-                              <Botao variante="fantasma" onClick={() => setAcao({ tipo: "situacao", t, situacao: "cancelado" })}>Cancelado</Botao>
-                            </>}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {naoValem.length > 0 && (
-            <button className="mt-1 text-[12px] font-semibold underline-offset-2 hover:underline" style={{ color: "var(--ink3)" }} onClick={() => setVerTodosVoos((x) => !x)}>
-              {verTodosVoos ? "Esconder os que não contam" : `Ver também ${naoValem.length} voo(s) que não contam (fora das datas, genérico do Bitrix, repetido, cancelado)`}
-            </button>
-          )}
-        </div>
       )}
 
       {/* supervisor: status e datas da viagem */}
@@ -407,6 +286,6 @@ export default function VoosDaViagem({ v, trechos, onMudou }: { v: Viagem; trech
           explicacao={`Ida ${BR(v.data_embarque)} → ${BR(datas.ida || null)} · volta ${BR(v.data_retorno)} → ${BR(datas.volta || null)}. As datas ficam travadas: a sincronização do Bitrix não volta com as antigas.`}
           onFechar={() => setAcao(null)} onConfirmar={async (m) => { await corrigirDatas(v.id, datas.ida || null, datas.volta || null, m); mudou(); }} />
       )}
-    </section>
+    </details>
   );
 }
