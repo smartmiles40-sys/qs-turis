@@ -169,7 +169,7 @@ function EmViagem({ itens, abrir }: { itens: Item[]; abrir: (id: string) => void
 
 // ── Página ──────────────────────────────────────────────────────────────────
 
-export default function EsteiraPage({ onAbrirViagem, onAbrirExpedicao }: { onAbrirViagem: (id: string) => void; onAbrirExpedicao?: (id: string) => void }) {
+export default function EsteiraPage({ onAbrirViagem, onAbrirExpedicao, onAbrirConversa, onAbrirSolicitacao }: { onAbrirViagem: (id: string) => void; onAbrirExpedicao?: (id: string) => void; onAbrirConversa?: (id: string) => void; onAbrirSolicitacao?: (id: string) => void }) {
   const [aba, setAbaEstado] = useState<Aba>(() => { try { const a = localStorage.getItem(CHAVE_ABA); return a === "esteira" || a === "viagem" ? a : "atividades"; } catch { return "atividades"; } });
   const setAba = (a: Aba) => { setAbaEstado(a); try { localStorage.setItem(CHAVE_ABA, a); } catch { /* sem memória */ } };
   const [busca, setBusca] = useState("");
@@ -230,7 +230,7 @@ export default function EsteiraPage({ onAbrirViagem, onAbrirExpedicao }: { onAbr
       {erro && <Aviso tom="erro">{erro}</Aviso>}
       {!dados ? <div className="rel-card h-64 animate-pulse" style={{ background: "var(--card2)" }} /> : (
         <>
-          {aba === "atividades" && <RotinaRel itens={itens} equipe={equipe} abrirViagem={onAbrirViagem} abrirExpedicao={onAbrirExpedicao} onMudou={() => void carregar()} />}
+          {aba === "atividades" && <RotinaRel itens={itens} equipe={equipe} abrirViagem={onAbrirViagem} abrirExpedicao={onAbrirExpedicao} abrirConversa={onAbrirConversa} abrirSolicitacao={onAbrirSolicitacao} onMudou={() => void carregar()} />}
           {aba === "esteira" && <Quadro itens={itens} abrir={onAbrirViagem} />}
           {aba === "viagem" && <EmViagem itens={itens} abrir={onAbrirViagem} />}
           {semData > 0 && <p className="text-[12px]" style={{ color: "var(--ink3)" }}>{semData} viagem(ns) sem data de ida não entram na esteira — ajuste a data na viagem.</p>}
