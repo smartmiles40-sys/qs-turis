@@ -3176,6 +3176,24 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             <ChannelIcon type="linkedin" size={16} />Abrir LinkedIn
           </a>
         );
+      case "instagram": {
+        // Sem @ do lead no QS: copia a mensagem da cadência e abre a busca do
+        // Instagram pelo nome. O SDR acha o perfil, cola na DM e registra o desfecho.
+        const roteiro = getScriptForTask(task) || task.notes || "";
+        const msg = roteiro.trim() ? fillTemplate(roteiro, { name: lead?.full_name, segment: lead?.segment, sdr: lead?.owner?.name ?? currentUser?.name }) : "";
+        return (
+          <a
+            href={`https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(lead?.full_name || "")}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => { if (msg) void navigator.clipboard?.writeText(msg).catch(() => null); }}
+            className="qsx-btn qsx-btn-green"
+            title={msg ? "Copia a mensagem da cadência e abre o Instagram — é só colar na DM" : "Abre o Instagram buscando pelo nome do lead"}
+          >
+            <ChannelIcon type="instagram" size={16} />Abrir Instagram{msg ? " (mensagem copiada)" : ""}
+          </a>
+        );
+      }
       default:
         return lead ? <button onClick={() => onOpenLead(lead.id)} className="qsx-btn qsx-btn-green">Ver informações</button> : null;
     }
@@ -3657,7 +3675,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                   className="qsx-fchip"
                   style={{ height: 38, borderRadius: 10 }}
                 >
-                  {(["ligacao", "ligacao_whatsapp", "whatsapp", "email", "linkedin", "pesquisa"] as ChannelType[])
+                  {(["ligacao", "ligacao_whatsapp", "whatsapp", "email", "linkedin", "instagram", "pesquisa"] as ChannelType[])
                     .filter((ch) => channelOptions(editDraft.channel).includes(ch))
                     .map((ch) => (
                     <option key={ch} value={ch}>{CHANNEL_LABELS[ch]}</option>
@@ -5078,6 +5096,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                     ["whatsapp", "Enviar WhatsApp"],
                     ["email", "Enviar E-mail"],
                     ["linkedin", "Contato pelo LinkedIn"],
+                    ["instagram", "Contato pelo Instagram"],
                     ["pesquisa", "Atividade de Pesquisa"],
                   ] as [ChannelType, string][])
                     .filter(([ch]) => channelOptions(extraTask.channel_type).includes(ch))

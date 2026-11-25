@@ -33,7 +33,7 @@ export const STEP_KINDS: StepKindDef[] = [
   { kind: "pesquisa", label: "Tarefa manual", channel: "pesquisa", textoLabel: "O que fazer", textoPlaceholder: "Ex.: conferir no Bitrix se o lead já foi cliente e anotar a última viagem.", mensagem: false },
   { kind: "ligacao_whatsapp", label: "Ligação WhatsApp", channel: "ligacao_whatsapp", textoLabel: "Roteiro da ligação", textoPlaceholder: "Roteiro…", mensagem: false },
   { kind: "linkedin", label: "LinkedIn", channel: "linkedin", textoLabel: "Mensagem", textoPlaceholder: "Mensagem…", mensagem: true },
-  { kind: "instagram", label: "Instagram", channel: "instagram", textoLabel: "Mensagem", textoPlaceholder: "Mensagem…", mensagem: true },
+  { kind: "instagram", label: "Instagram", channel: "instagram", textoLabel: "Mensagem da DM", textoPlaceholder: "Ex.: Oi {{primeiro_nome}}! Aqui é {{sdr}} da Se Tu For, Eu Vou. Vi seu interesse em {{expedicao}} e queria te mandar os detalhes por aqui também 😊", mensagem: true },
   { kind: "tiktok", label: "TikTok", channel: "tiktok", textoLabel: "Mensagem", textoPlaceholder: "Mensagem…", mensagem: true },
   { kind: "youtube", label: "YouTube", channel: "youtube", textoLabel: "Mensagem", textoPlaceholder: "Mensagem…", mensagem: true },
 ];
