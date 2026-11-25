@@ -20,11 +20,11 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQsAuth } from "@/contexts/QsAuthContext";
 import { COR_EMISSAO } from "@/lib/emissao";
 import { ETAPA, concluirEtapa, desfazerEtapa, diasAte, type RegistroEtapa } from "../lib/etapas";
-import { ETAPA_EXP, type EstadoEtapaExp, type Expedicao, type RegistroEtapaExp } from "../lib/etapasExpedicao";
+import { ETAPA_EXP, estadoDaExpedicao, type EstadoEtapaExp, type Expedicao, type RegistroEtapaExp } from "../lib/etapasExpedicao";
 import { concluirEtapaExp, desfazerEtapaExp } from "../lib/etapasExpedicaoBanco";
 import {
-  AREAS, GRUPOS_ROTINA, carregarExtras, contatoDa, ehDoDia, extrasVazios, montarRotina, rotuloDa,
-  type Atividade, type Contato, type DadosExtras, type GrupoRotina, type ItemPacote,
+  AREAS, GRUPOS_ROTINA, apagarToque, carregarExtras, contatoDa, ehDoDia, extrasVazios, janelaDa, montarRotina, registrarToque, rotuloDa,
+  type Atividade, type Toque, type Contato, type DadosExtras, type GrupoRotina, type ItemPacote,
 } from "../lib/rotina";
 import { abrirDocumentoPorId, dataBR, hojeSP, marcarCheckin, type Trecho } from "../lib/viagens";
 import { salvarItem, infoDoTipo } from "../lib/componentes";
@@ -73,7 +73,6 @@ const foneBR = (f: string | null) => {
   return f ?? "";
 };
 
-/** Título (quem) e descrição (o quê / quando) de uma atividade — usado nas linhas da fila. */
 /** "hoje 14:00", "amanhã 09:30" ou "27/11 14:00". */
 function abreQuando(iso: string | null): string {
   if (!iso) return "—";
@@ -82,6 +81,29 @@ function abreQuando(iso: string | null): string {
   const rot = dia === h ? "hoje" : dia === amanha.toISOString().slice(0, 10) ? "amanhã" : diaBR(dia);
   return `${rot} ${horaLocal(iso, null)}`;
 }
+/** Linha de andamento da tarefa de vários dias: "dia 2 de 4" e as tentativas já feitas. */
+function andamentoDa(a: Atividade, toques: Toque[] | undefined): { dia: string | null; tentativas: string | null; retoma: string | null } {
+  const { abre, prazo } = janelaDa(a);
+  const h = hojeSP();
+  let dia: string | null = null;
+  if (abre && prazo && abre <= h && prazo >= h) {
+    const total = Math.round((Date.parse(prazo) - Date.parse(abre)) / 86400000) + 1;
+    const n = Math.round((Date.parse(h) - Date.parse(abre)) / 86400000) + 1;
+    if (total > 1) dia = `dia ${n} de ${total}`;
+  }
+  const ts = toques ?? [];
+  const ult = ts[0];
+  const quandoFoi = (iso: string) => {
+    const d = new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+    const n = Math.round((Date.parse(h) - Date.parse(d)) / 86400000);
+    return n === 0 ? "hoje" : n === 1 ? "ontem" : `há ${n} dias`;
+  };
+  const tentativas = ult ? `${ts.length} contato${ts.length === 1 ? "" : "s"} · último ${quandoFoi(ult.criado_em)}${ult.nota ? ` — "${ult.nota}"` : ""}` : null;
+  const retoma = ult?.retomar_em && ult.retomar_em > h ? `retoma ${dataBR(ult.retomar_em).slice(0, 5)}` : null;
+  return { dia, tentativas, retoma };
+}
+
+/** Título (quem) e descrição (o quê / quando) de uma atividade — usado nas linhas da fila. */
 function textos(a: Atividade): { quem: string; oQue: string; quando: string; corQuando: string } {
   if (a.tipo === "etapa") {
     const d = diasAte(a.it.v.data_embarque);
@@ -283,6 +305,8 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
   const [checklistExp, setChecklistExp] = useState<{ exp: Expedicao; estado: EstadoEtapaExp } | null>(null);
   const [modelo, setModelo] = useState<Contato | null>(null);
   const [abrindoWa, setAbrindoWa] = useState(false);
+  // "Falei com o cliente, aguardando": painel aberto no card
+  const [aguardar, setAguardar] = useState<{ chave: string; dias: number | null; data: string; nota: string } | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -294,7 +318,7 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
 
   const fila = useMemo(() => montarRotina(itens.map((i): ItemPacote => ({ v: i.v, atual: i.atual, trechos: i.trechos })), extras), [itens, extras]);
   const porGrupo = useMemo(() => {
-    const g: Record<GrupoRotina, Atividade[]> = { atrasadas: [], agora: [], hoje: [], proximas: [], futuras: [] };
+    const g: Record<GrupoRotina, Atividade[]> = { atrasadas: [], agora: [], hoje: [], andamento: [], esperando: [], proximas: [], futuras: [] };
     for (const a of fila) g[a.grupo].push(a);
     return g;
   }, [fila]);
@@ -356,13 +380,62 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
         registrar(`${def.nome} · ${a.exp.nome}`, async () => { await desfazerEtapaExp(a.exp.id, a.estado.id, antes); });
       } else if (a.tipo === "checkin") {
         await Promise.all(a.trechos.map((t) => marcarCheckin(t.id, true, eu)));
-        registrar(`Check-in ${voo(a.trechos[0])} · ${a.quem}`, async () => { await Promise.all(a.trechos.map((t) => marcarCheckin(t.id, false, eu))); });
+        const desfazEtapa = await fecharEtapaCheckin(a);
+        registrar(`Check-in ${voo(a.trechos[0])} · ${a.quem}`, async () => { await Promise.all(a.trechos.map((t) => marcarCheckin(t.id, false, eu))); await desfazEtapa?.(); });
       } else {
         await salvarItem(a.item.id, { status: "emitido" });
         registrar(`Emitido ${a.item.nome} · ${a.item.quem}`, async () => { await salvarItem(a.item.id, { status: "vendido" }); });
       }
       recarregar();
     } catch (e) { setErro(e instanceof Error ? e.message : "Não concluiu."); }
+    finally { setOcupado(null); }
+  }
+
+  /**
+   * Último check-in de voo da viagem/grupo feito → a etapa "Check-in" da cadência fecha
+   * sozinha (ela não aparece mais na fila enquanto houver voo pra fazer). Devolve o desfazer.
+   */
+  async function fecharEtapaCheckin(a: Extract<Atividade, { tipo: "checkin" }>): Promise<(() => Promise<void>) | null> {
+    const viagens = new Set(a.trechos.map((t) => t.viagem_id));
+    const resta = fila.some((o) => o.tipo === "checkin" && o.chave !== a.chave
+      && (a.expId ? o.expId === a.expId : o.trechos.some((t) => viagens.has(t.viagem_id))));
+    if (resta) return null;
+    try {
+      if (a.expId && extras) {
+        const exp = extras.exps.find((e) => e.id === a.expId);
+        const est = exp ? estadoDaExpedicao(exp, extras.regsExp.get(exp.id) ?? [], hojeSP()).atual : null;
+        if (!exp || est?.id !== "checkin") return null;
+        await concluirEtapaExp({ expedicaoId: exp.id, etapa: "checkin", userId: eu, checklist: ETAPA_EXP.checkin.checklist.map((item) => ({ item, feito: true })), obs: "Fechada pela rotina: check-in de todos os voos feito." });
+        return async () => { await desfazerEtapaExp(exp.id, "checkin", est.registro ?? null); };
+      }
+      const it = a.viagemId ? itens.find((i) => i.v.id === a.viagemId) : null;
+      if (!it || it.atual?.id !== "checkin") return null;
+      const antes = it.atual.registro ?? null;
+      await concluirEtapa({ viagemId: it.v.id, etapa: "checkin", userId: eu, checklist: ETAPA.checkin.checklist.map((item) => ({ item, feito: true })), houveAlteracao: null, alteracao: null, obs: "Fechada pela rotina: check-in de todos os voos feito." });
+      return async () => { await desfazerEtapa(it.v.id, "checkin", eu, { antes }); };
+    } catch (e) { console.warn("[rotina] etapa check-in:", e); return null; }
+  }
+
+  /** Registra o contato e quando a tarefa volta pro dia. */
+  async function salvarAguardando(a: Atividade) {
+    if (!aguardar) return;
+    const retomarEm = aguardar.dias === null ? aguardar.data || null : (() => { const x = new Date(`${hojeSP()}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + (aguardar.dias ?? 1)); return x.toISOString().slice(0, 10); })();
+    setOcupado(a.chave); setErro(null);
+    try {
+      const id = await registrarToque({ chave: a.chave, tipo: a.tipo, retomarEm, nota: aguardar.nota, userId: eu });
+      registrar(`Aguardando ${textos(a).quem}${retomarEm ? ` · volta ${dataBR(retomarEm).slice(0, 5)}` : ""}`, async () => { await apagarToque(id); });
+      setAguardar(null);
+      setPulei((s) => new Set(s).add(a.chave)); // sai do card agora; se ainda vence hoje, continua na lista (no fim da área)
+      recarregar();
+    } catch (e) { setErro(e instanceof Error ? e.message : "Não registrou."); }
+    finally { setOcupado(null); }
+  }
+
+  /** "Retomar agora": um toque sem data devolve a tarefa pro dia. */
+  async function retomarAgora(a: Atividade) {
+    setOcupado(a.chave); setErro(null);
+    try { await registrarToque({ chave: a.chave, tipo: a.tipo, retomarEm: null, nota: "retomada antes da data", userId: eu }); recarregar(); }
+    catch (e) { setErro(e instanceof Error ? e.message : "Não retomou."); }
     finally { setOcupado(null); }
   }
 
@@ -396,8 +469,10 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
 
   const CONT: { id: GrupoRotina | "feitas"; rotulo: string; n: number; cor: string }[] = [
     { id: "atrasadas", rotulo: "Atrasadas", n: porGrupo.atrasadas.length, cor: "#DC2626" },
-    { id: "agora", rotulo: "Agora (check-in aberto)", n: porGrupo.agora.length, cor: "#B45309" },
-    { id: "hoje", rotulo: "Para hoje", n: porGrupo.hoje.length, cor: "#D97706" },
+    { id: "agora", rotulo: "Check-in aberto", n: porGrupo.agora.length, cor: "#B45309" },
+    { id: "hoje", rotulo: "Vence hoje", n: porGrupo.hoje.length, cor: "#D97706" },
+    { id: "andamento", rotulo: "Em andamento", n: porGrupo.andamento.length, cor: "#CA8A04" },
+    { id: "esperando", rotulo: "Esperando cliente", n: porGrupo.esperando.length, cor: "#0D9488" },
     { id: "proximas", rotulo: "Próximos 7 dias", n: porGrupo.proximas.length, cor: "#2563EB" },
     { id: "futuras", rotulo: "Futuras", n: porGrupo.futuras.length, cor: "#64748B" },
     { id: "feitas", rotulo: "Feitas hoje", n: feitasHoje.length, cor: "#16A34A" },
@@ -483,6 +558,7 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
   /** Uma linha da fila; `n` = posição na prioridade do dia. */
   function linha(a: Atividade, n?: number): ReactNode {
     const t = textos(a); const r = rotuloDa(a); const c = contatoDa(a);
+    const and = andamentoDa(a, extras?.toques.get(a.chave));
     const eAtual = atual?.chave === a.chave;
     return (
       <li key={a.chave} className="rel-card px-3 py-2.5 flex flex-wrap lg:flex-nowrap items-center gap-x-3 gap-y-2"
@@ -494,10 +570,12 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
         <span className="w-[130px] flex-shrink-0">
           <span className="block text-[11px] font-extrabold uppercase tracking-wide" style={{ color: r.cor }}>{r.o_que}</span>
           <span className="block text-[11.5px] font-semibold" style={{ color: a.grupo === "atrasadas" ? "#DC2626" : t.corQuando }}>{a.grupo === "atrasadas" && a.tipo !== "solicitacao" ? "⚠ " : ""}{t.quando}</span>
+          {(and.retoma || and.dia) && <span className="block text-[11px] font-bold" style={{ color: and.retoma ? "#0D9488" : "#92400E" }}>{and.retoma ?? and.dia}</span>}
         </span>
         <button type="button" onClick={() => { setAtiva(a.chave); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="min-w-0 flex-1 text-left basis-[220px]" title="Trazer pro card da próxima atividade">
           <span className="block text-[14px] font-bold truncate" style={{ color: "var(--ink)" }}>{t.quem}</span>
           <span className="block text-[12px] truncate" style={{ color: "var(--ink3)" }}>{t.oQue}</span>
+          {and.tentativas && <span className="block text-[11.5px] truncate font-semibold" style={{ color: "#0F766E" }}>💬 {and.tentativas}</span>}
         </button>
         <span className="flex gap-1.5 flex-shrink-0">
           {c && (
@@ -507,6 +585,7 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
             </button>
           )}
           {podeAbrir(a) && a.tipo !== "solicitacao" && <Botao variante="fantasma" onClick={() => abrir(a)}>Abrir</Botao>}
+          {a.grupo === "esperando" && <Botao disabled={ocupado === a.chave} onClick={() => void retomarAgora(a)} title="Cliente respondeu: volta pra lista de hoje">Retomar agora</Botao>}
           <Botao variante={ehDoDia(a.grupo) ? "primario" : "secundario"} disabled={ocupado === a.chave} onClick={() => void acao(a)}>{ocupado === a.chave ? "…" : rotuloAcao(a)}</Botao>
         </span>
       </li>
@@ -538,7 +617,7 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+      <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
         {CONT.map((c) => (
           <button key={c.id} type="button" disabled={c.id === "feitas"} onClick={() => c.id !== "feitas" && setVer((v) => (v === c.id ? "todas" : (c.id as GrupoRotina)))}
             className="rel-card px-3 py-2 text-left disabled:cursor-default" aria-pressed={ver === c.id}
@@ -565,14 +644,27 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
       {/* PRÓXIMA ATIVIDADE */}
       {!extras ? <div className="rel-card h-48 animate-pulse" style={{ background: "var(--card2)" }} aria-busy /> : atual ? (() => {
         const t = textos(atual); const r = rotuloDa(atual); const c = contatoDa(atual);
+        const and = andamentoDa(atual, extras.toques.get(atual.chave));
+        const painel = aguardar?.chave === atual.chave ? aguardar : null;
         return (
           <section className="rel-card p-5 flex flex-col gap-4" style={{ borderLeft: `6px solid ${r.cor}` }} aria-label="Próxima atividade">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] font-extrabold uppercase tracking-wider" style={{ color: "var(--ink3)" }}>Próxima atividade</span>
               <span className="text-[12px] font-extrabold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: `${r.cor}1F`, color: r.cor }}>{r.o_que}</span>
               <span className="text-[13px] font-bold" style={{ color: t.corQuando }}>{t.quando}</span>
+              {and.dia && <span className="text-[12px] font-bold px-2 py-0.5 rounded" style={{ background: "#FEF3C7", color: "#92400E" }}>{and.dia}</span>}
             </div>
             <h2 className="text-[24px] font-extrabold leading-tight -mt-1" style={{ color: "var(--ink)" }}>{t.quem}</h2>
+            {(extras.toques.get(atual.chave) ?? []).length > 0 && (
+              <div className="rounded-lg px-3 py-2 -mt-1 text-[12.5px]" style={{ background: "#F0FDFA", color: "#115E59" }}>
+                <b>Histórico de contato:</b>
+                <ul className="mt-0.5 space-y-0.5">
+                  {(extras.toques.get(atual.chave) ?? []).slice(0, 4).map((x) => (
+                    <li key={x.id}>{new Date(x.criado_em).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}{x.user_id ? ` · ${equipe.find((u) => u.id === x.user_id)?.name?.split(" ")[0] ?? ""}` : ""}{x.nota ? ` — ${x.nota}` : ""}{x.retomar_em ? ` (retomar ${dataBR(x.retomar_em).slice(0, 5)})` : ""}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px] items-start">
               <div className="min-w-0">{miolo(atual, r.cor)}</div>
               <PainelCliente contato={c} ocupado={abrindoWa} onWhats={() => c && void chamarNoWhats(c)}
@@ -581,8 +673,34 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
             <div className="flex flex-wrap gap-2 pt-1 border-t" style={{ borderColor: "var(--line)" }}>
               <Botao variante="primario" className="!text-[14px] !px-5 !py-2.5" disabled={ocupado === atual.chave} onClick={() => void acao(atual)}>{ocupado === atual.chave ? "…" : rotuloAcao(atual)}</Botao>
               {temChecklist(atual) && <Botao onClick={() => checklist(atual)}>Checklist / registrar alteração</Botao>}
+              {atual.tipo !== "checkin" && (
+                <Botao onClick={() => setAguardar(painel ? null : { chave: atual.chave, dias: 2, data: "", nota: "" })} title="Falei com o cliente e estou esperando a resposta: a tarefa sai de hoje e volta sozinha na data">⏸ Falei com o cliente, aguardando</Botao>
+              )}
               <Botao variante="fantasma" onClick={() => { setPulei((s) => new Set(s).add(atual.chave)); setAtiva(null); }} title="Vai pra próxima; esta continua na fila">Depois →</Botao>
             </div>
+            {painel && (
+              <div className="rounded-xl p-4 grid gap-3" style={{ background: "#F0FDFA", border: "1px solid #99F6E4" }}>
+                <div className="text-[13px] font-bold" style={{ color: "#115E59" }}>Quando essa tarefa volta pra sua lista?</div>
+                <div className="flex flex-wrap gap-2">
+                  {[1, 2, 3, 5, 7].map((d) => (
+                    <button key={d} type="button" onClick={() => setAguardar({ ...painel, dias: d })}
+                      className="px-3 py-1.5 rounded-lg text-[13px] font-bold border"
+                      style={painel.dias === d ? { background: "#0D9488", color: "#fff", borderColor: "#0D9488" } : { background: "var(--card)", color: "var(--ink)", borderColor: "var(--line)" }}>
+                      {d === 1 ? "amanhã" : `em ${d} dias`}
+                    </button>
+                  ))}
+                  <input type="date" value={painel.data} min={hojeSP()} onChange={(e) => setAguardar({ ...painel, dias: null, data: e.target.value })}
+                    className="px-2 py-1.5 rounded-lg text-[13px] border" style={{ borderColor: painel.dias === null ? "#0D9488" : "var(--line)", background: "var(--card)", color: "var(--ink)" }} aria-label="Outra data" />
+                </div>
+                {and.dia || janelaDa(atual).prazo ? <p className="text-[12px]" style={{ color: "var(--ink3)" }}>Se o prazo chegar antes ({janelaDa(atual).prazo ? dataBR(janelaDa(atual).prazo!).slice(0, 5) : "—"}), ela volta mesmo assim.</p> : null}
+                <textarea value={painel.nota} onChange={(e) => setAguardar({ ...painel, nota: e.target.value })} rows={2} placeholder="O que ficou combinado? (ex.: mandei a lista de documentos, vai enviar o passaporte)"
+                  className="w-full px-3 py-2 rounded-lg text-[13px] border" style={{ borderColor: "var(--line)", background: "var(--card)", color: "var(--ink)" }} />
+                <div className="flex gap-2">
+                  <Botao variante="primario" disabled={ocupado === atual.chave || (painel.dias === null && !painel.data)} onClick={() => void salvarAguardando(atual)}>{ocupado === atual.chave ? "…" : "Salvar e ir pra próxima"}</Botao>
+                  <Botao variante="fantasma" onClick={() => setAguardar(null)}>Cancelar</Botao>
+                </div>
+              </div>
+            )}
           </section>
         );
       })() : (
@@ -599,7 +717,7 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
             <h2 className="text-[15px] font-extrabold uppercase tracking-wide" style={{ color: "var(--ink)" }}>
               {ver === "todas" ? "Para fazer hoje" : GRUPOS_ROTINA.find((g) => g.id === ver)?.titulo} · {doDiaVis.length}
             </h2>
-            <span className="text-[12.5px]" style={{ color: "var(--ink3)" }}>na ordem de prioridade: check-ins → emissões → solicitações → expedições → pacotes</span>
+            <span className="text-[12.5px]" style={{ color: "var(--ink3)" }}>na ordem de prioridade: check-ins → emissões → solicitações → expedições → pacotes · o que você já mexeu hoje desce pro fim da área</span>
           </div>
           {doDiaVis.length === 0 ? <p className="text-[13px] px-1" style={{ color: "var(--ink3)" }}>Nada aqui.</p> : porArea(doDiaVis, true)}
         </section>

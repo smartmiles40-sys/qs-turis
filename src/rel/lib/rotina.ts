@@ -26,11 +26,25 @@ import { etapasDasExpedicoes, expedicoesDaRotina } from "./etapasExpedicaoBanco"
 import { hojeSP, type Trecho, type Viagem } from "./viagens";
 import { ehVooQueVale } from "./agendaServicos";
 
-export type GrupoRotina = "atrasadas" | "agora" | "hoje" | "proximas" | "futuras";
+/**
+ * 25/11 — tarefas de VÁRIOS DIAS. Toda atividade é uma janela (abre → prazo) e fica em
+ * um estado só:
+ *   atrasadas  passou do prazo
+ *   agora      check-in com a janela aberta
+ *   hoje       vence hoje
+ *   andamento  já abriu, prazo mais pra frente ("dia 2 de 4") — também é do dia
+ *   esperando  o time falou com o cliente e marcou "retomar em" (0420): sai do dia e
+ *              volta sozinha na data — ou antes, se o prazo chegar
+ *   proximas   abre nos próximos 7 dias
+ *   futuras    abre depois disso
+ */
+export type GrupoRotina = "atrasadas" | "agora" | "hoje" | "andamento" | "esperando" | "proximas" | "futuras";
 export const GRUPOS_ROTINA: { id: GrupoRotina; titulo: string; cor: string }[] = [
   { id: "atrasadas", titulo: "Atrasadas", cor: "#DC2626" },
-  { id: "agora", titulo: "Agora", cor: "#B45309" },
-  { id: "hoje", titulo: "Para hoje", cor: "#D97706" },
+  { id: "agora", titulo: "Check-in aberto", cor: "#B45309" },
+  { id: "hoje", titulo: "Vence hoje", cor: "#D97706" },
+  { id: "andamento", titulo: "Em andamento", cor: "#CA8A04" },
+  { id: "esperando", titulo: "Esperando o cliente (volta sozinha na data)", cor: "#0D9488" },
   { id: "proximas", titulo: "Próximos 7 dias", cor: "#2563EB" },
   { id: "futuras", titulo: "Futuras (emissões e pedidos mais pra frente)", cor: "#64748B" },
 ];
@@ -73,7 +87,18 @@ export const AREAS: { tipo: Atividade["tipo"]; titulo: string; emoji: string; co
 ];
 const PESO = Object.fromEntries(AREAS.map((a, i) => [a.tipo, i])) as Record<Atividade["tipo"], number>;
 /** O que é do dia: atrasadas, check-in aberto e o de hoje. */
-export const ehDoDia = (g: GrupoRotina) => g === "atrasadas" || g === "agora" || g === "hoje";
+export const ehDoDia = (g: GrupoRotina) => g === "atrasadas" || g === "agora" || g === "hoje" || g === "andamento";
+
+/** Um toque do time numa atividade que ainda não terminou (0420). */
+export interface Toque { id: string; chave: string; tipo: string; retomar_em: string | null; nota: string | null; user_id: string | null; criado_em: string }
+
+/** Janela da atividade (abre → prazo), pra mostrar "dia 2 de 4" e "vence em X dias". */
+export function janelaDa(a: Atividade): { abre: string | null; prazo: string | null } {
+  if (a.tipo === "etapa" || a.tipo === "etapa_exp") return { abre: a.estado.abre, prazo: a.estado.prazo };
+  if (a.tipo === "emissao") return { abre: a.estado.abre ?? null, prazo: a.estado.prazo ?? null };
+  if (a.tipo === "solicitacao") return { abre: null, prazo: a.sol.prazo ? new Date(a.sol.prazo).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) : null };
+  return { abre: null, prazo: null };
+}
 
 const somaDias = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 
@@ -81,7 +106,7 @@ function grupoDaEtapa(e: { id: string; situacao: string; abre: string | null; pr
   // "Em viagem" é acompanhamento contínuo: vira atividade na véspera da volta (fechar a etapa)
   if (e.id === "em_viagem" && e.situacao === "a_fazer") return e.prazo && e.prazo <= somaDias(hoje, 1) ? "hoje" : null;
   if (e.situacao === "atrasada") return "atrasadas";
-  if (e.situacao === "a_fazer") return e.prazo && e.prazo > somaDias(hoje, 1) ? "proximas" : "hoje";
+  if (e.situacao === "a_fazer") return e.prazo && e.prazo > hoje ? "andamento" : "hoje";
   if (e.situacao === "aguardando" && e.abre && e.abre <= somaDias(hoje, 7)) return "proximas";
   return null;
 }
@@ -93,9 +118,11 @@ export interface DadosExtras {
   checkins: CheckinGrupo[];
   emissoes: ItemEmissao[];
   solicitacoes: SolicitacaoRotina[];
+  /** toques por chave da atividade, o mais recente primeiro (0420) */
+  toques: Map<string, Toque[]>;
 }
 
-export const extrasVazios = (): DadosExtras => ({ exps: [], regsExp: new Map(), checkins: [], emissoes: [], solicitacoes: [] });
+export const extrasVazios = (): DadosExtras => ({ exps: [], regsExp: new Map(), checkins: [], emissoes: [], solicitacoes: [], toques: new Map() });
 
 export interface CheckinGrupo { titulo: string; expId: string | null; viagemId: string | null; pax: number; trechos: Trecho[]; clienteId: string | null; telefone: string | null; destino: string | null }
 
@@ -106,9 +133,31 @@ export const chaveDoVoo = (t: Pick<Trecho, "numero" | "companhia" | "partida_em"
 /** O que a rotina precisa além dos pacotes da Esteira: expedições, check-ins de grupo e emissões. */
 export async function carregarExtras(): Promise<DadosExtras> {
   const agora = Date.now();
-  const [{ exps }, checkins, emissoes, solicitacoes] = await Promise.all([expedicoesDaRotina(), checkinsDaSemana(agora), emissoesAbertas(), solicitacoesAbertas()]);
+  const [{ exps }, checkins, emissoes, solicitacoes, toques] = await Promise.all([expedicoesDaRotina(), checkinsDaSemana(agora), emissoesAbertas(), solicitacoesAbertas(), toquesRecentes()]);
   const regsExp = await etapasDasExpedicoes(exps.map((e) => e.id));
-  return { exps, regsExp, checkins, emissoes, solicitacoes };
+  return { exps, regsExp, checkins, emissoes, solicitacoes, toques };
+}
+
+/** Toques dos últimos 120 dias (cobre a janela mais longa: documentos da expedição, emissão de trem-bala). */
+async function toquesRecentes(): Promise<Map<string, Toque[]>> {
+  const m = new Map<string, Toque[]>();
+  const desde = new Date(Date.now() - 120 * 24 * 3600_000).toISOString();
+  const { data, error } = await supabase.from("rel_rotina_andamento").select("*").gte("criado_em", desde).order("criado_em", { ascending: false }).limit(5000);
+  if (error) return m; // sem a tabela a rotina segue, só sem o "aguardando"
+  for (const t of (data ?? []) as Toque[]) m.set(t.chave, [...(m.get(t.chave) ?? []), t]);
+  return m;
+}
+
+/** "Falei com o cliente, aguardando": registra o toque e quando a tarefa volta pro dia. */
+export async function registrarToque(p: { chave: string; tipo: string; retomarEm: string | null; nota: string | null; userId: string }): Promise<string> {
+  const { data, error } = await supabase.from("rel_rotina_andamento")
+    .insert({ chave: p.chave, tipo: p.tipo, retomar_em: p.retomarEm, nota: p.nota?.trim() || null, user_id: p.userId || null }).select("id").single();
+  if (error) throw error;
+  return (data as { id: string }).id;
+}
+export async function apagarToque(id: string) {
+  const { error } = await supabase.from("rel_rotina_andamento").delete().eq("id", id);
+  if (error) throw error;
 }
 
 type ViagemMin = { id: string; titulo: string; destino: string | null; cliente_nome: string | null; cliente_id: string | null; status: string; expedicoes_id: string | null };
@@ -267,24 +316,48 @@ export function montarRotina(pacotes: ItemPacote[], extras: DadosExtras | null, 
     for (const item of extras.emissoes) {
       const e = estadoEmissao(item, hoje);
       const g: GrupoRotina | null = e.situacao === "vencida" ? "atrasadas"
-        : e.situacao === "urgente" || e.situacao === "aberta" ? "hoje"
+        : e.situacao === "urgente" || e.situacao === "aberta" ? (e.prazo && e.prazo > hoje ? "andamento" : "hoje")
         : e.abre && e.abre <= somaDias(hoje, 7) ? "proximas" : "futuras";
       out.push({ tipo: "emissao", chave: `m:${item.id}`, grupo: g, ordem: String(e.situacao === "aguardando" ? e.abre ?? "9999" : e.prazo ?? ""), item, estado: e });
     }
     for (const sol of extras.solicitacoes) {
       const dia = sol.prazo ? new Date(sol.prazo).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) : null;
+      // solicitação aberta já é trabalho: vence hoje (ou urgente/sem prazo) ou está em andamento
       const g: GrupoRotina = sol.vencida ? "atrasadas"
-        : !dia || dia <= hoje || sol.prioridade === "urgente" || sol.status === "nova" ? "hoje"
-        : dia <= somaDias(hoje, 7) ? "proximas" : "futuras";
+        : !dia || dia <= hoje || sol.prioridade === "urgente" ? "hoje" : "andamento";
       out.push({ tipo: "solicitacao", chave: `s:${sol.id}`, grupo: g, ordem: sol.prazo ?? "", sol });
     }
   }
 
+  // A etapa "Check-in" da cadência é feita voo a voo: enquanto houver check-in de voo na fila
+  // (aberto ou abrindo), a etapa não aparece de novo — e fecha sozinha no último voo (RotinaRel).
+  const comVoo = new Set<string>();
+  for (const a of out) if (a.tipo === "checkin") {
+    if (a.expId) comVoo.add(`x:${a.expId}`);
+    for (const t of a.trechos) comVoo.add(`v:${t.viagem_id}`);
+  }
+  const fila = out.filter((a) => !(a.tipo === "etapa" && a.estado.id === "checkin" && comVoo.has(`v:${a.it.v.id}`))
+    && !(a.tipo === "etapa_exp" && a.estado.id === "checkin" && comVoo.has(`x:${a.exp.id}`)));
+
+  // "Esperando o cliente": o toque mais recente com retomar_em no futuro tira do dia o que
+  // está EM ANDAMENTO. Venceu hoje, atrasou ou abriu o check-in? Volta pro dia mesmo assim.
+  const toques = extras?.toques ?? new Map<string, Toque[]>();
+  for (const a of fila) {
+    const t = toques.get(a.chave)?.[0];
+    if (a.grupo === "andamento" && t?.retomar_em && t.retomar_em > hoje) a.grupo = "esperando";
+  }
+  const mexidaHoje = (a: Atividade) => {
+    const t = toques.get(a.chave)?.[0];
+    return t ? new Date(t.criado_em).toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }) === hoje : false;
+  };
+
   // Do dia primeiro, por ÁREA (na ordem de prioridade) e, dentro da área, o mais urgente
   // (check-in aberto > atrasada > hoje) e o mais cedo. Depois próximos 7 dias e futuras.
-  const bloco = (g: GrupoRotina) => (ehDoDia(g) ? 0 : g === "proximas" ? 1 : 2);
-  const urg: Record<GrupoRotina, number> = { agora: 0, atrasadas: 1, hoje: 2, proximas: 3, futuras: 4 };
-  return out.sort((a, b) => bloco(a.grupo) - bloco(b.grupo) || PESO[a.tipo] - PESO[b.tipo] || urg[a.grupo] - urg[b.grupo] || a.ordem.localeCompare(b.ordem));
+  // Quem já levou um toque hoje vai pro fim da sua área (já foi mexida; o resto vem antes).
+  const bloco = (g: GrupoRotina) => (ehDoDia(g) ? 0 : g === "esperando" ? 1 : g === "proximas" ? 2 : 3);
+  const urg: Record<GrupoRotina, number> = { agora: 0, atrasadas: 1, hoje: 2, andamento: 3, esperando: 4, proximas: 5, futuras: 6 };
+  return fila.sort((a, b) => bloco(a.grupo) - bloco(b.grupo) || PESO[a.tipo] - PESO[b.tipo] || Number(mexidaHoje(a)) - Number(mexidaHoje(b))
+    || urg[a.grupo] - urg[b.grupo] || a.ordem.localeCompare(b.ordem));
 }
 
 /** Rótulo curto do que fazer (coluna da esquerda) e a cor. */
