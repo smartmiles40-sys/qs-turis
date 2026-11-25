@@ -277,6 +277,16 @@ function pgValor(v) {
   return encodeURIComponent(`"${String(v).replace(/["\\]/g, '\\$&')}"`);
 }
 
+// @ do Instagram (0418): aceita instagram | instagram_url | ig, com ou sem @/link.
+// Espelho de src/lib/instagram.ts (normalizarInstagram) — manter iguais.
+export function instagramDoLead(payload) {
+  let s = String(payload?.instagram ?? payload?.instagram_url ?? payload?.ig ?? '').trim();
+  if (!s) return null;
+  s = s.replace(/^https?:\/\//i, '').replace(/^(www\.|m\.)?instagram\.com\//i, '').replace(/^@+/, '');
+  s = s.split(/[/?#]/)[0].toLowerCase(); // com espaço = nome digitado, não @ → recusa
+  return /^[a-z0-9._]{1,30}$/.test(s) ? s : null;
+}
+
 // Vocabulário fechado de temperatura (PT + EN). Usado pra achar o score PELO
 // VALOR, sem depender do nome do campo que o Bitrix mandou.
 const TEMP_WORD = /^(quente|morno|frio|hot|warm|cold)$/i;
@@ -284,7 +294,7 @@ const TEMP_WORD = /^(quente|morno|frio|hot|warm|cold)$/i;
 // Nomes de campo que NUNCA são o score (evita falso-positivo no scan por valor).
 const NON_SCORE_KEYS = new Set([
   'source', 'segment', 'full_name', 'first_name', 'last_name', 'email', 'phone',
-  'company', 'company_name', 'city', 'state', 'website', 'linkedin_url',
+  'company', 'company_name', 'city', 'state', 'website', 'linkedin_url', 'instagram',
   'job_title', 'bitrix_id', 'id', 'cadence_id', 'owner_id', 'location',
 ]);
 
@@ -626,6 +636,7 @@ export async function createInboundLead(payload, opts = {}) {
     phone,
     email,
     linkedin_url: payload.linkedin_url || null,
+    ...(instagramDoLead(payload) ? { instagram: instagramDoLead(payload) } : {}),
     source: normSource(payload.source),
     // Lead que JÁ entra vinculado a uma cadência (com tarefas geradas logo
     // abaixo) nasce "em_prospeccao" — mesma regra do front ao vincular cadência

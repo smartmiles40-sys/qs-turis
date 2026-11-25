@@ -62,6 +62,7 @@ import CotandoAereo from "@/components/sdr/aereo/CotandoAereo";
 import CadastroDoLead from "@/clientes/cadastro/CadastroDoLead";
 import LigacoesDoLead from "@/components/sdr/leads/LigacoesDoLead";
 import SeloCardBitrix from "@/components/sdr/leads/SeloCardBitrix";
+import { normalizarInstagram, urlDoInstagram } from "@/lib/instagram";
 import type { LeadComCardBitrix } from "@/components/sdr/leads/cardBitrix";
 import type {
   Lead,
@@ -200,6 +201,7 @@ interface LeadEditForm {
   estimated_value: string;
   company_linkedin: string;
   company_size: string;
+  instagram: string;
 }
 
 function leadToEditForm(lead: Lead): LeadEditForm {
@@ -216,6 +218,7 @@ function leadToEditForm(lead: Lead): LeadEditForm {
     estimated_value: lead.estimated_value != null ? String(lead.estimated_value) : "",
     company_linkedin: lead.company_linkedin ?? "",
     company_size: lead.company_size ?? "",
+    instagram: lead.instagram ? `@${lead.instagram}` : "",
   };
 }
 
@@ -586,6 +589,10 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
       setEditError("Valor estimado inválido — use números (ex.: 1500 ou 1.500,50).");
       return;
     }
+    if (editForm.instagram.trim() && !normalizarInstagram(editForm.instagram)) {
+      setEditError("Instagram inválido — use o @ do perfil (ex.: @maria.souza) ou o link instagram.com/...");
+      return;
+    }
     setSavingEdit(true);
     setEditError(null);
     try {
@@ -602,6 +609,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
         estimated_value: estimated,
         company_linkedin: editForm.company_linkedin.trim() || null,
         company_size: editForm.company_size.trim() || null,
+        instagram: normalizarInstagram(editForm.instagram),
       };
       // Mantém first/last coerentes com o nome exibido (iniciais do avatar) —
       // só quando o nome realmente mudou, pra não sobrescrever dados do Bitrix.
@@ -1390,6 +1398,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
       ...((lead.city || lead.state) ? [["Cidade / UF", [lead.city, lead.state].filter(Boolean).join(" / ")] as [string, React.ReactNode]] : []),
       ...(lead.job_title ? [["Cargo", lead.job_title] as [string, React.ReactNode]] : []),
       ...(lead.company_name ? [["Empresa", lead.company_name] as [string, React.ReactNode]] : []),
+      ...(lead.instagram ? [["Instagram", <a href={urlDoInstagram(lead.instagram)} target="_blank" rel="noopener noreferrer" style={{ color: "#DB2777", fontWeight: 600 }}>@{lead.instagram}</a>] as [string, React.ReactNode]] : []),
       ...(lead.linkedin_url ? [["LinkedIn", lead.linkedin_url] as [string, React.ReactNode]] : []),
       ...(lead.estimated_value != null ? [["Valor estimado", lead.estimated_value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })] as [string, React.ReactNode]] : []),
       ...(lead.closed_value != null ? [["Valor fechado", lead.closed_value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })] as [string, React.ReactNode]] : []),
@@ -2144,6 +2153,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
                   { key: "full_name", label: "Nome completo *", type: "text", placeholder: "Nome do lead" },
                   { key: "phone", label: "Telefone", type: "text", placeholder: "(11) 99999-9999" },
                   { key: "email", label: "E-mail", type: "email", placeholder: "nome@empresa.com" },
+                  { key: "instagram", label: "Instagram", type: "text", placeholder: "@usuario ou link do perfil" },
                   { key: "company_name", label: "Empresa", type: "text", placeholder: "Nome da empresa" },
                   { key: "job_title", label: "Cargo", type: "text", placeholder: "Ex.: Diretor Comercial" },
                   { key: "department", label: "Departamento", type: "text", placeholder: "Ex.: Comercial" },

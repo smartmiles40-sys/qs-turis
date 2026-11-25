@@ -9,7 +9,7 @@
 //
 // Body (JSON) — campos aceitos (todos opcionais menos ter algum identificador):
 //   full_name | first_name/last_name, email, phone, company_name (ou company),
-//   segment, city, state, job_title, website, linkedin_url, source,
+//   segment, city, state, job_title, website, linkedin_url, instagram (@ ou link), source,
 //   cadence_id (opcional), owner_id (opcional), estimated_value (opcional),
 //   bitrix_id (opcional — ID do negócio no Bitrix; deduplica: o mesmo bitrix_id
 //   nunca cria dois cards, e permite a volta QS→Bitrix mover a coluna certa)

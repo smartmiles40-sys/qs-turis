@@ -81,6 +81,8 @@ export interface Lead {
   phone: string | null;
   email: string | null;
   linkedin_url: string | null;
+  /** Usuário do Instagram sem @ (0418). */
+  instagram?: string | null;
   source: LeadSource;
   status: LeadStatus;
   location: string | null;

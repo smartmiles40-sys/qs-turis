@@ -30,6 +30,7 @@ import { caronaDasOportunidades } from "@/lib/qs/oportunidadeFutura";
 import { getLeadScore, normalizeTemperature, type LeadTemperature } from "@/lib/leadScore";
 import TemperaturaSdrPicker from "@/components/sdr/agenda/TemperaturaSdrPicker";
 import { formatPhoneDisplay, fillTemplate, normalizePhoneBR } from "@/lib/whatsapp";
+import { urlDoInstagram } from "@/lib/instagram";
 import { fetchEnabledChannels } from "@/lib/qs/channels";
 import { dialViaOficial, setOnCallEndedOficial } from "@/lib/qs/waCall";
 import {
@@ -3177,18 +3178,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
           </a>
         );
       case "instagram": {
-        // Sem @ do lead no QS: copia a mensagem da cadência e abre a busca do
-        // Instagram pelo nome. O SDR acha o perfil, cola na DM e registra o desfecho.
+        // Copia a mensagem da cadência e abre o perfil (qs_leads.instagram, 0418);
+        // lead sem @ → busca do Instagram pelo nome. O SDR cola na DM e registra o desfecho.
         const roteiro = getScriptForTask(task) || task.notes || "";
         const msg = roteiro.trim() ? fillTemplate(roteiro, { name: lead?.full_name, segment: lead?.segment, sdr: lead?.owner?.name ?? currentUser?.name }) : "";
         return (
           <a
-            href={`https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(lead?.full_name || "")}`}
+            href={lead?.instagram ? urlDoInstagram(lead.instagram) : `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(lead?.full_name || "")}`}
             target="_blank"
             rel="noopener noreferrer"
             onClick={() => { if (msg) void navigator.clipboard?.writeText(msg).catch(() => null); }}
             className="qsx-btn qsx-btn-green"
-            title={msg ? "Copia a mensagem da cadência e abre o Instagram — é só colar na DM" : "Abre o Instagram buscando pelo nome do lead"}
+            title={`${msg ? "Copia a mensagem da cadência e abre " : "Abre "}${lead?.instagram ? `o perfil @${lead.instagram}` : "a busca do Instagram pelo nome (lead sem @ — preencha em Editar dados)"}`}
           >
             <ChannelIcon type="instagram" size={16} />Abrir Instagram{msg ? " (mensagem copiada)" : ""}
           </a>
