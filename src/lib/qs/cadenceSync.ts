@@ -38,7 +38,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { loadWorkHours, scheduleWeekdays, planCadenceDates, clampToWorkWindow, nextWorkMoment } from "@/lib/workHours";
-import type { CadenceActivity, CadenceDay, PriorityLevel, TaskStatus } from "../../components/sdr/types";
+import type { CadenceActivity, CadenceDay, PriorityLevel, TaskStatus } from "../../components/sdr/types";
 import { lotes } from "@/lib/lotes";
 
 /** O que a sincronização fez — vira a mensagem que o gestor lê no fim. */
@@ -196,6 +196,13 @@ export async function aplicarPlanoNosLeads(
         const d = diaDaTag(t.tags);
         if (d != null) jaTem.add(chave(d, t.channel_type));
       }
+      // Lead ANTIGO (tarefas de antes do carimbo "dia:N", 24/07): sem o carimbo
+      // não dá pra saber qual dia ele já fez, e o laço abaixo recriava o plano
+      // INTEIRO pra hoje (25/11: 271 ligações/WhatsApps em 30 leads de julho).
+      // Pra ele só entra canal que ele NUNCA teve nesta cadência — o passo
+      // novo de verdade (ex.: Instagram); ligação/WhatsApp não se repetem.
+      const legado = tarefas.some((t) => diaDaTag(t.tags) == null && !(t.tags ?? []).includes("follow-up"));
+      const canaisQueJaTeve = new Set(tarefas.map((t) => t.channel_type));
 
       // A régua de datas deste lead sai do dia em que ELE entrou na cadência.
       // Lead espalhado pelo teto de entrada (0216) começou DEPOIS do dia em que
@@ -223,6 +230,8 @@ export async function aplicarPlanoNosLeads(
       // 4a. O que o plano tem e o lead não tem → criar.
       for (const item of doPlano) {
         if (jaTem.has(item.k)) continue;
+        if (legado && canaisQueJaTeve.has(item.act.channel_type)) continue;
+        if (legado) canaisQueJaTeve.add(item.act.channel_type); // 1 por canal novo, não 1 por dia
         const quando = new Date(dateByDay.get(item.dia) ?? new Date());
         const [h, m] = (item.act.scheduled_time || "09:00").split(":").map(Number);
         quando.setHours(h || 9, m || 0, 0, 0);
