@@ -284,8 +284,9 @@ export function instagramDoLead(payload) {
   if (!s) return null;
   s = s.replace(/^https?:\/\//i, '').replace(/^(www\.|m\.)?instagram\.com\//i, '').replace(/^@+/, '');
   s = s.split(/[/?#]/)[0].toLowerCase(); // com espaço = nome digitado, não @ → recusa
-  return /^[a-z0-9._]{1,30}$/.test(s) ? s : null;
+  return /^[a-z0-9._]{3,30}$/.test(s) && !IG_LIXO.test(s) ? s : null;
 }
+const IG_LIXO = /^(teste|testes?[0-9]*|teste_[a-z0-9_]+|littleteste|n[aã]o|naotenho|notenho|naotem|n[aã]otenhoinsta(gram)?|seminsta(gram)?|nenhum|nada|x{3,}|[._0]+)$/;
 
 // Vocabulário fechado de temperatura (PT + EN). Usado pra achar o score PELO
 // VALOR, sem depender do nome do campo que o Bitrix mandou.

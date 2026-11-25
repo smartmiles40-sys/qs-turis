@@ -31,7 +31,8 @@
 // Env: BITRIX_WEBHOOK_BASE (já usada pelo bitrix-sync), SUPABASE_*.
 // -----------------------------------------------------------------------------
 
-import { rest } from './_supabaseAdmin.js';
+import { rest, segredoConfere } from './_supabaseAdmin.js';
+import { instagramDoLead } from './_leads.js';
 import { getSupabaseUserId, assertCanAccessLead } from './_wa.js';
 import { bx, bitrixConfigurado } from './_bitrixLead.js';
 import { comSentry } from './_sentry.js';
@@ -177,7 +178,57 @@ export async function respostasDoNegocio(bitrixId) {
   return saida;
 }
 
+// ── @ do Instagram do lead (0418/0419, 25/11) ────────────────────────────────
+// O formulário da LP grava o @ no negócio, em "Id do Instagram do cliente".
+// A rotina (Cron, a cada 10 min) lê esse campo dos leads que ainda não têm @ —
+// 50 negócios por chamada do Bitrix — e grava em qs_leads.instagram. Quem foi
+// conferido ganha instagram_conferido_em e não é perguntado de novo (com ou sem
+// @). Cobre o histórico (aos poucos) e todo lead novo em até 10 minutos.
+const CAMPO_INSTAGRAM = 'UF_CRM_1771877600411';
+const LOTE_INSTAGRAM = 300;
+
+export async function rodadaInstagram({ limite = LOTE_INSTAGRAM, orcamentoMs = 40_000 } = {}) {
+  const inicio = Date.now();
+  if (!bitrixConfigurado()) return { parado: 'bitrix_nao_configurado' };
+  const leads = (await rest(`qs_leads?select=id,bitrix_id&instagram=is.null&instagram_conferido_em=is.null&bitrix_id=not.is.null&order=created_at.desc&limit=${limite}`)) || [];
+  let conferidos = 0;
+  let achados = 0;
+  for (let i = 0; i < leads.length; i += 50) {
+    if (Date.now() - inicio > orcamentoMs) break;
+    const lote = leads.slice(i, i + 50);
+    const ids = [...new Set(lote.map((l) => String(l.bitrix_id)).filter((v) => /^d+$/.test(v)))];
+    const deals = ids.length
+      ? await bx('crm.deal.list', { filter: { '@ID': ids }, select: ['ID', CAMPO_INSTAGRAM] }, 15_000)
+      : [];
+    if (!Array.isArray(deals)) break; // Bitrix fora: tenta na próxima rodada, sem marcar ninguém
+    const porDeal = new Map(deals.map((d) => [String(d.ID), instagramDoLead({ instagram: d[CAMPO_INSTAGRAM] })]));
+    const agora = new Date().toISOString();
+    for (const l of lote) {
+      const ig = porDeal.get(String(l.bitrix_id)) || null;
+      await rest(`qs_leads?id=eq.${l.id}&instagram=is.null`, {
+        method: 'PATCH', prefer: 'return=minimal',
+        body: ig ? { instagram: ig, instagram_conferido_em: agora } : { instagram_conferido_em: agora },
+      }).catch((e) => console.warn('[instagram] gravando:', e?.message));
+      conferidos++;
+      if (ig) achados++;
+    }
+  }
+  return { ok: true, fila: leads.length, conferidos, achados };
+}
+
+function cronAutorizado(req) {
+  const cron = String(process.env.CRON_SECRET || '').trim();
+  const veio = String(req.headers?.authorization || '').replace(/^Bearers+/i, '').trim();
+  return !!cron && segredoConfere(veio, cron);
+}
+
 async function handler(req, res) {
+  if (param(req, 'acao') === 'instagram') {
+    if (!cronAutorizado(req)) return res.status(401).json({ error: 'Só o Cron.' });
+    const r = await rodadaInstagram();
+    console.log(`[instagram] rodada: ${JSON.stringify(r)}`);
+    return res.status(200).json(r);
+  }
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return res.status(405).json({ error: 'Use GET' });
@@ -266,6 +317,14 @@ async function handler(req, res) {
     // Gravar é otimização, não o serviço: se o cache falhar, a resposta sai
     // igual e o próximo acesso pergunta ao Bitrix de novo.
     console.warn('[formulario] gravando cache:', e?.message);
+  }
+
+  // O @ que veio junto vai pro lead (só se ainda não tem — o SDR pode ter corrigido à mão).
+  const ig = instagramDoLead({ instagram: answers.find((a) => a.campo === CAMPO_INSTAGRAM)?.valor });
+  if (ig) {
+    await rest(`qs_leads?id=eq.${encodeURIComponent(leadId)}&instagram=is.null`, {
+      method: 'PATCH', prefer: 'return=minimal', body: { instagram: ig, instagram_conferido_em: agora },
+    }).catch((e) => console.warn('[formulario] instagram:', e?.message));
   }
 
   return res.status(200).json({ answers, atualizado_em: agora, origem: 'bitrix' });

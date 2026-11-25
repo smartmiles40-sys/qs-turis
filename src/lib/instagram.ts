@@ -9,7 +9,10 @@ export function normalizarInstagram(raw: string | null | undefined): string | nu
   if (!s) return null;
   s = s.replace(/^https?:\/\//i, "").replace(/^(www\.|m\.)?instagram\.com\//i, "").replace(/^@+/, "");
   s = s.split(/[/?#]/)[0].toLowerCase(); // com espaço = nome digitado, não @ → recusa
-  return /^[a-z0-9._]{1,30}$/.test(s) ? s : null;
+  return /^[a-z0-9._]{3,30}$/.test(s) && !IG_LIXO.test(s) ? s : null;
 }
+
+/** "teste", "naotenho"… que o lead digita pra passar do formulário. */
+const IG_LIXO = /^(teste|testes?[0-9]*|teste_[a-z0-9_]+|littleteste|n[aã]o|naotenho|notenho|naotem|n[aã]otenhoinsta(gram)?|seminsta(gram)?|nenhum|nada|x{3,}|[._0]+)$/;
 
 export const urlDoInstagram = (usuario: string) => `https://www.instagram.com/${usuario}/`;

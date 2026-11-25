@@ -135,6 +135,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/lead-formulario?acao=instagram",
+      "schedule": "7-59/10 * * * *"
+    },
+    {
       "path": "/api/leads-sem-card?acao=retentar",
       "schedule": "4-59/10 * * * *"
     },
