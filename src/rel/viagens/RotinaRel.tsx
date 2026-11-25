@@ -74,6 +74,14 @@ const foneBR = (f: string | null) => {
 };
 
 /** Título (quem) e descrição (o quê / quando) de uma atividade — usado nas linhas da fila. */
+/** "hoje 14:00", "amanhã 09:30" ou "27/11 14:00". */
+function abreQuando(iso: string | null): string {
+  if (!iso) return "—";
+  const dia = diaLocal(iso, null), h = hojeSP();
+  const amanha = new Date(`${h}T12:00:00Z`); amanha.setUTCDate(amanha.getUTCDate() + 1);
+  const rot = dia === h ? "hoje" : dia === amanha.toISOString().slice(0, 10) ? "amanhã" : diaBR(dia);
+  return `${rot} ${horaLocal(iso, null)}`;
+}
 function textos(a: Atividade): { quem: string; oQue: string; quando: string; corQuando: string } {
   if (a.tipo === "etapa") {
     const d = diasAte(a.it.v.data_embarque);
@@ -86,7 +94,7 @@ function textos(a: Atividade): { quem: string; oQue: string; quando: string; cor
     const t = a.trechos[0];
     const pax = a.pax > 1 ? ` · ${a.pax} passageiros` : "";
     const loc = a.pax === 1 && t.localizador ? ` · loc. ${t.localizador}` : "";
-    return { quem: a.quem, oQue: `${nomeCia(t)} ${numeroVoo(t)} · ${rota(t)} · voo ${horaVoo(t)}${pax}${loc}`, quando: t.fonte === "bitrix" ? "horário a confirmar" : a.aberto ? "aberto agora" : `abre ${horaLocal(t.checkin_em, null)}`, corQuando: a.aberto ? "#DC2626" : "#B45309" };
+    return { quem: a.quem, oQue: `${nomeCia(t)} ${numeroVoo(t)} · ${rota(t)} · voo ${horaVoo(t)}${pax}${loc}`, quando: t.fonte === "bitrix" ? "horário a confirmar" : a.aberto ? "aberto agora" : `abre ${abreQuando(t.checkin_em)}`, corQuando: a.aberto ? "#DC2626" : "#B45309" };
   }
   if (a.tipo === "solicitacao") {
     const s = a.sol;
@@ -401,7 +409,7 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
       return (
         <div className="grid gap-3">
           {a.trechos.length > 1 && a.pax === 1 && <p className="text-[12.5px] font-semibold" style={{ color: "var(--ink2)" }}>{a.trechos.length} trechos no mesmo check-in.</p>}
-          <BilheteVoo t={a.trechos[0]} cor={cor} estado={a.trechos[0].fonte === "bitrix" ? "horário a confirmar" : a.aberto ? "check-in aberto" : `abre ${horaLocal(a.trechos[0].checkin_em, null)}`} outros={a.trechos} />
+          <BilheteVoo t={a.trechos[0]} cor={cor} estado={a.trechos[0].fonte === "bitrix" ? "horário a confirmar" : a.aberto ? "check-in aberto" : `abre ${abreQuando(a.trechos[0].checkin_em)}`} outros={a.trechos} />
         </div>
       );
     }

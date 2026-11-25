@@ -106,7 +106,7 @@ export const chaveDoVoo = (t: Pick<Trecho, "numero" | "companhia" | "partida_em"
 /** O que a rotina precisa além dos pacotes da Esteira: expedições, check-ins de grupo e emissões. */
 export async function carregarExtras(): Promise<DadosExtras> {
   const agora = Date.now();
-  const [{ exps }, checkins, emissoes, solicitacoes] = await Promise.all([expedicoesDaRotina(), checkinsDas24h(agora), emissoesAbertas(), solicitacoesAbertas()]);
+  const [{ exps }, checkins, emissoes, solicitacoes] = await Promise.all([expedicoesDaRotina(), checkinsDaSemana(agora), emissoesAbertas(), solicitacoesAbertas()]);
   const regsExp = await etapasDasExpedicoes(exps.map((e) => e.id));
   return { exps, regsExp, checkins, emissoes, solicitacoes };
 }
@@ -123,13 +123,16 @@ async function telefonesDe(ids: (string | null | undefined)[]): Promise<Map<stri
 }
 
 /**
- * Todo voo (de viagem ativa) cujo check-in abre nas próximas 24h e que não decolou.
+ * Todo voo (de viagem ativa) cujo check-in já abriu ou abre nos próximos 7 dias e que
+ * não decolou. 25/11 (Bruno): o check-in só abre 48h (voo) / 24h (trem) antes — ou o
+ * horário gravado no trecho (checkin_abre_em) —, então ele só entra no DIA quando a
+ * janela abre ("agora"); antes disso fica em "Próximos 7 dias" mostrando quando abre.
  * Não só das expedições em andamento: quem ESTENDEU a viagem volta depois do grupo
  * "Concluído" e o check-in da volta é do time do mesmo jeito. Expedição junta por
  * GRUPO × voo; o resto, por viagem × voo.
  */
-async function checkinsDas24h(agora: number): Promise<CheckinGrupo[]> {
-  const ate = new Date(agora + 24 * 3600_000).toISOString(), desde = new Date(agora).toISOString();
+async function checkinsDaSemana(agora: number): Promise<CheckinGrupo[]> {
+  const ate = new Date(agora + 7 * 24 * 3600_000).toISOString(), desde = new Date(agora).toISOString();
   const { data, error } = await supabase.from("rel_trechos_v").select("*")
     .is("checkin_feito_em", null).lte("checkin_em", ate).gt("partida_em", desde).limit(3000);
   if (error) throw error;
@@ -240,9 +243,10 @@ export function montarRotina(pacotes: ItemPacote[], extras: DadosExtras | null, 
     for (const t of it.trechos) {
       if (!ehVooQueVale(t, it.v) || !t.checkin_em || t.checkin_feito_em || t.status_manual) continue;
       const abre = new Date(t.checkin_em).getTime(), sai = new Date(t.partida_em).getTime();
-      if (abre > agora + 24 * 3600_000 || sai <= agora) continue;
+      if (abre > agora + 7 * 24 * 3600_000 || sai <= agora) continue;
       vistos.add(t.id);
-      out.push({ tipo: "checkin", chave: `c:${t.id}`, grupo: abre <= agora ? "agora" : "hoje", ordem: t.partida_em, quem: it.v.cliente_nome || it.v.titulo, viagemId: it.v.id, expId: null, pax: 1, trechos: [t], aberto: abre <= agora, clienteId: it.v.cliente_id, telefone: it.v.cliente_telefone ?? null, destino: it.v.destino });
+      // só vira tarefa do dia quando a janela do check-in ABRE; antes, aparece em "Próximos 7 dias"
+      out.push({ tipo: "checkin", chave: `c:${t.id}`, grupo: abre <= agora ? "agora" : "proximas", ordem: t.partida_em, quem: it.v.cliente_nome || it.v.titulo, viagemId: it.v.id, expId: null, pax: 1, trechos: [t], aberto: abre <= agora, clienteId: it.v.cliente_id, telefone: it.v.cliente_telefone ?? null, destino: it.v.destino });
     }
   }
 
@@ -258,7 +262,7 @@ export function montarRotina(pacotes: ItemPacote[], extras: DadosExtras | null, 
       if (!trechos.length) continue;
       const t0 = trechos[0];
       const aberto = trechos.some((t) => t.checkin_em && new Date(t.checkin_em).getTime() <= agora);
-      out.push({ tipo: "checkin", chave: `cx:${t0.id}`, grupo: aberto ? "agora" : "hoje", ordem: t0.partida_em, quem: c.titulo, viagemId: c.viagemId, expId: c.expId, pax: c.pax, trechos, aberto, clienteId: c.clienteId, telefone: c.telefone, destino: c.destino });
+      out.push({ tipo: "checkin", chave: `cx:${t0.id}`, grupo: aberto ? "agora" : "proximas", ordem: t0.partida_em, quem: c.titulo, viagemId: c.viagemId, expId: c.expId, pax: c.pax, trechos, aberto, clienteId: c.clienteId, telefone: c.telefone, destino: c.destino });
     }
     for (const item of extras.emissoes) {
       const e = estadoEmissao(item, hoje);
