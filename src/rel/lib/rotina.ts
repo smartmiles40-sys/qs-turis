@@ -58,8 +58,22 @@ export type Atividade =
   | { tipo: "emissao"; chave: string; grupo: GrupoRotina; ordem: string; item: ItemEmissao; estado: EstadoEmissao }
   | { tipo: "solicitacao"; chave: string; grupo: GrupoRotina; ordem: string; sol: SolicitacaoRotina };
 
-/** Prioridade dentro do grupo: check-in > emissão vencendo > etapa. Menor = primeiro. */
-const PESO: Record<Atividade["tipo"], number> = { checkin: 0, emissao: 1, solicitacao: 2, etapa_exp: 3, etapa: 4 };
+/**
+ * ÁREAS do trabalho, já na ORDEM DE PRIORIDADE do dia (25/11, Bruno: "ordem de
+ * prioridade nas coisas que têm que ser feitas naquele dia, sempre em primeiro
+ * e divididas por áreas"). Check-in tem hora marcada; emissão perde tarifa;
+ * solicitação é alguém esperando; depois a cadência das expedições e dos pacotes.
+ */
+export const AREAS: { tipo: Atividade["tipo"]; titulo: string; emoji: string; cor: string }[] = [
+  { tipo: "checkin", titulo: "Check-ins", emoji: "✈", cor: "#B45309" },
+  { tipo: "emissao", titulo: "Emissões", emoji: "🎫", cor: "#0891B2" },
+  { tipo: "solicitacao", titulo: "Solicitações", emoji: "📨", cor: "#7C3AED" },
+  { tipo: "etapa_exp", titulo: "Expedições (grupos)", emoji: "🧭", cor: "#0F766E" },
+  { tipo: "etapa", titulo: "Pacotes (cadência)", emoji: "🧳", cor: "#2563EB" },
+];
+const PESO = Object.fromEntries(AREAS.map((a, i) => [a.tipo, i])) as Record<Atividade["tipo"], number>;
+/** O que é do dia: atrasadas, check-in aberto e o de hoje. */
+export const ehDoDia = (g: GrupoRotina) => g === "atrasadas" || g === "agora" || g === "hoje";
 
 const somaDias = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 
@@ -262,8 +276,11 @@ export function montarRotina(pacotes: ItemPacote[], extras: DadosExtras | null, 
     }
   }
 
-  const ordemGrupo: Record<GrupoRotina, number> = { agora: 0, atrasadas: 1, hoje: 2, proximas: 3, futuras: 4 };
-  return out.sort((a, b) => ordemGrupo[a.grupo] - ordemGrupo[b.grupo] || PESO[a.tipo] - PESO[b.tipo] || a.ordem.localeCompare(b.ordem));
+  // Do dia primeiro, por ÁREA (na ordem de prioridade) e, dentro da área, o mais urgente
+  // (check-in aberto > atrasada > hoje) e o mais cedo. Depois próximos 7 dias e futuras.
+  const bloco = (g: GrupoRotina) => (ehDoDia(g) ? 0 : g === "proximas" ? 1 : 2);
+  const urg: Record<GrupoRotina, number> = { agora: 0, atrasadas: 1, hoje: 2, proximas: 3, futuras: 4 };
+  return out.sort((a, b) => bloco(a.grupo) - bloco(b.grupo) || PESO[a.tipo] - PESO[b.tipo] || urg[a.grupo] - urg[b.grupo] || a.ordem.localeCompare(b.ordem));
 }
 
 /** Rótulo curto do que fazer (coluna da esquerda) e a cor. */

@@ -23,7 +23,7 @@ import { ETAPA, concluirEtapa, desfazerEtapa, diasAte, type RegistroEtapa } from
 import { ETAPA_EXP, type EstadoEtapaExp, type Expedicao, type RegistroEtapaExp } from "../lib/etapasExpedicao";
 import { concluirEtapaExp, desfazerEtapaExp } from "../lib/etapasExpedicaoBanco";
 import {
-  GRUPOS_ROTINA, carregarExtras, contatoDa, extrasVazios, montarRotina, rotuloDa,
+  AREAS, GRUPOS_ROTINA, carregarExtras, contatoDa, ehDoDia, extrasVazios, montarRotina, rotuloDa,
   type Atividade, type Contato, type DadosExtras, type GrupoRotina, type ItemPacote,
 } from "../lib/rotina";
 import { abrirDocumentoPorId, dataBR, hojeSP, marcarCheckin, type Trecho } from "../lib/viagens";
@@ -123,6 +123,34 @@ async function verArquivo(id: string) {
 }
 function alertaSilencioso(e: unknown) { console.warn("[rotina] arquivo:", e); }
 
+/** Passageiros um embaixo do outro; com muitos, mostra 4 e abre a lista inteira no clique. */
+function ListaPax({ pax, cor }: { pax: string[]; cor: string }) {
+  const [aberta, setAberta] = useState(false);
+  const LIMITE = 4;
+  const vistos = aberta ? pax : pax.slice(0, LIMITE);
+  return (
+    <div className="rounded-lg px-3 py-2" style={{ background: "var(--card2)" }}>
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-[10.5px] font-extrabold uppercase tracking-wider" style={{ color: "var(--ink3)" }}>Passageiro{pax.length > 1 ? `s (${pax.length})` : ""}</span>
+        {pax.length > 1 && <Copiar texto={pax.join("\n")} />}
+      </div>
+      <ol className={`grid gap-x-6 gap-y-0.5 ${aberta && pax.length > 8 ? "sm:grid-cols-2" : ""}`}>
+        {vistos.map((p, i) => (
+          <li key={`${p}-${i}`} className="flex items-baseline gap-2 text-[13.5px] font-semibold" style={{ color: "var(--ink)" }}>
+            <span className="w-5 text-right text-[11.5px] font-bold tabular-nums flex-shrink-0" style={{ color: cor }}>{i + 1}</span>
+            <span className="min-w-0 break-words">{p}</span>
+          </li>
+        ))}
+      </ol>
+      {pax.length > LIMITE && (
+        <button type="button" onClick={() => setAberta((x) => !x)} className="mt-1 text-[12.5px] font-bold underline" style={{ color: cor }}>
+          {aberta ? "Mostrar menos" : `Ver todos os ${pax.length} passageiros`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
  * O BILHETE do voo: companhia em destaque, rota em códigos grandes, horários,
  * localizador com copiar e os botões de abrir o bilhete e o site de check-in.
@@ -185,11 +213,7 @@ function BilheteVoo({ t, cor, estado, outros }: { t: Trecho; cor: string; estado
           {t.bagagem && <Campinho rotulo="Bagagem">{t.bagagem}</Campinho>}
           {t.terminal_partida && t.classe && <Campinho rotulo="Classe">{t.classe}</Campinho>}
         </div>
-        {pax.length > 0 && (
-          <div className="text-[12.5px]" style={{ color: "var(--ink2)" }}>
-            <b>Passageiro{pax.length > 1 ? "s" : ""}:</b> {pax.slice(0, 15).join(" · ")}{pax.length > 15 ? ` … +${pax.length - 15}` : ""}
-          </div>
-        )}
+        {pax.length > 0 && <ListaPax pax={pax} cor={cor} />}
         <div className="flex flex-wrap gap-2">
           {docs.length > 0
             ? docs.slice(0, 4).map((id, i) => <Botao key={id} variante="primario" onClick={() => void verArquivo(id)}>📄 Abrir bilhete{docs.length > 1 ? ` ${i + 1}` : ""}</Botao>)
@@ -266,9 +290,14 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
     for (const a of fila) g[a.grupo].push(a);
     return g;
   }, [fila]);
-  // a próxima: a escolhida, senão a primeira que não foi pulada (de atrasadas/agora/hoje)
-  const doDia = fila.filter((a) => a.grupo !== "proximas" && a.grupo !== "futuras");
-  const atual = fila.find((a) => a.chave === ativa) ?? doDia.find((a) => !pulei.has(a.chave)) ?? doDia[0] ?? null;
+  // a fila já vem na ordem de prioridade (área → urgência → hora). A próxima: a escolhida,
+  // senão a primeira não pulada que dá pra fazer agora (check-in que ainda não abriu espera).
+  const doDia = fila.filter((a) => ehDoDia(a.grupo));
+  const doDiaVis = doDia.filter((a) => ver === "todas" || ver === a.grupo);
+  const prioridade = new Map(doDia.map((a, i) => [a.chave, i + 1]));
+  const daPraFazer = (a: Atividade) => !(a.tipo === "checkin" && !a.aberto && a.trechos[0]?.fonte !== "bitrix");
+  const atual = fila.find((a) => a.chave === ativa) ?? doDia.find((a) => !pulei.has(a.chave) && daPraFazer(a))
+    ?? doDia.find((a) => !pulei.has(a.chave)) ?? doDia[0] ?? null;
 
   const hoje = hojeSP();
   const feitasHoje = useMemo(() => {
@@ -443,6 +472,62 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
     );
   }
 
+  /** Uma linha da fila; `n` = posição na prioridade do dia. */
+  function linha(a: Atividade, n?: number): ReactNode {
+    const t = textos(a); const r = rotuloDa(a); const c = contatoDa(a);
+    const eAtual = atual?.chave === a.chave;
+    return (
+      <li key={a.chave} className="rel-card px-3 py-2.5 flex flex-wrap lg:flex-nowrap items-center gap-x-3 gap-y-2"
+        style={{ borderLeft: `4px solid ${r.cor}`, ...(eAtual ? { boxShadow: `inset 0 0 0 1px ${r.cor}` } : {}) }}>
+        {n != null && (
+          <span className="w-8 h-8 flex-shrink-0 rounded-full inline-flex items-center justify-center text-[13px] font-extrabold tabular-nums"
+            style={{ background: eAtual ? r.cor : `${r.cor}1F`, color: eAtual ? "#fff" : r.cor }} title={`${n}º na ordem de prioridade do dia`}>{n}º</span>
+        )}
+        <span className="w-[130px] flex-shrink-0">
+          <span className="block text-[11px] font-extrabold uppercase tracking-wide" style={{ color: r.cor }}>{r.o_que}</span>
+          <span className="block text-[11.5px] font-semibold" style={{ color: a.grupo === "atrasadas" ? "#DC2626" : t.corQuando }}>{a.grupo === "atrasadas" && a.tipo !== "solicitacao" ? "⚠ " : ""}{t.quando}</span>
+        </span>
+        <button type="button" onClick={() => { setAtiva(a.chave); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="min-w-0 flex-1 text-left basis-[220px]" title="Trazer pro card da próxima atividade">
+          <span className="block text-[14px] font-bold truncate" style={{ color: "var(--ink)" }}>{t.quem}</span>
+          <span className="block text-[12px] truncate" style={{ color: "var(--ink3)" }}>{t.oQue}</span>
+        </button>
+        <span className="flex gap-1.5 flex-shrink-0">
+          {c && (
+            <button type="button" title={`WhatsApp de ${c.nome || "cliente"}`} aria-label="Chamar no WhatsApp" onClick={() => void chamarNoWhats(c)}
+              className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-white" style={{ background: WA }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm5.5 12.4c-.3-.1-1.7-.8-2-.9-.3-.1-.5-.1-.7.1-.2.3-.8.9-.9 1.1-.2.2-.3.2-.6.1-.3-.1-1.2-.5-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.5.1-.6l.4-.5.3-.5c.1-.2 0-.4 0-.5l-.9-2.2c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.1 4.9 4.3 2.4 1 2.9.8 3.4.7.5-.1 1.7-.7 1.9-1.4.2-.7.2-1.3.2-1.4-.1-.1-.3-.2-.6-.3z" /></svg>
+            </button>
+          )}
+          {podeAbrir(a) && a.tipo !== "solicitacao" && <Botao variante="fantasma" onClick={() => abrir(a)}>Abrir</Botao>}
+          <Botao variante={ehDoDia(a.grupo) ? "primario" : "secundario"} disabled={ocupado === a.chave} onClick={() => void acao(a)}>{ocupado === a.chave ? "…" : rotuloAcao(a)}</Botao>
+        </span>
+      </li>
+    );
+  }
+
+  /** A lista dividida por ÁREA, na ordem de prioridade das áreas. */
+  function porArea(lista: Atividade[], numerar: boolean): ReactNode {
+    return (
+      <div className="space-y-3">
+        {AREAS.map((ar) => {
+          const daqui = lista.filter((a) => a.tipo === ar.tipo);
+          if (!daqui.length) return null;
+          const atrasadas = daqui.filter((a) => a.grupo === "atrasadas").length;
+          return (
+            <div key={ar.tipo}>
+              <h3 className="flex flex-wrap items-center gap-2 text-[12.5px] font-extrabold uppercase tracking-wide mb-1.5 pl-0.5" style={{ color: ar.cor }}>
+                <span aria-hidden>{ar.emoji}</span>{ar.titulo}
+                <span className="px-1.5 rounded tabular-nums" style={{ background: `${ar.cor}1F` }}>{daqui.length}</span>
+                {atrasadas > 0 && <span className="px-1.5 rounded normal-case tracking-normal" style={{ background: "#FEE2E2", color: "#B91C1C" }}>{atrasadas} atrasada{atrasadas === 1 ? "" : "s"}</span>}
+              </h3>
+              <ul className="space-y-1.5">{daqui.map((a) => linha(a, numerar ? prioridade.get(a.chave) : undefined))}</ul>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
@@ -499,41 +584,23 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
         </section>
       )}
 
-      {/* A FILA */}
-      {extras && GRUPOS_ROTINA.filter((g) => ver === "todas" || ver === g.id).map((g) => (
+      {/* A FILA — o do dia primeiro, por ÁREA e numerado na ordem de prioridade; depois o que vem pela frente */}
+      {extras && (ver === "todas" || ehDoDia(ver)) && (
+        <section aria-label="Para fazer hoje">
+          <div className="flex flex-wrap items-baseline gap-x-3 mb-2">
+            <h2 className="text-[15px] font-extrabold uppercase tracking-wide" style={{ color: "var(--ink)" }}>
+              {ver === "todas" ? "Para fazer hoje" : GRUPOS_ROTINA.find((g) => g.id === ver)?.titulo} · {doDiaVis.length}
+            </h2>
+            <span className="text-[12.5px]" style={{ color: "var(--ink3)" }}>na ordem de prioridade: check-ins → emissões → solicitações → expedições → pacotes</span>
+          </div>
+          {doDiaVis.length === 0 ? <p className="text-[13px] px-1" style={{ color: "var(--ink3)" }}>Nada aqui.</p> : porArea(doDiaVis, true)}
+        </section>
+      )}
+      {extras && GRUPOS_ROTINA.filter((g) => !ehDoDia(g.id) && (ver === "todas" || ver === g.id)).map((g) => (
         porGrupo[g.id].length > 0 || ver === g.id ? (
-          <section key={g.id}>
+          <section key={g.id} aria-label={g.titulo}>
             <h2 className="text-[13px] font-extrabold uppercase tracking-wide mb-1.5" style={{ color: g.cor }}>{g.titulo} · {porGrupo[g.id].length}</h2>
-            {porGrupo[g.id].length === 0 && <p className="text-[13px] px-1" style={{ color: "var(--ink3)" }}>Nada aqui.</p>}
-            <ul className="space-y-1.5">
-              {porGrupo[g.id].map((a) => {
-                const t = textos(a); const r = rotuloDa(a); const c = contatoDa(a);
-                const eAtual = atual?.chave === a.chave;
-                return (
-                  <li key={a.chave} className="rel-card px-3 py-2.5 flex flex-wrap lg:flex-nowrap items-center gap-x-3 gap-y-2"
-                    style={{ borderLeft: `4px solid ${r.cor}`, ...(eAtual ? { boxShadow: `inset 0 0 0 1px ${r.cor}` } : {}) }}>
-                    <span className="w-[130px] flex-shrink-0">
-                      <span className="block text-[11px] font-extrabold uppercase tracking-wide" style={{ color: r.cor }}>{r.o_que}</span>
-                      <span className="block text-[11.5px] font-semibold" style={{ color: t.corQuando }}>{t.quando}</span>
-                    </span>
-                    <button type="button" onClick={() => { setAtiva(a.chave); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="min-w-0 flex-1 text-left basis-[220px]" title="Trazer pro card da próxima atividade">
-                      <span className="block text-[14px] font-bold truncate" style={{ color: "var(--ink)" }}>{t.quem}</span>
-                      <span className="block text-[12px] truncate" style={{ color: "var(--ink3)" }}>{t.oQue}</span>
-                    </button>
-                    <span className="flex gap-1.5 flex-shrink-0">
-                      {c && (
-                        <button type="button" title={`WhatsApp de ${c.nome || "cliente"}`} aria-label="Chamar no WhatsApp" onClick={() => void chamarNoWhats(c)}
-                          className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-white" style={{ background: WA }}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm5.5 12.4c-.3-.1-1.7-.8-2-.9-.3-.1-.5-.1-.7.1-.2.3-.8.9-.9 1.1-.2.2-.3.2-.6.1-.3-.1-1.2-.5-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.5.1-.6l.4-.5.3-.5c.1-.2 0-.4 0-.5l-.9-2.2c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.1 4.9 4.3 2.4 1 2.9.8 3.4.7.5-.1 1.7-.7 1.9-1.4.2-.7.2-1.3.2-1.4-.1-.1-.3-.2-.6-.3z" /></svg>
-                        </button>
-                      )}
-                      {podeAbrir(a) && a.tipo !== "solicitacao" && <Botao variante="fantasma" onClick={() => abrir(a)}>Abrir</Botao>}
-                      <Botao variante={g.id === "proximas" || g.id === "futuras" ? "secundario" : "primario"} disabled={ocupado === a.chave} onClick={() => void acao(a)}>{ocupado === a.chave ? "…" : rotuloAcao(a)}</Botao>
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+            {porGrupo[g.id].length === 0 ? <p className="text-[13px] px-1" style={{ color: "var(--ink3)" }}>Nada aqui.</p> : porArea(porGrupo[g.id], false)}
           </section>
         ) : null
       ))}
