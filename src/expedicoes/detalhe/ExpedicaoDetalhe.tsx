@@ -28,6 +28,7 @@ import { nomeDaExpedicao } from "../lib/nomeExpedicao";
 import { ABAS_COCKPIT, ABAS_FORA_DO_PACOTE, hashCanonico, resolverRotaCockpit, type AbaCockpit, type SecaoCockpit } from "../lib/cockpit/rota";
 import { contagensMatriz, type LinhaMatriz } from "../lib/cockpit/matriz";
 import { carregarResumoCockpit, linhasDaMatriz, type ResumoCockpit } from "./cockpit/dados";
+import { carregarAereo, type DadosAereo } from "../passageiros/aereoDados";
 import { resumoChecklist } from "../lib/checklistResumo";
 import VisaoGeral from "./VisaoGeral";
 import "./cockpit.css";
@@ -140,9 +141,17 @@ export default function ExpedicaoDetalhe({ caminho }: { caminho: string }) {
   // ── derivados ──
   const hoje = dataSP(new Date());
   const info = useMemo(() => infoFase(exp?.data_embarque, exp?.data_retorno, hoje), [exp?.data_embarque, exp?.data_retorno, hoje]);
+  // 26/11: coluna Passagem — voos do grupo/da pessoa + "Passagem Aérea" do Bitrix + bilhetes do Rel
+  const [aereo, setAereo] = useState<DadosAereo | null>(null);
+  useEffect(() => {
+    if (!exp || !resumo) return;
+    let vivo = true;
+    carregarAereo(exp, resumo.rooming.passageiros).then((d) => { if (vivo) setAereo(d); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [exp, resumo]);
   const linhas = useMemo(() => (exp && resumo ? linhasDaMatriz({
-    exp, fase: info.fase, pax: resumo.rooming.passageiros, requisitos: resumo.requisitos, quartos: resumo.rooming.quartos, alocacoes: resumo.rooming.alocacoes,
-  }) : []), [exp, resumo, info.fase]);
+    exp, fase: info.fase, pax: resumo.rooming.passageiros, requisitos: resumo.requisitos, quartos: resumo.rooming.quartos, alocacoes: resumo.rooming.alocacoes, aereo,
+  }) : []), [exp, resumo, info.fase, aereo]);
   const contagens = useMemo(() => contagensMatriz(linhas), [linhas]);
   const semValor = linhas.some((l) => l.celulas.pagamento.tom === "danger");
   // 30/10: badge da aba Checklist = tarefas atrasadas (mesma conta da Saúde).

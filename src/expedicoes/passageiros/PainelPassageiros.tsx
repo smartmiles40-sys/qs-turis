@@ -47,6 +47,7 @@ import { avaliarValidadePassaporte, avisoPassaporte } from "../lib/passaporte";
 import { dataSP, infoFase } from "../lib/fase";
 import { resumoProntidao } from "../lib/cockpit/matriz";
 import { linhasDaMatriz } from "../detalhe/cockpit/dados";
+import { carregarAereo, type DadosAereo } from "./aereoDados";
 
 type Col = "id" | "nome" | "tipo" | "grupo" | "cpf" | "passaporte" | "validade" | "quarto" | "status" | "prontidao";
 const ORDEM_PRONT = { Apto: 0, Atenção: 1, Bloqueado: 2 } as const;
@@ -121,8 +122,16 @@ export default function PainelPassageiros({ exp, sub, onMudou }: { exp: Expedica
 
   const pront = useMemo(() => (dados ? prontidaoDe(exp, dados.pax, dados.requisitos).resultado : new Map()), [dados, exp]);
   const posicoes = useMemo(() => (pessoas ? construirPosicoesFidelidade(pessoas, exp.id) : {}), [pessoas, exp.id]);
-  const linhasMx = useMemo(() => (dados ? linhasDaMatriz({ exp, fase, pax: dados.pax, requisitos: dados.requisitos, quartos: dados.quartos, alocacoes: dados.alocacoes, prontidao: pront }) : []),
-    [dados, exp, fase, pront]);
+  // 26/11: coluna Passagem (voos do grupo/da pessoa + Bitrix + bilhetes do Rel)
+  const [aereo, setAereo] = useState<DadosAereo | null>(null);
+  useEffect(() => {
+    if (!dados) return;
+    let vivo = true;
+    carregarAereo(exp, dados.pax).then((d) => { if (vivo) setAereo(d); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [dados, exp.id]);
+  const linhasMx = useMemo(() => (dados ? linhasDaMatriz({ exp, fase, pax: dados.pax, requisitos: dados.requisitos, quartos: dados.quartos, alocacoes: dados.alocacoes, prontidao: pront, aereo }) : []),
+    [dados, exp, fase, pront, aereo]);
   const indice = useMemo(() => {
     const m = new Map<string, number>();
     [...(dados?.pax ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)).forEach((p, i) => m.set(p.id, i + 1));

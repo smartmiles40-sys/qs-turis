@@ -47,6 +47,7 @@ export default function MatrizPassageiros({ linhas, posicoes, onAbrir, busca = "
     { id: "lideres", rotulo: "Líderes", qtd: n.lideres },
   ];
   if (n.seguro) filtros.push({ id: "seguro", rotulo: "Sem seguro", qtd: n.seguro, tom: "warn" });
+  if (n.passagem) filtros.push({ id: "passagem", rotulo: "Passagem a resolver", qtd: n.passagem, tom: "warn" });
 
   return (
     <section className="ck-mx" aria-label="Matriz de passageiros">
@@ -97,7 +98,7 @@ export default function MatrizPassageiros({ linhas, posicoes, onAbrir, busca = "
                     return (
                       <td key={c.id}>
                         <button type="button" className="ck-mx__cel" title={cel.dica ?? `Abrir a prontidão de ${l.pax.nome}`}
-                          onClick={() => onAbrir(l.pax.id, c.id === "pagamento" || c.id === "quarto" ? "pax" : "prontidao")}>
+                          onClick={() => onAbrir(l.pax.id, c.id === "pagamento" || c.id === "quarto" || c.id === "passagem" ? "pax" : "prontidao")}>
                           <span className={`ck-tag${tom ? ` ck-tag--${tom}` : ""}`}>{cel.rotulo}</span>
                         </button>
                       </td>

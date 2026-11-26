@@ -18,6 +18,7 @@ import { preencheuFormulario } from "../../passageiros/dados";
 import type { Fase } from "../../lib/fase";
 import { montarMatriz, type LinhaMatriz, type PaxMatriz } from "../../lib/cockpit/matriz";
 import type { DiaPortalMin } from "../../lib/cockpit/viagem";
+import { entradaPassagem, type DadosAereo } from "../../passageiros/aereoDados";
 import type { AlocacaoQuartoRow, ExpedicaoRow, PassageiroRow, QuartoRow, RoteiroLiderDiaRow } from "../../lib/database";
 
 export type CkCockpit = { id: string; status: string; prazo: string | null; parent_id: string | null; tarefa: string; etapa: string };
@@ -94,6 +95,8 @@ export function quartosDosPax(quartos: readonly QuartoRow[], alocacoes: readonly
 export function linhasDaMatriz(o: {
   exp: ExpedicaoRow; fase: Fase; pax: readonly PassageiroRow[]; requisitos: readonly ReqProntidao[];
   quartos: readonly QuartoRow[]; alocacoes: readonly AlocacaoQuartoRow[]; prontidao?: Map<string, ResultadoProntidao>;
+  /** 26/11: voos + Bitrix + Rel da coluna Passagem (passageiros/aereoDados.ts). Sem = "…". */
+  aereo?: DadosAereo | null;
 }): LinhaMatriz[] {
   const pront = o.prontidao ?? prontidaoDosPax(o.exp, o.pax, o.requisitos);
   const reqs = agruparReqs(o.requisitos);
@@ -105,6 +108,7 @@ export function linhasDaMatriz(o: {
     valor_contratado_brl: p.valor_contratado_brl, valor_pago_brl: p.valor_pago_brl,
     checagens: pront.get(p.id)?.checagens ?? [],
     requisitos: (reqs.get(p.id) ?? []).map((r) => ({ tipo: r.tipo, status: r.status, arquivo_id: r.arquivo_id })),
+    passagem: o.aereo ? entradaPassagem(p, o.aereo) : undefined,
   }));
   return montarMatriz(pax, o.exp, o.fase);
 }

@@ -234,7 +234,7 @@ test("matriz: líderes primeiro, cancelado fora, células e placar por coluna", 
   assert.equal(p.pagamento.tom, "danger");
   assert.equal(p.visto.texto, "não exigido");
   const c = contagensMatriz(m);
-  assert.deepEqual(c, { todos: 3, pendencia: 3, formulario: 1, seguro: 2, lideres: 1 });
+  assert.deepEqual(c, { todos: 3, pendencia: 3, formulario: 1, seguro: 2, lideres: 1, passagem: 0 });
   assert.deepEqual(filtrarMatriz(m, "formulario").map((l) => l.pax.id), ["Bia"]);
   assert.deepEqual(maioresPendencias(m).map((x) => x.texto), ["2 sem seguro", "1 com passaporte a resolver", "1 sem formulário"]);
 });

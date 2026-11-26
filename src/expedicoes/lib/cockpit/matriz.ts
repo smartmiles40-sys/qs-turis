@@ -20,9 +20,10 @@
 // -----------------------------------------------------------------------------
 import { avaliarValidadePassaporte } from "../passaporte.ts";
 import type { Fase } from "../fase.ts";
+import { avaliarPassagem, type EntradaPassagem } from "./passagem.ts";
 
 export type TomCelula = "ok" | "warn" | "danger" | "neutral";
-export type ColunaMatriz = "passaporte" | "visto" | "seguro" | "formulario" | "quarto" | "pagamento";
+export type ColunaMatriz = "passaporte" | "visto" | "seguro" | "formulario" | "quarto" | "pagamento" | "passagem";
 export const COLUNAS_MATRIZ: readonly { id: ColunaMatriz; rotulo: string }[] = [
   { id: "passaporte", rotulo: "Passaporte" },
   { id: "visto", rotulo: "Visto" },
@@ -30,6 +31,8 @@ export const COLUNAS_MATRIZ: readonly { id: ColunaMatriz; rotulo: string }[] = [
   { id: "formulario", rotulo: "Formulário" },
   { id: "quarto", rotulo: "Quarto" },
   { id: "pagamento", rotulo: "Pagamento" },
+  // 26/11 (Bruno): emissão da passagem por pessoa (ida/volta do grupo ou separada + voo nacional pelo CEP)
+  { id: "passagem", rotulo: "Passagem" },
 ];
 
 export interface Celula {
@@ -64,6 +67,8 @@ export interface PaxMatriz {
   checagens: readonly { tipo: string; semaforo: string; detalhe?: string }[];
   /** Requisitos do passageiro (pra achar a apólice do seguro). */
   requisitos: readonly { tipo: string; status: string; arquivo_id: string | null }[];
+  /** 26/11: o que dá pra saber do aéreo da pessoa (passagem.ts). Sem = ainda carregando. */
+  passagem?: EntradaPassagem;
 }
 
 export interface LinhaMatriz {
@@ -135,7 +140,15 @@ export function celulasDoPax(p: PaxMatriz, exp: { data_embarque: string | null; 
       : C(st, "warn", { ok: true, pendente: false });
   }
 
-  return { passaporte, visto, seguro, formulario, quarto, pagamento };
+  // Passagem (26/11) — sem os dados do aéreo ainda, não conta
+  let passagem: Celula;
+  if (!p.passagem) passagem = NA("…", "Lendo os voos");
+  else {
+    const r = avaliarPassagem(p.passagem, pos);
+    passagem = { rotulo: r.rotulo, tom: r.tom, aplica: r.aplica, ok: r.ok, pendente: r.pendente, dica: r.dica };
+  }
+
+  return { passaporte, visto, seguro, formulario, quarto, pagamento, passagem };
 }
 
 export function montarMatriz(pax: readonly PaxMatriz[], exp: { data_embarque: string | null; data_retorno: string | null }, fase: Fase): LinhaMatriz[] {
@@ -151,7 +164,7 @@ export function montarMatriz(pax: readonly PaxMatriz[], exp: { data_embarque: st
 
 export interface Placar { texto: string; tom: TomCelula; ok: number; aplica: number }
 
-const SUFIXO: Partial<Record<ColunaMatriz, string>> = { passaporte: " válidos", pagamento: " com valor" };
+const SUFIXO: Partial<Record<ColunaMatriz, string>> = { passaporte: " válidos", pagamento: " com valor", passagem: " emitidas" };
 
 /** Placar de cada coluna ("18/25"), colorido: tudo ok = verde; algo vermelho = vermelho; senão amarelo. */
 export function placarDaMatriz(linhas: readonly LinhaMatriz[]): Record<ColunaMatriz, Placar> {
@@ -166,12 +179,13 @@ export function placarDaMatriz(linhas: readonly LinhaMatriz[]): Record<ColunaMat
   return out;
 }
 
-export type FiltroMatriz = "todos" | "pendencia" | "formulario" | "lideres" | "seguro";
+export type FiltroMatriz = "todos" | "pendencia" | "formulario" | "lideres" | "seguro" | "passagem";
 export function filtrarMatriz(linhas: readonly LinhaMatriz[], f: FiltroMatriz): LinhaMatriz[] {
   switch (f) {
     case "pendencia": return linhas.filter((l) => l.pendente);
     case "formulario": return linhas.filter((l) => l.celulas.formulario.pendente);
     case "seguro": return linhas.filter((l) => l.celulas.seguro.pendente);
+    case "passagem": return linhas.filter((l) => l.celulas.passagem.pendente);
     case "lideres": return linhas.filter((l) => l.lider);
     default: return [...linhas];
   }
@@ -183,6 +197,7 @@ export function contagensMatriz(linhas: readonly LinhaMatriz[]) {
     pendencia: linhas.filter((l) => l.pendente).length,
     formulario: linhas.filter((l) => l.celulas.formulario.pendente).length,
     seguro: linhas.filter((l) => l.celulas.seguro.pendente).length,
+    passagem: linhas.filter((l) => l.celulas.passagem.pendente).length,
     lideres: linhas.filter((l) => l.lider).length,
   };
 }
@@ -194,6 +209,7 @@ const FRASE_PENDENCIA: Record<ColunaMatriz, (n: number) => string> = {
   formulario: (n) => `${n} sem formulário`,
   quarto: (n) => `${n} sem quarto`,
   pagamento: (n) => `${n} sem valor lançado`,
+  passagem: (n) => `${n} com passagem a resolver`,
 };
 
 /** As `n` maiores pendências agregadas ("18 sem seguro", "7 sem formulário"). */
