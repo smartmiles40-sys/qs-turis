@@ -67,3 +67,21 @@ html.dark .qs-neve span { color: #F8F6F7; opacity: .35; }
   .qs-neve { display: none; }
   html.natal .qs-side::before, html.natal .qs-side::after { animation: none; }
 }
+
+/* ── Chuva de estrelinhas (celebrarNatal: venda subida, meta do dia) ─────── */
+.qs-festa { position: fixed; inset: 0; pointer-events: none; z-index: 90; overflow: hidden; }
+.qs-festa span {
+  position: absolute; top: -30px; line-height: 1; opacity: 0;
+  text-shadow: 0 0 6px rgba(255, 220, 120, .55);
+  animation-name: qs-estrela; animation-timing-function: cubic-bezier(.25, .6, .4, 1); animation-fill-mode: forwards;
+}
+@keyframes qs-estrela {
+  0%   { transform: translate3d(0, 0, 0) rotate(0deg) scale(.6); opacity: 0; }
+  10%  { opacity: 1; }
+  80%  { opacity: 1; }
+  100% { transform: translate3d(var(--deriva, 0px), 92vh, 0) rotate(540deg) scale(1); opacity: 0; }
+}
+
+/* ── Login no clima ─────────────────────────────────────────────────────── */
+.qs-natal-saudacao { display: none; }
+html.natal .qs-natal-saudacao { display: block; }

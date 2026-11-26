@@ -54,8 +54,57 @@ export function aplicarNatal(): void {
   const root = document.documentElement;
   if (root.classList.contains("natal") !== ligado) {
     root.classList.toggle("natal", ligado);
+    trocarFavicon(ligado);
     window.dispatchEvent(new Event(EVENTO));
   }
+}
+
+/** Ícone da aba com toquinha durante o Clima de Natal. */
+function trocarFavicon(natal: boolean): void {
+  const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (link) link.href = natal ? "/favicon-natal.svg" : "/favicon.svg";
+}
+
+// ── Frases de tela vazia (fila zerada, nada pendente) ────────────────────────
+const FRASES = [
+  "Fila zerada! Pode ir atacar a rabanada.",
+  "Tudo em dia. O Papai Noel aprova esse ritmo.",
+  "Nada pendente: sobrou tempo pra pensar no amigo secreto.",
+  "Fila limpinha como neve fresca.",
+  "Até as renas ficaram impressionadas com essa organização.",
+  "Trabalho em dia, panetone liberado.",
+  "Missão cumprida. Pode acender o pisca-pisca.",
+];
+
+/** Uma frase natalina por dia (todo mundo vê a mesma no dia). null fora do clima. */
+export function fraseNatalDoDia(): string | null {
+  if (!natalLigado()) return null;
+  const dia = Math.floor(Date.now() / 86_400_000);
+  return FRASES[dia % FRASES.length];
+}
+
+// ── Chuva de estrelinhas (venda subida, meta do dia batida) ──────────────────
+const CORES_FESTA = ["#CCED60", "#FFC93C", "#F8F6F7", "#FF4D5E", "#DDF29A"];
+/** Faz chover estrelinhas por ~3 s. Só no Clima de Natal e pra quem não pediu menos movimento. */
+export function celebrarNatal(): void {
+  if (!natalLigado()) return;
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  const festa = document.createElement("div");
+  festa.className = "qs-festa";
+  festa.setAttribute("aria-hidden", "true");
+  for (let i = 0; i < 56; i++) {
+    const s = document.createElement("span");
+    s.textContent = i % 3 === 0 ? "★" : "✦"; // ★ ✦
+    s.style.left = `${Math.random() * 100}%`;
+    s.style.color = CORES_FESTA[i % CORES_FESTA.length];
+    s.style.fontSize = `${16 + Math.random() * 18}px`;
+    s.style.animationDuration = `${1.6 + Math.random() * 1.4}s`;
+    s.style.animationDelay = `${Math.random() * 0.5}s`;
+    s.style.setProperty("--deriva", `${(Math.random() - 0.5) * 120}px`);
+    festa.appendChild(s);
+  }
+  document.body.appendChild(festa);
+  window.setTimeout(() => festa.remove(), 3600);
 }
 
 let relogio: number | undefined;

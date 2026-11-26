@@ -138,13 +138,14 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="flex flex-col items-center mb-7">
           <div
-            className="flex items-center justify-center w-14 h-14 rounded-2xl text-white font-bold text-xl mb-4 transition-colors duration-300"
-            style={{ background: p.cor }}
+            className="qs-touca flex items-center justify-center w-14 h-14 rounded-2xl font-bold text-xl mb-4 transition-colors duration-300"
+            style={{ background: "var(--brand-teal)", color: "var(--brand-lime)" }}
           >
             QS
           </div>
           <h1 className="text-lg font-bold" style={{ color: "var(--ink)" }}>QS</h1>
           <p className="text-[10px] font-medium mb-1" style={{ color: "var(--ink3)" }}>by STFV</p>
+          <p className="qs-natal-saudacao text-sm font-semibold mb-0.5" style={{ color: "var(--ink)" }}>🎄 Boas festas, time!</p>
           <p className="text-sm" style={{ color: "var(--ink2)" }}>Por onde você vai entrar?</p>
         </div>
 

@@ -35,6 +35,7 @@ import ModeloModal from "../atendimento/ModeloModal";
 import { Aviso, Botao, Modal } from "../ui";
 import { EtapaModal } from "./EtapasViagem";
 import type { ItemAtividade } from "./AtividadesRel";
+import { fraseNatalDoDia } from "@/natal/natal";
 
 const COR_SIT: Record<string, string> = { atrasada: "#DC2626", a_fazer: "#D97706", aguardando: "#64748B" };
 const WA = "#25D366";
@@ -705,7 +706,8 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
         );
       })() : (
         <section className="rel-card p-6 text-center">
-          <p className="text-[16px] font-bold" style={{ color: "var(--ink)" }}>Tudo em dia por hoje. 🎉</p>
+          <p className="text-[16px] font-bold" style={{ color: "var(--ink)" }}>Tudo em dia por hoje. {fraseNatalDoDia() ? "🎄" : "🎉"}</p>
+          {fraseNatalDoDia() && <p className="text-[13px] mt-1 font-semibold" style={{ color: "var(--ink2)" }}>{fraseNatalDoDia()}</p>}
           <p className="text-[13px] mt-1" style={{ color: "var(--ink3)" }}>{porGrupo.proximas.length ? `Nos próximos 7 dias: ${porGrupo.proximas.length} atividade${porGrupo.proximas.length === 1 ? "" : "s"}.` : "Nada previsto pros próximos 7 dias."}</p>
         </section>
       )}

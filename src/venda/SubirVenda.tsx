@@ -76,6 +76,7 @@ import BlocosDaVenda from "./BlocosDaVenda";
 import { STATUS_ANALISE, abrirPedidoSem0230, analisarRascunho, analisarVendaGravada, type Analise } from "./analise";
 import { anexarPropostas, desfazerAnexos, listarPropostasDaVenda, vincularPropostas, type PropostaAnexada } from "./propostaAnexo";
 import { CampoPropostaVenda } from "./PropostasAnexadas";
+import { celebrarNatal } from "@/natal/natal";
 
 const PASSOS = ["Quem comprou", "O que vendeu", "Detalhes", "Pagamento", "Análise"] as const;
 const PASSO_ANALISE = PASSO.analise;
@@ -654,11 +655,13 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
           if (b && !b.ok && b.status === "erro") bx = ` Gravado no QS, mas o Bitrix recusou: ${b.mensagem ?? "sem motivo"}. Use "Tentar agora" no cartão (o QS também tenta sozinho).`;
         }
         const an = await guardarAnalise(r.venda_id);
+        celebrarNatal(); // Clima de Natal: chuva de estrelinhas (no-op fora de dezembro)
         onSalvo({ tom: bx || pv?.tom === "aviso" ? "aviso" : "ok", mensagem: `Venda consolidada! ${brl(r.total)} — a viagem nasce no Relacionamento e as contas a receber no Financeiro.${aviso}${an}${pv && pv.tom === "aviso" ? ` ${pv.mensagem}` : ""}${bx}` });
         return;
       }
 
       const an = acao === "reservar" || consolidada ? await guardarAnalise(r.venda_id) : "";
+      if (acao === "reservar") celebrarNatal(); // reservou a vaga = virou venda
       // Salvar/Reservar NÃO bloqueiam por IATA: só avisam (o Consolidar bloqueia).
       const semIata = problemasIata.length ? ` Atenção: ${problemasIata.length} pendência(s) no aéreo (código IATA dos aeroportos) — corrija antes de consolidar.` : "";
       if (pv) { onSalvo({ tom: semIata ? "aviso" : pv.tom, mensagem: `${acao === "reservar" ? "Vaga reservada. " : ""}${pv.mensagem}${aviso}${an}${semIata}` }); return; }
