@@ -67,7 +67,7 @@ import BlocoExpedicao from "./BlocoExpedicao";
 import CampoDoTipo from "./CampoDoTipo";
 import TrechosAereo from "./TrechosAereo";
 import EmissaoDoItem from "./EmissaoDoItem";
-import { REGRAS_PADRAO, type RegraEmissao } from "@/lib/emissao";
+import { REGRAS_PADRAO, regraPara, textoDoItem, type RegraEmissao } from "@/lib/emissao";
 import { carregarRegras } from "@/lib/emissaoRegras";
 import { avisosDoAereo, dadosParaBanco, lerTrechos, precisaDeTrechos, problemasDoAereo } from "./iata";
 import ExtratoAnalise from "./ExtratoAnalise";
@@ -101,10 +101,24 @@ export interface SubirVendaProps {
 
 type Acao = "salvar" | "reservar" | "consolidar";
 
+/** 26/11: tipos que herdam as datas da viagem ao entrar na venda. */
+const HERDA_DATAS = new Set<TipoItem>(["seguro", "hospedagem", "aereo", "carro", "transfer"]);
+/** Tipos em que o banco (venda_consolidar, 0369) exige data. */
+const PRECISA_DATA = new Set<TipoItem>(["aereo", "pacote", "hospedagem", "passeio", "transfer", "trem", "carro", "cruzeiro"]);
+/** Período da viagem: menor início e maior fim entre os itens que já têm data. */
+function periodoDaViagem(itens: ItemVenda[]): { inicio: string; fim: string | null } | null {
+  const ini = itens.map((i) => i.data_inicio).filter(Boolean).sort();
+  if (!ini.length) return null;
+  const fim = itens.map((i) => i.data_fim).filter(Boolean).sort();
+  return { inicio: ini[0] as string, fim: (fim[fim.length - 1] as string) ?? null };
+}
+
 export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio, cliente, viagemId }: SubirVendaProps) {
   const [passo, setPasso] = useState(0);
   const [pessoa, setPessoa] = useState<PessoaVenda>(pessoaVazia);
   const [itens, setItens] = useState<ItemVenda[]>([]);
+  /** 26/11: família da ficha do comprador (sugestão de um toque no passo 1). */
+  const [acompsFicha, setAcompsFicha] = useState<AcompFicha[]>([]);
   // 24/11: regras de emissão futura (trem-bala abre 3 meses antes…)
   const [regrasEmissao, setRegrasEmissao] = useState<RegraEmissao[]>(REGRAS_PADRAO);
   useEffect(() => { carregarRegras().then(setRegrasEmissao).catch(() => {}); }, []);
@@ -162,7 +176,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
     setCarregando(true); setPronto(false); setErro(null); setInfo(null); setFaltas(null); setPasso(0);
     setLinhas([linhaVazia()]); setObsFin(""); setEspecial(false); setEspecialObs(""); setObs("");
     setAnalise(null); setErroAnalise(null); setRestaurado(null);
-    setPropostasJa([]); setPropostasNovas([]); setDaFicha([]); setOutros([]); setVendaId(null);
+    setPropostasJa([]); setPropostasNovas([]); setDaFicha([]); setOutros([]); setVendaId(null); setAcompsFicha([]);
     if (ehCloser) listarPropostasDaVenda({ negocioId: negocio!.id }).then((l) => vivo && setPropostasJa(l)).catch(() => undefined);
     const base = pessoaVazia();
     if (negocio?.lead) Object.assign(base, { nome: nomeDoLead(negocio.lead), telefone: negocio.lead.phone ?? "", email: negocio.lead.email ?? "" });
@@ -260,6 +274,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       if (!vivo) return;
 
       setModeloNovo(novo);
+      setAcompsFicha(acomps);
       setEstado(est);
       setVendaId(venda?.id ?? null);
       // 0368: com a venda gravada, a lista de vagas diz quantos ocupados já são dela (inclusive na fila do espelho).
@@ -353,6 +368,16 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
     setRecarga((n) => n + 1);
   }
 
+  // Item que nasceu antes da viagem ter data (ex.: marcou Seguro e depois escolheu a
+  // expedição) completa sozinho quando a data aparece. Só preenche o vazio.
+  const periodo = periodoDaViagem(itens);
+  useEffect(() => {
+    if (!periodo) return;
+    if (!itens.some((i) => HERDA_DATAS.has(i.tipo) && !i.data_inicio)) return;
+    setItens((l) => l.map((i) => (HERDA_DATAS.has(i.tipo) && !i.data_inicio
+      ? { ...i, data_inicio: periodo.inicio, data_fim: i.data_fim || (i.tipo === "transfer" ? "" : periodo.fim ?? "") } : i)));
+  }, [periodo?.inicio, periodo?.fim]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const mudarItem = (k: string, p: Partial<ItemVenda>) => setItens((l) => l.map((i) => (i.k === k ? { ...i, ...p } : i)));
   const mudarDado = (k: string, chave: string, v: string) => setItens((l) => l.map((i) => (i.k === k ? { ...i, dados: { ...i.dados, [chave]: v } } : i)));
 
@@ -371,6 +396,10 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
 
   function adicionar(t: TipoItem) {
     const novo = itemVendaVazio(t);
+    // 26/11: seguro, hotel, aéreo, carro e transfer já nascem com as datas da viagem
+    // (as dos itens que já têm data — expedição, pacote…). O vendedor só ajusta.
+    const p = periodoDaViagem(itens);
+    if (HERDA_DATAS.has(t) && p) { novo.data_inicio = p.inicio; if (t !== "transfer") novo.data_fim = p.fim ?? ""; }
     setItens((l) => [...l, novo]);
     // Expedição nova já nasce com quem vai (passo 1): ninguém digita de novo.
     if (t === "expedicao") setViajantes((v) => ({ ...v, [novo.k]: [viajanteNovo(true), ...outros.map((o) => ({ ...o }))] }));
@@ -423,6 +452,9 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
     if (ate >= 2) {
       const errado = itens.find((i) => i.data_inicio && i.data_fim && i.data_fim < i.data_inicio);
       if (errado) return `${TIPOS[errado.tipo].rotulo}: a segunda data está antes da primeira.`;
+      // O banco (venda_consolidar) exige data nestes tipos: avisa AGORA, não no fim com a vaga já reservada.
+      const semData = itens.find((i) => PRECISA_DATA.has(i.tipo) && !i.data_inicio);
+      if (semData) return `${rotuloDoItem(semData)}: coloque a data (é ela que entra no calendário do Relacionamento).`;
       for (const i of itens.filter((x) => x.tipo === "expedicao")) {
         const exp = expedicoes?.find((e) => e.id === i.dados.expedicao_id);
         if (!exp) return "Escolha qual expedição foi vendida.";
@@ -609,6 +641,18 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
           })),
         });
         if (f.length) { setFaltas(f); irPara(primeiroPassoDasFaltas(f)); return; }
+        // 26/11 (Bruno): "tem que subir com a maior parte emitida". O que só abre depois
+        // (regra de emissão, ex. trem-bala) não conta contra; o resto que ficou pra
+        // depois, se for a maioria, pede confirmação. Toda pendência vai pra rotina do Rel.
+        const emitiveis = itens.filter((i) => !["expedicao", "concierge", "visto"].includes(i.tipo));
+        const depois = emitiveis.filter((i) => i.dados.emite_depois === "sim");
+        const semRegra = depois.filter((i) => regraPara(regrasEmissao, i.tipo, textoDoItem(i.nome, i.dados))?.abre_dias == null);
+        if (emitiveis.length && semRegra.length * 2 > emitiveis.length) {
+          const ok = window.confirm(`A maior parte desta venda ainda não foi emitida (${depois.length} de ${emitiveis.length}: ${depois.map(rotuloDoItem).join(", ")}).
+
+A regra é subir a venda com a maior parte já emitida. Consolidar mesmo assim? Cada pendência aparece na rotina do Relacionamento como "Emissão" até ser feita.`);
+          if (!ok) return;
+        }
         if (!modeloNovo) {
           setErro("Consolidar pela tela ainda não está ligado no banco (falta aplicar as migrations 0356–0358). Use \"Reservar vaga\" e depois \"Fechar a venda\" no cartão.");
           return;
@@ -744,7 +788,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
         {passo === 0 && (
           <div className="space-y-4">
             <DadosDaPessoaNaVenda pessoa={pessoa} onMudar={setPessoa} travada={pessoaTravada} daFicha={daFicha} />
-            <QuemViaja modo="pessoas" viajantes={outros} nomeComprador={pessoa.nome} dataViagem={dataViagem} totalVenda={total} onViajantes={mudarOutros} />
+            <QuemViaja modo="pessoas" daFicha={acompsFicha} viajantes={outros} nomeComprador={pessoa.nome} dataViagem={dataViagem} totalVenda={total} onViajantes={mudarOutros} />
           </div>
         )}
 

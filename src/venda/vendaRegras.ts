@@ -347,3 +347,22 @@ export function menorDeIdade(nascimento: string, referencia?: string | null): bo
   if (rm < Number(m[2]) || (rm === Number(m[2]) && rd < Number(m[3]))) idade--;
   return idade < 18;
 }
+
+/**
+ * 26/11: família que já está na ficha do comprador e ainda NÃO está em "Quem vai"
+ * (por ficha ou por nome) — vira sugestão de um toque, sem redigitar nada.
+ */
+export function sugestoesDaFicha(acomps: readonly AcompFicha[], ja: readonly Viajante[]): AcompFicha[] {
+  const ids = new Set(ja.map((v) => v.cliente_id).filter(Boolean));
+  const nomes = new Set(ja.map((v) => normNome(v.nome)).filter(Boolean));
+  return acomps.filter((a) => a.nome && !ids.has(a.id) && !nomes.has(normNome(a.nome)));
+}
+
+/** Acompanhante da ficha → viajante da venda (documentos já vêm junto). */
+export function viajanteDaFicha(a: AcompFicha, base: Viajante): Viajante {
+  const vin = String(a.vinculo ?? "").trim().toLowerCase();
+  return {
+    ...base, nome: a.nome, cliente_id: a.id, cpf: a.cpf ?? "", nascimento: (a.nascimento ?? "").slice(0, 10),
+    email: a.email ?? "", telefone: a.telefone ?? "", vinculo: (VINCULOS_OK.has(vin) ? vin : "") as VinculoViajante,
+  };
+}

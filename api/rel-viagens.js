@@ -425,7 +425,7 @@ function camposDaViagem(deal, mapa) {
 }
 
 async function viagemDoDeal(dealId) {
-  const r = await rest(`rel_viagens?select=id,status,cliente_id,titulo,destino,expedicao,tipo,data_venda,data_embarque,data_retorno,valor,qtd_passageiros,observacoes,necessidades,bitrix_funil,bitrix_dados,datas_travadas,consolidada_em&bitrix_deal_id=eq.${encodeURIComponent(dealId)}&limit=1`);
+  const r = await rest(`rel_viagens?select=id,status,cliente_id,titulo,destino,expedicao,tipo,data_venda,data_embarque,data_retorno,valor,qtd_passageiros,observacoes,necessidades,bitrix_funil,bitrix_dados,datas_travadas,consolidada_em,closer_negocio_id&bitrix_deal_id=eq.${encodeURIComponent(dealId)}&limit=1`);
   return r?.[0] || null;
 }
 
@@ -587,7 +587,10 @@ async function importarDealCore(deal, ctx, profundidade = 0) {
     if (String(atual[k] ?? '') !== String(v)) patch[k] = v;
   }
   if (!atual.cliente_id && clienteId) patch.cliente_id = clienteId;
-  if (atual.status === 'cancelada') patch.status = 'ativa';
+  // Reativa se tinha cancelado — MENOS quando a viagem é de uma venda do QS
+  // (consolidada ou nascida do cartão do closer): aí quem cancela é o QS e o
+  // card que ficou parado na coluna de venda do Bitrix não pode desfazer (26/11).
+  if (atual.status === 'cancelada' && !atual.consolidada_em && !atual.closer_negocio_id) patch.status = 'ativa';
   if (Object.keys(patch).length) {
     await rest(`rel_viagens?id=eq.${atual.id}`, { method: 'PATCH', body: patch, prefer: 'return=minimal' });
     conta.atualizados++;

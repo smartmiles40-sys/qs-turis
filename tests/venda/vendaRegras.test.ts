@@ -135,3 +135,22 @@ test("closer sem acesso às Expedições: json completo da venda_subir (SQL prop
   assert.equal(carlos.valor_contratado, "15000");
   assert.equal(ana.divide, `v:${carlos.chave}`);
 });
+
+// 26/11: família da ficha do comprador vira sugestão de um toque no passo 1.
+import { sugestoesDaFicha, viajanteDaFicha } from "../../src/venda/vendaRegras.ts";
+test("família da ficha: sugere só quem ainda não está em 'Quem vai' e traz os documentos", () => {
+  const ficha = [
+    { id: "c1", nome: "Maria Souza", vinculo: "filho", cpf: "12345678901", nascimento: "2015-03-02T00:00:00" },
+    { id: "c2", nome: "João Souza", vinculo: "conjuge" },
+    { id: "c3", nome: "Ana Lima", vinculo: "Prima" },
+  ];
+  const ja = [{ ...viajanteVazio(false, "joao souza", "k1") }, { ...viajanteVazio(false, "", "k2"), cliente_id: "c3" }];
+  const s = sugestoesDaFicha(ficha, ja);
+  assert.deepEqual(s.map((x) => x.id), ["c1"]);
+  const v = viajanteDaFicha(s[0], viajanteVazio(false, "", "k9"));
+  assert.equal(v.cliente_id, "c1");
+  assert.equal(v.cpf, "12345678901");
+  assert.equal(v.nascimento, "2015-03-02");
+  assert.equal(v.vinculo, "filho");
+  assert.equal(viajanteDaFicha(ficha[2], viajanteVazio(false, "", "k8")).vinculo, "");
+});

@@ -12,10 +12,10 @@
 import { Botao, Campo, Entrada } from "@/rel/ui";
 import { brl } from "@/closer/lib";
 import { viajanteNovo } from "./api";
-import { VINCULOS_VIAJANTE, lerValor, type Viajante, type VinculoViajante } from "./vendaRegras";
+import { VINCULOS_VIAJANTE, lerValor, sugestoesDaFicha, viajanteDaFicha, type AcompFicha, type Viajante, type VinculoViajante } from "./vendaRegras";
 import DadosDoViajante from "./DadosDoViajante";
 
-export default function QuemViaja({ viajantes, nomeComprador, dataViagem, totalVenda, onViajantes, modo = "tudo" }: {
+export default function QuemViaja({ viajantes, nomeComprador, dataViagem, totalVenda, onViajantes, modo = "tudo", daFicha = [] }: {
   viajantes: Viajante[];
   nomeComprador: string;
   dataViagem?: string | null;
@@ -27,12 +27,15 @@ export default function QuemViaja({ viajantes, nomeComprador, dataViagem, totalV
    * "tudo" = como era (pessoas + valor).
    */
   modo?: "tudo" | "pessoas" | "valores";
+  /** 26/11: família cadastrada na ficha do comprador (vira botão de um toque). */
+  daFicha?: readonly AcompFicha[];
 }) {
   const lista = viajantes.some((v) => v.comprador) ? viajantes : [viajanteNovo(true), ...viajantes];
   const mudar = (chave: string, p: Partial<Viajante>) => onViajantes(lista.map((v) => (v.chave === chave ? { ...v, ...p } : v)));
   const tirar = (chave: string) => onViajantes(lista.filter((x) => x.chave !== chave)
     .map((x) => ({ ...x, responsavel: x.responsavel === chave ? "" : x.responsavel })));
   const acomp = lista.filter((v) => !v.comprador);
+  const sugestoes = sugestoesDaFicha(daFicha, lista);
   const somaAcomp = Math.round(acomp.reduce((s, v) => s + (lerValor(v.valor_contratado) ?? 0), 0) * 100) / 100;
   const titular = Math.max(Math.round((totalVenda - somaAcomp) * 100) / 100, 0);
 
@@ -67,6 +70,20 @@ export default function QuemViaja({ viajantes, nomeComprador, dataViagem, totalV
           {modo === "pessoas" ? " O valor de cada um você coloca nos próximos passos." : " Valor de cada um é opcional — sem valor, tudo fica no titular."}
         </p>
       </div>
+      {sugestoes.length > 0 && (
+        <div className="rounded-xl p-3 space-y-2" style={{ border: "1px dashed var(--line)" }}>
+          <p className="text-[12.5px]" style={{ color: "var(--ink3)" }}>Já cadastrados na ficha do cliente — toque em quem vai junto:</p>
+          <div className="flex flex-wrap gap-2">
+            {sugestoes.map((a) => (
+              <button key={a.id} type="button" className="rounded-full px-3 py-1.5 text-[13px] font-semibold"
+                style={{ border: "1px solid var(--rel)", background: "var(--rel-soft)", color: "var(--ink)" }}
+                onClick={() => onViajantes([...lista, viajanteDaFicha(a, viajanteNovo(false))])}>
+                + {a.nome}{a.vinculo && VINCULOS_VIAJANTE[a.vinculo as Exclude<VinculoViajante, "">] ? ` (${VINCULOS_VIAJANTE[a.vinculo as Exclude<VinculoViajante, "">]})` : ""}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <p className="text-[13px]" style={{ color: "var(--ink)" }}>
         <b>{nomeComprador || "Quem comprou"}</b> (titular){acomp.length > 0 && totalVenda > 0 ? <> — fica com {brl(titular)}</> : null}
       </p>

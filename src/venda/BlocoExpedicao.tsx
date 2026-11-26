@@ -80,6 +80,12 @@ export default function BlocoExpedicao({ item, viajantes, expedicoes, carregando
     onViajantes(viajantes.map((v) => (v.valor_contratado ? v : { ...v, valor_contratado: sugerirValor(v, e) })));
   }
 
+  // 26/11: a expedição veio marcada do contrato (só o id) → completa nome, datas e
+  // valor de tabela sozinha, como se o vendedor tivesse escolhido na lista.
+  useEffect(() => {
+    if (exp && !item.dados.expedicao) escolher(exp);
+  }, [exp?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const mudar = (chave: string, p: Partial<Viajante>) => onViajantes(viajantes.map((v) => (v.chave === chave ? { ...v, ...p } : v)));
   // Quem já é desta venda já ocupa a vaga dele: não conta contra ela mesma.
   // 0368: o banco diz quantos (inclusive quem ainda espera na fila do espelho, sem passageiro_id).

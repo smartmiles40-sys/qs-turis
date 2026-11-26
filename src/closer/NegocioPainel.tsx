@@ -251,14 +251,15 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
           {/* ── 2. Fechar: pagamento e contrato (ficha de fechamento) ── */}
           {(vendaRegistrada || encerrado) && (
             <Bloco titulo={consolidada ? "Venda fechada" : encerrado ? NOME_ETAPA[n.etapa] : "2. Fechar: pagamento e contrato"}
-              acao={!encerrado ? <Botao variante={consolidada ? "secundario" : "primario"} onClick={() => setFichaAberta(true)}>{consolidada ? "Corrigir fechamento" : "Fechar a venda"}</Botao> : undefined}>
+              acao={!encerrado ? <Botao variante={consolidada ? "secundario" : "primario"} onClick={() => (consolidada ? setFichaAberta(true) : setRegistrarAberto(true))}>{consolidada ? "Corrigir fechamento" : "Fechar a venda"}</Botao> : undefined}>
               {consolidada && n.viagem_id ? (
                 <FichaFechamentoResumo key={n.consolidada_em ?? ""} viagemId={n.viagem_id} />
               ) : encerrado ? (
                 <Nada t={`${n.motivo_perda ? `Motivo: ${n.motivo_perda}. ` : ""}Mova de volta pra uma etapa aberta se o cliente voltou.`} />
               ) : (
                 <p className="text-[13px]" style={{ color: "var(--ink2)" }}>
-                  Os itens já vêm preenchidos. Falta o plano de pagamento (entrada e parcelas) e as preferências do cliente. Ao
+                  {/* 26/11: um caminho só — o pagamento é o mesmo do "Subir venda" (não preenche duas vezes). */}
+                  Fechar = abrir a venda e tocar em "Consolidar venda": o pagamento que você já pôs lá vale aqui. Ao
                   fechar, a viagem nasce no Relacionamento e o plano vai pro Financeiro.
                 </p>
               )}
@@ -359,7 +360,7 @@ export default function NegocioPainel({ id, onVoltar, links }: { id: string; onV
             <select className="rel-input" value={n.etapa} disabled={ocupado} aria-label="Mover para"
               onChange={(e) => {
                 const et = e.target.value as Etapa;
-                if (et === "aguardando_emissao" && !consolidada) { if (vendaRegistrada) setFichaAberta(true); else setRegistrarAberto(true); return; }
+                if (et === "aguardando_emissao" && !consolidada) { setRegistrarAberto(true); return; }
                 if ((et === "venda_realizada" || et === "venda_cancelada") && !consolidada) {
                   setAviso({ tom: "erro", t: `${NOME_ETAPA[et]} vale só pra venda fechada. Primeiro "Registrar venda", depois "Fechar a venda".` });
                   return;

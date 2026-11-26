@@ -4,6 +4,7 @@
 // cada linha = forma, valor, data e nº de parcelas. Embaixo, "Soma R$ X = Total
 // R$ Y ✓" ou a diferença em vermelho. Regras puras: ./vendaFinal.
 // -----------------------------------------------------------------------------
+import { useEffect } from "react";
 import { Botao, Campo, Entrada } from "@/rel/ui";
 import { FORMAS_LINHA, brl, conferirPagamento, linhaVazia, problemaDaLinha, type FormaLinha, type LinhaPagamento } from "./vendaFinal";
 
@@ -16,6 +17,12 @@ export default function PagamentoLinhas({ linhas, total, onLinhas }: {
   const c = conferirPagamento(lista, total);
   const mudar = (chave: string, p: Partial<LinhaPagamento>) => onLinhas(lista.map((l) => (l.chave === chave ? { ...l, ...p } : l)));
   const tirar = (chave: string) => onLinhas(lista.length > 1 ? lista.filter((l) => l.chave !== chave) : [linhaVazia()]);
+  // 26/11: a 1ª linha já nasce com o total da venda (antes vinha vazia); o vendedor só
+  // escolhe a forma e a data — ou ajusta o valor e adiciona as outras linhas.
+  const unicaVazia = lista.length === 1 && !lista[0].valor.trim();
+  useEffect(() => {
+    if (unicaVazia && total > 0) onLinhas([{ ...lista[0], valor: String(Math.round(total * 100) / 100).replace(".", ",") }]);
+  }, [unicaVazia, total]); // eslint-disable-line react-hooks/exhaustive-deps
   // Nova linha já vem com o que falta pra fechar o total (a pessoa só ajusta).
   const adicionar = () => onLinhas([...lista, { ...linhaVazia(), valor: c.diferenca > 0 ? String(c.diferenca).replace(".", ",") : "" }]);
 

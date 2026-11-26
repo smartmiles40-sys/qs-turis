@@ -59,10 +59,10 @@ export default function DadosDaPessoaNaVenda({ pessoa, onMudar, travada, daFicha
       <Campo rotulo="E-mail" dica={daFicha.includes("email") ? "Veio da ficha do cliente. Confira." : undefined}>
         <Entrada type="email" value={pessoa.email} onChange={set("email")} />
       </Campo>
-      <Campo rotulo="CPF" dica={dica("cpf", "Opcional agora.")}>
+      <Campo rotulo="CPF" dica={dica("cpf", "Pode subir sem, mas a venda só fecha (consolida) com CPF.")}>
         <Entrada inputMode="numeric" value={pessoa.cpf} onChange={set("cpf")} placeholder="000.000.000-00" />
       </Campo>
-      <Campo rotulo="Nascimento" dica={dica("nascimento", "Opcional agora.")}>
+      <Campo rotulo="Nascimento" dica={dica("nascimento", "Pode subir sem, mas a venda só fecha (consolida) com nascimento.")}>
         <Entrada type="date" value={pessoa.nascimento} onChange={set("nascimento")} />
       </Campo>
     </div>

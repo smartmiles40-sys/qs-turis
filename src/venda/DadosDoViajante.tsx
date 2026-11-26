@@ -32,7 +32,7 @@ export default function DadosDoViajante({ v, viajantes, nomeComprador, dataViage
   return (
     <details className="sm:col-span-2 rounded-lg px-3 py-2" style={{ border: "1px dashed var(--line)" }} open={!!menor}>
       <summary className="text-[12.5px] font-semibold cursor-pointer" style={{ color: "var(--ink2)" }}>
-        Dados pro contrato e pro Operacional (opcional)
+        Dados pro contrato e pro Operacional (CPF e nascimento: obrigatórios pra fechar a venda)
         <span className="font-normal" style={{ color: falta.length ? "var(--err-ink)" : "var(--ink3)" }}>
           {" — "}{falta.length ? `falta: ${falta.join(", ")}` : "completo"}
         </span>
