@@ -140,7 +140,7 @@ export default function FormCotacaoCampos({ f, onMudar, prioridade, onPrioridade
           {/* 0203: alteração e correção viraram tipos próprios (assento, remarcação, nome…) — só aparecem em pedido antigo */}
           {PEDIDOS.filter((p) => (p.id !== "alteracao" && p.id !== "correcao") || f.pedido === p.id).map((p) => (
             <button key={p.id} type="button" role="radio" aria-checked={f.pedido === p.id} onClick={() => mudar("pedido", p.id)}
-              className="qs-tam rounded-lg px-3 py-2 text-left border"
+              className="rounded-lg px-3 py-2 text-left border"
               style={f.pedido === p.id ? { borderColor: "var(--rel)", background: "var(--rel-soft)" } : { borderColor: "var(--line)" }}>
               <span className="block text-[13px] font-semibold" style={{ color: "var(--ink)" }}>{p.rotulo}</span>
               <span className="block text-[11.5px] leading-tight" style={{ color: "var(--ink3)" }}>{p.dica}</span>

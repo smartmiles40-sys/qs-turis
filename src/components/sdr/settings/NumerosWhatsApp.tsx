@@ -399,7 +399,7 @@ export default function NumerosWhatsApp() {
                   const ativo = ateData === alvo;
                   return (
                     <button key={p.rotulo} type="button" onClick={() => setAteData(alvo)}
-                      className="qs-tam px-3 py-2 text-sm rounded-lg border text-left"
+                      className="px-3 py-2 text-sm rounded-lg border text-left"
                       style={{ borderColor: ativo ? AZUL : "#E5E7EB", background: ativo ? "#F5F8FF" : "#fff", color: ativo ? AZUL : "#374151" }}>
                       <span className="font-medium">{p.rotulo}</span>
                       <span className="block text-[11px] text-gray-400">até {dataBr(alvo)}</span>

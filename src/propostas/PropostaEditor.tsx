@@ -597,7 +597,7 @@ function EditorDaProposta({ id, setor, inicial, onVoltar, onAbrir }: PropsEditor
                   <p className="text-[12.5px] font-semibold mb-2" style={{ color: "var(--ink2)" }}>Que serviço?</p>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {ORDEM_TIPOS.map((t: TipoItem) => (
-                      <button key={t} type="button" className="qs-tam rel-linha rounded-lg border px-3 py-2 text-left text-[13.5px]" style={{ borderColor: "var(--line)", color: "var(--ink)" }}
+                      <button key={t} type="button" className="rel-linha rounded-lg border px-3 py-2 text-left text-[13.5px]" style={{ borderColor: "var(--line)", color: "var(--ink)" }}
                         onClick={() => { mudarOpcao(nOpcao, { itens: [...opcao.itens, itemVazio(t, p)] }); setAddTipo(false); }}>
                         <span aria-hidden>{TIPOS[t].emoji}</span> {TIPOS[t].rotulo}
                       </button>

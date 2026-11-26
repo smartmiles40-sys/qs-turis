@@ -425,7 +425,7 @@ export function TelaPerguntar({ conversa, setConversa }: { conversa: MensagemCha
             <div className="flex flex-col gap-1.5">
               {SUGESTOES.map((s) => (
                 <button key={s} type="button" onClick={() => void enviar(s)}
-                  className="qs-tam text-left px-3 py-2 rounded-xl border border-slate-200 bg-white text-[13px] text-slate-700 hover:border-marca">{s}</button>
+                  className="text-left px-3 py-2 rounded-xl border border-slate-200 bg-white text-[13px] text-slate-700 hover:border-marca">{s}</button>
               ))}
             </div>
           </div>

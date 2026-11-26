@@ -307,7 +307,7 @@ export default function AgendaMiniatura({ responsavel, closerId, dia, onEscolher
                   type="button"
                   disabled={ocupado}
                   onClick={() => onEscolher(s.start)}
-                  className={`qs-tam flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left text-xs transition ${
+                  className={`flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left text-xs transition ${
                     ocupado ? "cursor-default" : "hover:brightness-95"
                   }`}
                   style={{

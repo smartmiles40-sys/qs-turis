@@ -376,7 +376,7 @@ function TrocarFicha({ aberto, atual, onFechar, onEscolher }: { aberto: boolean;
               {lista.map((c) => (
                 <li key={c.id}>
                   <button type="button" disabled={c.id === atual} onClick={() => setEscolhida(c)}
-                    className="qs-tam w-full text-left rounded-lg border px-2.5 py-2 rel-linha disabled:opacity-60 disabled:cursor-default" style={{ borderColor: "var(--line)" }}>
+                    className="w-full text-left rounded-lg border px-2.5 py-2 rel-linha disabled:opacity-60 disabled:cursor-default" style={{ borderColor: "var(--line)" }}>
                     <span className="block text-[13px] font-semibold" style={{ color: "var(--ink)" }}>{c.nome}{c.id === atual && " (ficha atual)"}</span>
                     <span className="block text-[11.5px]" style={{ color: "var(--ink3)" }}>
                       {[c.cpf ? formatarCpf(c.cpf) : null, c.telefone ? formatarTelefone(c.telefone) : null, c.email, c.nascimento ? formatarData(c.nascimento) : null].filter(Boolean).join(" · ") || "sem dados"}

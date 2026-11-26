@@ -61,7 +61,7 @@ export function EnviarFinanceiroModal({ aberto, origem, alvo, nome, onFechar, on
           <div className="grid sm:grid-cols-2 gap-1.5" role="radiogroup" aria-label="Motivo">
             {(Object.entries(MOTIVO_FIN) as [MotivoFin, string][]).map(([k, r]) => (
               <button key={k} role="radio" aria-checked={motivo === k} onClick={() => setMotivo(k)}
-                className="qs-tam rounded-lg px-3 py-2 text-[13px] text-left border"
+                className="rounded-lg px-3 py-2 text-[13px] text-left border"
                 style={motivo === k ? { background: "var(--rel-soft)", color: "var(--rel-ink)", borderColor: "var(--rel)", fontWeight: 600 } : { borderColor: "var(--line)", color: "var(--ink2)" }}>{r}</button>
             ))}
           </div>

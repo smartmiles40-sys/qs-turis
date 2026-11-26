@@ -517,7 +517,7 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                           /* Mesma regra do "Hoje": o que já tem desfecho fica
                              esmaecido, pra lista de compromisso mostrar só o que
                              ainda é compromisso. */
-                          className={`qs-tam-sm w-full text-left flex items-baseline gap-2 rounded px-1.5 py-1 hover:bg-gray-50 ${
+                          className={`w-full text-left flex items-baseline gap-2 rounded px-1.5 py-1 hover:bg-gray-50 ${
                             ABERTAS.includes(m.status) ? "" : "opacity-50"
                           }`}
                         >

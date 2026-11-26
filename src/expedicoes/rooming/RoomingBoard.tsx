@@ -449,7 +449,7 @@ function BlocoHotel({ t, r, expId, recolhido, onAlternar, onAdicionar, onDuplica
         ) : (
           <div className="flex min-w-0 items-center gap-1">
             <button type="button" onClick={onAlternar} aria-expanded={!recolhido} title={recolhido ? "Expandir hotel" : "Recolher hotel"}
-              className="qs-tam-sm flex items-center gap-2 min-w-0 text-left rounded-md px-1 py-0.5 -mx-1 hover:bg-[var(--card)]">
+              className="flex items-center gap-2 min-w-0 text-left rounded-md px-1 py-0.5 -mx-1 hover:bg-[var(--card)]">
               <span style={{ color: "var(--ink3)" }}><Ic d={recolhido ? I.direita : I.abaixo} t={16} /></span>
               <span style={{ color: "var(--ink3)" }}><Ic d={I.predio} /></span>
               <span className="font-bold text-[13px] truncate" style={{ color: "var(--ink)" }}>{t.hotel_cidade ?? "Hotel"}</span>

@@ -78,7 +78,7 @@ function SeletorPasta({ aberto, excluirId, onFechar, onEscolher }: { aberto: boo
       <ul className="flex flex-col gap-1">
         {pastas.map((p) => (
           <li key={p.id}>
-            <button type="button" onClick={() => setPastaId(p.id)} className="qs-tam w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[13px] hover:bg-[var(--card2)]" style={{ color: "var(--ink)" }}>
+            <button type="button" onClick={() => setPastaId(p.id)} className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-[13px] hover:bg-[var(--card2)]" style={{ color: "var(--ink)" }}>
               <IconeTipo tipo="pasta" /> <span className="truncate">{p.nome}</span>
             </button>
           </li>

@@ -219,7 +219,7 @@ function ActionBtn({ children, label, active, onClick, tone = "blue" }: {
     <button
       onClick={onClick}
       aria-pressed={active}
-      className={`qs-tam flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-medium transition ${
+      className={`flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-medium transition ${
         active ? on : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
       }`}
     >

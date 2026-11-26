@@ -558,7 +558,7 @@ export default function MeetingDetailModal({
                           key={mot}
                           onClick={() => marcarSal("recusado", mot)}
                           disabled={busy}
-                          className="qs-tam w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-left text-xs font-medium text-gray-700 hover:border-red-300 hover:bg-red-50 disabled:opacity-50"
+                          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-left text-xs font-medium text-gray-700 hover:border-red-300 hover:bg-red-50 disabled:opacity-50"
                         >
                           {mot}
                         </button>

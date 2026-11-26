@@ -65,7 +65,7 @@ export function ConcluirModal({ conversa, onFechar, onFeito }: {
         <div className="grid sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Motivo">
           {MOTIVOS_CONCLUSAO.map((m) => (
             <button key={m.id} role="radio" aria-checked={motivo === m.id} onClick={() => setMotivo(m.id)}
-              className="qs-tam rounded-lg px-3 py-2 text-left border"
+              className="rounded-lg px-3 py-2 text-left border"
               style={motivo === m.id ? { background: "var(--rel-soft)", color: "var(--rel-ink)", borderColor: "var(--rel)" } : { borderColor: "var(--line)", color: "var(--ink2)" }}>
               <span className="block text-[13px] font-semibold">{m.rotulo}</span>
               <span className="block text-[11.5px]" style={{ color: "var(--ink3)" }}>{m.dica}</span>
