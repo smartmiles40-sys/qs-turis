@@ -166,6 +166,21 @@ a.qs-kpi:hover, button.qs-kpi:hover { background: var(--surface-2); }
 .qs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .qs-topbar { display: none; }
 
+/* ── Textura de fundo da marca (26/11) ─────────────────────────────────────
+   O mesmo padrão orgânico (ondas + folhas) do Sistema de Expedições e das LPs,
+   bem apagado, atrás das telas. Aparece só nos respiros entre os cards (que
+   continuam sólidos), então não atrapalha a leitura. Opacidade já embutida no
+   SVG: claro = teal a ~19%, noite = lime a ~7% (igual ao Expedições). */
+.qs-main {
+  background-color: var(--bg);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'><g fill='none' stroke='%2309282b' stroke-width='1.2' opacity='0.19' stroke-linecap='round'><path d='M5 48 Q18 32, 32 48 T 58 48 T 80 48'/><path d='M15 14 Q25 24, 35 14 T 60 14 T 82 14'/><path d='M0 72 Q15 58, 30 72 T 58 72 T 80 72'/><ellipse cx='65' cy='52' rx='4' ry='7' transform='rotate(-28 65 52)'/><ellipse cx='14' cy='30' rx='3' ry='6' transform='rotate(22 14 30)'/><path d='M48 30 Q54 22, 62 26 Q66 18, 72 24'/></g></svg>");
+  background-repeat: repeat;
+  background-size: 80px 80px;
+}
+html.dark .qs-main {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'><g fill='none' stroke='%23CCED60' stroke-width='1.1' opacity='0.07' stroke-linecap='round'><path d='M5 48 Q18 32, 32 48 T 58 48 T 80 48'/><path d='M15 14 Q25 24, 35 14 T 60 14 T 82 14'/><path d='M0 72 Q15 58, 30 72 T 58 72 T 80 72'/><ellipse cx='65' cy='52' rx='4' ry='7' transform='rotate(-28 65 52)'/><ellipse cx='14' cy='30' rx='3' ry='6' transform='rotate(22 14 30)'/><path d='M48 30 Q54 22, 62 26 Q66 18, 72 24'/></g></svg>");
+}
+
 /* ── Menu lateral com a cara da marca (26/11) ─────────────────────────────
    Igual ao Sistema de Expedições: gradiente Dark Teal nos DOIS modos, texto
    off-white e o item ativo em lime com texto teal. Os tokens são redefinidos
