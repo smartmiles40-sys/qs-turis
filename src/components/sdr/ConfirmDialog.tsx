@@ -55,7 +55,7 @@ export default function ConfirmDialog() {
             ref={confirmarRef}
             onClick={() => responder(true)}
             className={`rounded-lg py-2.5 text-sm font-semibold text-white transition-colors ${
-              pedido.perigo ? "bg-[#C4373D] hover:bg-[#A72E33]" : "bg-marca hover:bg-[#0139D6]"
+              pedido.perigo ? "bg-[#C4373D] hover:bg-[#A72E33]" : "bg-[#0147FF] hover:bg-[#0139D6]"
             }`}
           >
             {pedido.confirmarLabel ?? "Confirmar"}

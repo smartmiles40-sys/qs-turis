@@ -1430,7 +1430,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
     return (
       <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-4">
         <div className="flex items-center gap-2 mb-3">
-          <svg className="w-4 h-4 text-marca-tx" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-4 h-4 text-[#0147FF]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <h4 className="text-xs font-semibold text-blue-800">Próximas atividades ({openTasks.length})</h4>
@@ -1440,7 +1440,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
             const isLate = new Date(t.scheduled_at).getTime() < todayStart.getTime();
             return (
               <div key={t.id} className="flex items-center gap-2 flex-wrap">
-                <span className="w-6 h-6 rounded-full bg-blue-100 text-marca-tx flex items-center justify-center shrink-0">
+                <span className="w-6 h-6 rounded-full bg-blue-100 text-[#0147FF] flex items-center justify-center shrink-0">
                   {CHANNEL_ICONS[t.channel_type]}
                 </span>
                 <span className="text-sm font-medium text-gray-800">{CHANNEL_LABELS[t.channel_type]}</span>
@@ -1508,7 +1508,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
                           href={meeting.meeting_link}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-sm text-marca-tx hover:underline truncate"
+                          className="text-sm text-[#0147FF] hover:underline truncate"
                           title="Abrir link da reunião"
                         >
                           {meeting.meeting_link}
@@ -1621,7 +1621,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
                       <div
                         className={`relative z-10 w-10 h-10 rounded-full flex items-center justify-center shrink-0 border-2 ${
                           isPast
-                            ? "bg-marca border-marca text-white"
+                            ? "bg-[#0147FF] border-[#0147FF] text-white"
                             : "bg-white border-gray-200 text-gray-500"
                         }`}
                       >
@@ -1953,7 +1953,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
                     key={days}
                     onClick={() => scheduleReEngagement(days)}
                     disabled={schedulingReContact}
-                    className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-marca hover:bg-marca/5 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-[#0147FF] hover:bg-[#0147FF]/5 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
                     {days} dias
                   </button>
@@ -2032,8 +2032,8 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
                 <div className="space-y-2 max-h-32 overflow-y-auto">
                   {cadenceDays.slice(0, 3).map((day) => (
                     <div key={day.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-[#F8F9FA]">
-                      <div className="w-6 h-6 rounded-full bg-marca/10 flex items-center justify-center shrink-0">
-                        <span className="text-[9px] font-bold text-marca-tx">D{day.day_number}</span>
+                      <div className="w-6 h-6 rounded-full bg-[#0147FF]/10 flex items-center justify-center shrink-0">
+                        <span className="text-[9px] font-bold text-[#0147FF]">D{day.day_number}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         {day.activities?.map((act) => (
@@ -2171,7 +2171,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
                     value={editForm[field.key] as string}
                     onChange={(e) => setEditForm((prev) => (prev ? { ...prev, [field.key]: e.target.value } : prev))}
                     placeholder={field.placeholder}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                   />
                 </div>
               ))}
@@ -2180,7 +2180,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
                 <select
                   value={editForm.source}
                   onChange={(e) => setEditForm((prev) => (prev ? { ...prev, source: e.target.value as LeadSource } : prev))}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 >
                   {Object.entries(SOURCE_LABELS).map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
@@ -2205,7 +2205,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
               <button
                 onClick={saveLeadEdit}
                 disabled={savingEdit}
-                className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-marca hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-[#0147FF] hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {savingEdit ? "Salvando..." : "Salvar alterações"}
               </button>

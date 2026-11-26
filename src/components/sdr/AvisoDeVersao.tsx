@@ -37,7 +37,7 @@ export default function AvisoDeVersao() {
       <button
         onClick={() => window.location.reload()}
         className="shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-bold text-white transition-colors hover:brightness-110"
-        style={{ background: "rgb(var(--marca-rgb))" }}
+        style={{ background: "#0147FF" }}
       >
         Atualizar
       </button>

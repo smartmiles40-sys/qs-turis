@@ -550,7 +550,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
         </div>
         <button
           onClick={onCreateCadence}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-marca hover:bg-[#0139D6] transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-[#0147FF] hover:bg-[#0139D6] transition-colors"
         >
           <IconPlus />
           Criar Cadência
@@ -567,7 +567,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
           placeholder="Buscar cadência por nome ou descrição..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full pl-9 pr-4 py-2 rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:border-marca focus:ring-2 focus:ring-marca/10 transition"
+          className="w-full pl-9 pr-4 py-2 rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:border-[#0147FF] focus:ring-2 focus:ring-[#0147FF]/10 transition"
         />
       </div>
 
@@ -577,7 +577,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
         <button
           onClick={() => setFilterStatus("todos")}
           className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-            filterStatus === "todos" ? "bg-marca text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+            filterStatus === "todos" ? "bg-[#0147FF] text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
           }`}
         >
           Todos
@@ -587,7 +587,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
             key={s}
             onClick={() => setFilterStatus(filterStatus === s ? "todos" : s)}
             className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-              filterStatus === s ? "bg-marca text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+              filterStatus === s ? "bg-[#0147FF] text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
             {CADENCE_STATUS_LABELS[s]}
@@ -639,7 +639,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
               type="checkbox"
               checked={selectedIds.size === filtered.length && filtered.length > 0}
               onChange={toggleSelectAll}
-              className="w-3.5 h-3.5 rounded border-gray-300 text-marca-tx focus:ring-marca/20"
+              className="w-3.5 h-3.5 rounded border-gray-300 text-[#0147FF] focus:ring-[#0147FF]/20"
             />
             Selecionar todas ({selectedIds.size}/{filtered.length})
           </label>
@@ -688,7 +688,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
                     type="checkbox"
                     checked={selectedIds.has(cadence.id)}
                     onChange={() => toggleSelect(cadence.id)}
-                    className="w-4 h-4 rounded border-gray-300 text-marca-tx focus:ring-marca/20 mt-0.5"
+                    className="w-4 h-4 rounded border-gray-300 text-[#0147FF] focus:ring-[#0147FF]/20 mt-0.5"
                   />
 
                   <div className="flex-1 min-w-0">
@@ -747,7 +747,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
                         {(cadence._leads_count ?? 0) > 0 ? (
                           <button
                             onClick={() => openLeadsModal(cadence, false)}
-                            className="text-sm font-bold text-gray-900 self-start underline decoration-dotted underline-offset-2 hover:text-marca-tx transition"
+                            className="text-sm font-bold text-gray-900 self-start underline decoration-dotted underline-offset-2 hover:text-[#0147FF] transition"
                             title="Ver os leads vinculados a esta cadência"
                           >
                             {cadence._leads_count ?? 0}
@@ -762,13 +762,13 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
                         {(cadence._active_leads_count ?? 0) > 0 ? (
                           <button
                             onClick={() => openLeadsModal(cadence, true)}
-                            className="text-sm font-bold text-marca-tx self-start underline decoration-dotted underline-offset-2 hover:text-[#0139D6] transition"
+                            className="text-sm font-bold text-[#0147FF] self-start underline decoration-dotted underline-offset-2 hover:text-[#0139D6] transition"
                             title="Ver os leads em prospecção nesta cadência"
                           >
                             {cadence._active_leads_count ?? 0}
                           </button>
                         ) : (
-                          <span className="text-sm font-bold text-marca-tx">0</span>
+                          <span className="text-sm font-bold text-[#0147FF]">0</span>
                         )}
                       </div>
 
@@ -819,7 +819,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
                             return (
                               <div
                                 key={owner.user_id}
-                                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold border-2 border-white bg-marca/10 text-marca-tx"
+                                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold border-2 border-white bg-[#0147FF]/10 text-[#0147FF]"
                                 title={owner.user?.name}
                               >
                                 {initials}
@@ -835,7 +835,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
                     <button
                       onClick={() => onEditCadence(cadence.id)}
                       disabled={busyCardId === cadence.id}
-                      className="p-2 rounded-lg text-gray-400 hover:text-marca-tx hover:bg-marca/5 transition disabled:opacity-40"
+                      className="p-2 rounded-lg text-gray-400 hover:text-[#0147FF] hover:bg-[#0147FF]/5 transition disabled:opacity-40"
                       title="Editar cadência"
                     >
                       <IconEdit />
@@ -863,7 +863,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
                     <button
                       onClick={() => handleDuplicate(cadence)}
                       disabled={busyCardId === cadence.id}
-                      className="p-2 rounded-lg text-gray-400 hover:text-marca-tx hover:bg-marca/5 transition disabled:opacity-40"
+                      className="p-2 rounded-lg text-gray-400 hover:text-[#0147FF] hover:bg-[#0147FF]/5 transition disabled:opacity-40"
                       title="Duplicar: abre o builder com uma cópia desta cadência (rascunho)"
                     >
                       <IconCopy />

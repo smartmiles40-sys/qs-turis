@@ -410,7 +410,7 @@ function LoginCompacto() {
     } finally { setEntrando(false); }
   }
 
-  const campo = "w-full px-3 py-2.5 rounded-lg border border-slate-300 bg-white text-[14px] text-slate-800 placeholder-slate-400 focus:outline-none focus:border-marca";
+  const campo = "w-full px-3 py-2.5 rounded-lg border border-slate-300 bg-white text-[14px] text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#0147FF]";
   return (
     <form onSubmit={(e) => void entrar(e)} className="pt-6 px-2 space-y-3">
       <div className="text-center mb-2">

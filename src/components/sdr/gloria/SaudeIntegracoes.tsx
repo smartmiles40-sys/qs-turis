@@ -152,7 +152,7 @@ export default function SaudeIntegracoes({ onRetrato }: { onRetrato?: (r: Retrat
               onClick={() => void testar()}
               disabled={testando}
               className="text-[12px] font-semibold px-4 py-1.5 rounded-lg text-white disabled:opacity-50"
-              style={{ background: "rgb(var(--marca-rgb))" }}
+              style={{ background: "#0147FF" }}
             >
               {testando ? "Batendo nas portas..." : "Testar agora"}
             </button>

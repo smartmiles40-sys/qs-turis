@@ -67,9 +67,9 @@ export default function CalendarPreview({ passos, datasPorDia, entrada, onEntrad
           return (
             <div key={k}
               className={`min-h-[54px] rounded-lg border p-1 ${
-                itens.length ? (fds ? "border-amber-300 bg-amber-50" : "border-marca/30 bg-marca/5") : fora ? "border-gray-50 bg-gray-50" : "border-gray-100 bg-white"
+                itens.length ? (fds ? "border-amber-300 bg-amber-50" : "border-[#0147FF]/30 bg-[#0147FF]/5") : fora ? "border-gray-50 bg-gray-50" : "border-gray-100 bg-white"
               }`}>
-              <div className={`text-[10px] ${k === entradaKey ? "font-bold text-marca-tx" : "text-gray-400"}`}>
+              <div className={`text-[10px] ${k === entradaKey ? "font-bold text-[#0147FF]" : "text-gray-400"}`}>
                 {d.getDate()}{k === entradaKey ? " · entra" : ""}
               </div>
               <div className="flex flex-col gap-0.5 mt-0.5">

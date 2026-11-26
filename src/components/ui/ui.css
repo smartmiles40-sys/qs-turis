@@ -166,39 +166,6 @@ a.qs-kpi:hover, button.qs-kpi:hover { background: var(--surface-2); }
 .qs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .qs-topbar { display: none; }
 
-/* ── Menu lateral com a cara da marca (26/11) ─────────────────────────────
-   Igual ao Sistema de Expedições: gradiente Dark Teal nos DOIS modos, texto
-   off-white e o item ativo em lime com texto teal. Os tokens são redefinidos
-   só dentro da sidebar (os estilos inline do AppShell usam var(--text) etc.);
-   os menus que abrem dela (.qs-pop) voltam pros tokens normais do tema. */
-.qs-side {
-  --text: var(--brand-offwhite);
-  --muted: var(--brand-sage);
-  --subtle: var(--brand-sage-2);
-  --surface: transparent;
-  --surface-2: rgba(255, 255, 255, .08);
-  --border: rgba(255, 255, 255, .10);
-  --border-strong: rgba(255, 255, 255, .16);
-  --danger: #FF9295;
-  background: var(--brand-gradient);
-  border-right-color: rgba(255, 255, 255, .06);
-  color: var(--text);
-}
-.qs-side .qs-side__group { color: color-mix(in srgb, var(--brand-lime) 70%, transparent); }
-.qs-side .qs-nav:hover { color: var(--text); }
-.qs-side .qs-nav[aria-current="page"] { background: var(--brand-lime); color: var(--brand-teal); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
-.qs-side .qs-nav[aria-current="page"] .qs-nav__n { color: var(--brand-teal); }
-.qs-side .qs-btn[aria-current="page"] { background: var(--brand-lime); color: var(--brand-teal); }
-.qs-sector__logo { background: var(--brand-lime); color: var(--brand-teal); }
-.qs-side .qs-pop {
-  --text: #09282B; --muted: #325A5E; --subtle: #587074;
-  --surface: #FFFFFF; --surface-2: #EDF2EE; --border: #DCE5DE; --border-strong: #C5D3C9; --danger: #B91C1C;
-}
-html.dark .qs-side .qs-pop {
-  --text: #F8F6F7; --muted: #B4C2BB; --subtle: #8A9C94;
-  --surface: #0F1614; --surface-2: #17211E; --border: #22302C; --border-strong: #33443F; --danger: #F87171;
-}
-
 /* Celular (04/11): o rodapé da gaveta (nome, sair) ficava embaixo da
    barrinha do iPhone no app instalado. */
 @media (max-width: 767px) {

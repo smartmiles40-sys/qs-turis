@@ -61,7 +61,7 @@ function Ouvir({ g }: { g: Pick<GravacaoLigacao, "storage_path"> }) {
       <button
         onClick={abrir}
         disabled={carregando}
-        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-marca text-white hover:bg-[#0136cc] disabled:opacity-60"
+        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#0147FF] text-white hover:bg-[#0136cc] disabled:opacity-60"
       >
         {carregando ? "Abrindo…" : "▶ Ouvir"}
       </button>

@@ -11,7 +11,7 @@
 //
 // Modo noturno: a camada de override do index.css cobre os utilitários neutros
 // puros (bg-white, text-gray-*, border-gray-*), mas NÃO cobre variantes com
-// opacidade (bg-gray-50/70) nem hex arbitrário (text-marca-tx) — esses levam
+// opacidade (bg-gray-50/70) nem hex arbitrário (text-[#0147FF]) — esses levam
 // `dark:` explícito aqui.
 // -----------------------------------------------------------------------------
 

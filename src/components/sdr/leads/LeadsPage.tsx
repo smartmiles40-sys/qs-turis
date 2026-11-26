@@ -775,7 +775,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
           {executa && (
             <button
               onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] transition-colors"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -798,7 +798,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Pesquise por ID, nome, empresa, e-mail ou telefone..."
-          className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca transition-colors"
+          className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] transition-colors"
         />
       </div>
 
@@ -811,7 +811,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             onClick={() => { setFilterSource(filterSource === k ? "" : k); setCurrentPage(1); }}
             className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
               filterSource === k
-                ? "bg-marca text-white"
+                ? "bg-[#0147FF] text-white"
                 : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
@@ -828,7 +828,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             onClick={() => { setFilterStatus(filterStatus === k ? "" : k); setCurrentPage(1); }}
             className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
               filterStatus === k
-                ? "bg-marca text-white"
+                ? "bg-[#0147FF] text-white"
                 : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
@@ -845,7 +845,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             onClick={() => { setFilterTemp(filterTemp === k ? "" : k); setCurrentPage(1); }}
             className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
               filterTemp === k
-                ? "bg-marca text-white"
+                ? "bg-[#0147FF] text-white"
                 : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
@@ -859,7 +859,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         <select
           value={filterCadence}
           onChange={(e) => { setFilterCadence(e.target.value); setCurrentPage(1); }}
-          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-marca/20"
+          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
         >
           <option value="">Cadência</option>
           {cadences.map((c) => (
@@ -871,7 +871,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         <select
           value={filterOwner}
           onChange={(e) => { setFilterOwner(e.target.value); setCurrentPage(1); }}
-          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-marca/20"
+          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
         >
           <option value="">Responsável</option>
           {users.map((u) => (
@@ -884,7 +884,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
           value={filterFonte}
           onChange={(e) => { setFilterFonte(e.target.value); setCurrentPage(1); }}
           aria-label="Fonte"
-          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-marca/20 max-w-[220px]"
+          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 max-w-[220px]"
         >
           <option value="">Fonte</option>
           {fontes.map((f) => (
@@ -896,7 +896,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         <select
           value={filterLossReason}
           onChange={(e) => { setFilterLossReason(e.target.value); setCurrentPage(1); }}
-          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-marca/20"
+          className="rounded-full px-3 py-1.5 text-xs border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
         >
           <option value="">Motivo de Perda</option>
           {lossReasons.map((lr) => (
@@ -916,8 +916,8 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
 
       {/* ── Bulk Actions ────────────────────────────────────────────────── */}
       {selectedIds.size > 0 && (
-        <div className="flex flex-wrap items-center gap-3 mb-4 px-4 py-3 rounded-xl bg-marca/5 border border-marca/10">
-          <span className="text-sm font-medium text-marca-tx">
+        <div className="flex flex-wrap items-center gap-3 mb-4 px-4 py-3 rounded-xl bg-[#0147FF]/5 border border-[#0147FF]/10">
+          <span className="text-sm font-medium text-[#0147FF]">
             {selectedIds.size} lead{selectedIds.size > 1 ? "s" : ""} selecionado{selectedIds.size > 1 ? "s" : ""}
           </span>
           <div className="flex items-center gap-2 ml-auto">
@@ -1007,7 +1007,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 }
               }}
               disabled={cadenceLinking}
-              className="px-3 py-1.5 rounded-lg bg-marca text-xs font-medium text-white cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+              className="px-3 py-1.5 rounded-lg bg-[#0147FF] text-xs font-medium text-white cursor-pointer disabled:opacity-60 disabled:cursor-wait"
               defaultValue=""
             >
               <option value="" disabled>Vincular à Cadência</option>
@@ -1095,7 +1095,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                     type="checkbox"
                     checked={allOnPageSelected}
                     onChange={toggleAll}
-                    className="w-4 h-4 rounded border-gray-300 text-marca-tx focus:ring-marca/20"
+                    className="w-4 h-4 rounded border-gray-300 text-[#0147FF] focus:ring-[#0147FF]/20"
                   />
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
@@ -1132,7 +1132,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                         type="checkbox"
                         checked={selectedIds.has(lead.id)}
                         onChange={() => toggleOne(lead.id)}
-                        className="w-4 h-4 rounded border-gray-300 text-marca-tx focus:ring-marca/20"
+                        className="w-4 h-4 rounded border-gray-300 text-[#0147FF] focus:ring-[#0147FF]/20"
                       />
                     </td>
                     <td className="px-4 py-3">
@@ -1235,7 +1235,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                         <span className="text-red-600">{loadError}</span>
                         <button
                           onClick={retryFetchLeads}
-                          className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] transition-colors"
+                          className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] transition-colors"
                         >
                           Tentar novamente
                         </button>
@@ -1279,7 +1279,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   onClick={() => setCurrentPage(page)}
                   className={`w-8 h-8 rounded-lg text-xs font-medium transition-colors tabular-nums ${
                     page === currentPage
-                      ? "bg-marca text-white"
+                      ? "bg-[#0147FF] text-white"
                       : "text-gray-600 hover:bg-gray-100"
                   }`}
                 >
@@ -1329,7 +1329,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                     value={formFirstName}
                     onChange={(e) => setFormFirstName(e.target.value)}
                     placeholder="Nome"
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                   />
                 </div>
                 <div>
@@ -1339,7 +1339,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                     value={formLastName}
                     onChange={(e) => setFormLastName(e.target.value)}
                     placeholder="Sobrenome"
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                   />
                 </div>
               </div>
@@ -1351,7 +1351,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   value={formEmail}
                   onChange={(e) => { setFormEmail(e.target.value); setDupLead(null); }}
                   placeholder="email@exemplo.com.br"
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 />
               </div>
 
@@ -1362,7 +1362,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   value={formPhone}
                   onChange={(e) => { setFormPhone(e.target.value); setDupLead(null); }}
                   placeholder="(00) 00000-0000"
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 />
               </div>
 
@@ -1373,7 +1373,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   value={formCompany}
                   onChange={(e) => setFormCompany(e.target.value)}
                   placeholder="Nome da empresa"
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 />
               </div>
 
@@ -1382,7 +1382,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 <select
                   value={formSource}
                   onChange={(e) => setFormSource(e.target.value as LeadSource)}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                 >
                   {(Object.keys(SOURCE_LABELS) as LeadSource[]).map((k) => (
                     <option key={k} value={k}>{SOURCE_LABELS[k]}</option>
@@ -1397,7 +1397,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   <select
                     value={formOwnerId}
                     onChange={(e) => setFormOwnerId(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
                   >
                     <option value="">Automático (rodízio entre os SDRs)</option>
                     {users.map((u) => (
@@ -1434,7 +1434,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                       resetForm();
                       onOpenLead(id);
                     }}
-                    className="px-3 py-1.5 rounded-lg bg-marca text-xs font-medium text-white hover:bg-[#0139D6] transition-colors"
+                    className="px-3 py-1.5 rounded-lg bg-[#0147FF] text-xs font-medium text-white hover:bg-[#0139D6] transition-colors"
                   >
                     Abrir lead
                   </button>
@@ -1469,7 +1469,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   // clique NÃO pode entrar como "force".
                   onClick={() => { void handleCreateLead(false); }}
                   disabled={saving || !formFirstName.trim()}
-                  className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
+                  className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
                 >
                   {saving ? "Salvando..." : "Cadastrar"}
                 </button>
@@ -1595,7 +1595,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                 onClick={handoverMode === "quantidade" ? handleHandoverQuantity : handleHandover}
                 disabled={handoverSaving || !handoverCloserId || (handoverMode === "selecao" ? selectedIds.size === 0 : (!handoverFromId || !parseInt(handoverQty, 10)))}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50"
-                style={{ background: "rgb(var(--marca-rgb))" }}
+                style={{ background: "#0147FF" }}
               >
                 {handoverSaving ? "Enviando..." : "Transferir"}
               </button>

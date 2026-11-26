@@ -346,7 +346,7 @@ export default function MeetingDetailModal({
               href={meeting.meeting_link}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2.5 text-marca-tx font-semibold hover:underline"
+              className="flex items-center gap-2.5 text-[#0147FF] font-semibold hover:underline"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
                 <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" />
@@ -390,14 +390,14 @@ export default function MeetingDetailModal({
               href={googleCalendarUrl(toCalendarEvent(meeting))}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[11px] font-semibold text-gray-500 hover:text-marca-tx"
+              className="text-[11px] font-semibold text-gray-500 hover:text-[#0147FF]"
             >
               Exportar p/ Google
             </a>
             <span className="text-gray-300">·</span>
             <button
               onClick={() => downloadIcs(toCalendarEvent(meeting))}
-              className="text-[11px] font-semibold text-gray-500 hover:text-marca-tx"
+              className="text-[11px] font-semibold text-gray-500 hover:text-[#0147FF]"
             >
               Baixar .ics
             </button>
@@ -406,7 +406,7 @@ export default function MeetingDetailModal({
                 <span className="text-gray-300">·</span>
                 <button
                   onClick={() => { onOpenLead(meeting.lead_id); onClose(); }}
-                  className="text-[11px] font-semibold text-gray-500 hover:text-marca-tx"
+                  className="text-[11px] font-semibold text-gray-500 hover:text-[#0147FF]"
                 >
                   Abrir lead
                 </button>

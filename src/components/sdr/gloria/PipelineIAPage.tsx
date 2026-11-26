@@ -542,7 +542,7 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
             {soPipeline && (
               <span
                 className="text-[12px] font-semibold px-2.5 py-1 rounded-full"
-                style={{ background: "#EEF4FF", color: "rgb(var(--marca-tx-rgb))" }}
+                style={{ background: "#EEF4FF", color: "#0147FF" }}
                 title="qs_settings.gloria_so_pipeline = true"
               >
                 só o pipeline
@@ -596,7 +596,7 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
               <p className="text-[12px] text-gray-600 mt-1.5">aconteceram</p>
             </div>
             <div className="rounded-lg px-4 py-3 min-w-[110px]" style={{ background: "#EEF4FF" }}>
-              <p className="text-[24px] font-bold leading-none" style={{ color: "rgb(var(--marca-tx-rgb))" }}>{placar.agendadas}</p>
+              <p className="text-[24px] font-bold leading-none" style={{ color: "#0147FF" }}>{placar.agendadas}</p>
               <p className="text-[12px] text-gray-600 mt-1.5">ainda de pé</p>
             </div>
             <div className="rounded-lg px-4 py-3 min-w-[110px]" style={{ background: placar.noShow > 0 ? "#FEF2F2" : "#F9FAFB" }}>
@@ -687,7 +687,7 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
               disabled={salvandoTeste}
               onClick={() => void cadastrarTeste()}
               className="mt-3 text-[12px] font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-60"
-              style={{ background: "rgb(var(--marca-rgb))" }}
+              style={{ background: "#0147FF" }}
             >
               {salvandoTeste ? "cadastrando…" : "Cadastrar e colocar na IA"}
             </button>
@@ -718,7 +718,7 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
                   disabled={adicionando === a.id}
                   onClick={() => void colocarNoPipeline(a.id, a.full_name || "o lead")}
                   className="shrink-0 text-[12px] font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-60"
-                  style={{ background: "rgb(var(--marca-rgb))" }}
+                  style={{ background: "#0147FF" }}
                 >
                   {adicionando === a.id ? "…" : "Colocar na IA"}
                 </button>
@@ -789,7 +789,7 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
                         <div className="flex items-start justify-between gap-2">
                           <button
                             onClick={() => onOpenLead?.(l.lead_id)}
-                            className="text-left text-[13px] font-semibold text-gray-900 truncate hover:text-marca-tx hover:underline min-w-0"
+                            className="text-left text-[13px] font-semibold text-gray-900 truncate hover:text-[#0147FF] hover:underline min-w-0"
                             title="Abrir o lead"
                           >
                             {l.nome}
@@ -826,7 +826,7 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
                               <button
                                 onClick={() => void reabrir(l.lead_id, l.nome)}
                                 disabled={adicionando === l.lead_id}
-                                className="text-[10px] font-semibold text-marca-tx hover:underline disabled:opacity-50"
+                                className="text-[10px] font-semibold text-[#0147FF] hover:underline disabled:opacity-50"
                                 title="Reabrir o atendimento por IA: liga a sessão de novo, zera os toques e dá 30 min de carência antes do próximo"
                               >
                                 {adicionando === l.lead_id ? "…" : "reabrir"}
@@ -836,7 +836,7 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
                               <button
                                 onClick={() => void abordarAgora(l.lead_id, l.nome)}
                                 disabled={abordando === l.lead_id}
-                                className="text-[10px] font-semibold text-marca-tx hover:underline disabled:opacity-50"
+                                className="text-[10px] font-semibold text-[#0147FF] hover:underline disabled:opacity-50"
                                 title="Pedir pra Gloria puxar assunto agora. Fora da janela de 24h sai o modelo aprovado; dentro dela, ela responde a ultima mensagem do lead."
                               >
                                 {abordando === l.lead_id ? "…" : "falar"}

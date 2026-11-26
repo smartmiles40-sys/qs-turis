@@ -125,7 +125,7 @@ export default function ChangePasswordModal({ open, onClose }: Props) {
               type="submit"
               disabled={saving || !password || !confirm}
               className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
-              style={{ background: "rgb(var(--marca-rgb))" }}
+              style={{ background: "#0147FF" }}
             >
               {saving ? "Salvando..." : "Trocar senha"}
             </button>

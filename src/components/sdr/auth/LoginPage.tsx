@@ -6,39 +6,39 @@ import { SETORES, type Setor } from "@/components/sdr/types";
 // ── As portas do QS (09/10/2026; Financeiro e Operações em 14/10) ───────────────────────────────────────
 // Um sistema, um banco, uma porta por setor. A pessoa escolhe por onde entra;
 // se a conta dela não é daquele setor, o login recusa com a frase certa (em vez
-// de abrir uma tela vazia). Desde 26/11 todas as portas usam a cor da marca (Dark Teal).
+// de abrir uma tela vazia). A cor da porta acompanha a área inteira.
 const PORTAS: Record<Setor, { titulo: string; sub: string; cor: string; corSoft: string }> = {
   comercial: {
     titulo: "Comercial",
     sub: "Leads, atividades e reuniões",
-    cor: "rgb(var(--marca-rgb))",
-    corSoft: "rgb(var(--marca-rgb) / 0.08)",
+    cor: "#0147FF",
+    corSoft: "rgba(1, 71, 255, 0.08)",
   },
   relacionamento: {
     titulo: "Relacionamento",
     sub: "Clientes, viagens e pós-venda",
-    cor: "rgb(var(--marca-rgb))",
-    corSoft: "rgb(var(--marca-rgb) / 0.08)",
+    cor: "#0E7C6A",
+    corSoft: "rgba(14, 124, 106, 0.09)",
   },
   // Índigo e âmbar escuros: texto branco em cima passa no contraste AA.
   financeiro: {
     titulo: "Financeiro",
     sub: "Recebimentos, pagamentos e status",
-    cor: "rgb(var(--marca-rgb))",
-    corSoft: "rgb(var(--marca-rgb) / 0.08)",
+    cor: "#3730A3",
+    corSoft: "rgba(55, 48, 163, 0.09)",
   },
   operacional: {
     titulo: "Operações",
     sub: "Expedições, fornecedores e embarques",
-    cor: "rgb(var(--marca-rgb))",
-    corSoft: "rgb(var(--marca-rgb) / 0.08)",
+    cor: "#B45309",
+    corSoft: "rgba(180, 83, 9, 0.10)",
   },
   // Marketing (0240, 30/10): magenta escuro — texto branco em cima = 6:1 (AA).
   marketing: {
     titulo: "Marketing",
     sub: "Conteúdo orgânico, tráfego e aprovação",
-    cor: "rgb(var(--marca-rgb))",
-    corSoft: "rgb(var(--marca-rgb) / 0.08)",
+    cor: "#BE185D",
+    corSoft: "rgba(190, 24, 93, 0.09)",
   },
 };
 
@@ -176,7 +176,7 @@ export default function LoginPage() {
                 >
                   <Icone />
                 </span>
-                <span className="block text-sm font-bold" style={{ color: ativo ? "rgb(var(--marca-tx-rgb))" : "var(--ink)" }}>
+                <span className="block text-sm font-bold" style={{ color: ativo ? item.cor : "var(--ink)" }}>
                   {item.titulo}
                 </span>
                 <span className="block text-[11px] leading-snug mt-0.5" style={{ color: "var(--ink3)" }}>

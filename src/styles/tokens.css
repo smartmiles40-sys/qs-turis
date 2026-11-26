@@ -5,38 +5,20 @@
 
 
 :root {
-  /* ── Marca "Se Tu For, Eu Vou!" (Guia da Marca 2025, Drive) ──────────────
-     Mesmas cores do Sistema de Expedições. Dark Teal é o tom principal; o
-     lime é o acento (item ativo do menu, botão primário no modo noite). */
-  --brand-teal: #09282B;      /* Dark Teal */
-  --brand-teal-2: #104146;    /* variação */
-  --brand-teal-3: #325A5E;    /* variação */
-  --brand-lime: #CCED60;      /* Lime Green */
-  --brand-lime-2: #DDF29A;
-  --brand-lime-soft: #ECF6CA;
-  --brand-sage: #CBD8CE;      /* Light Green */
-  --brand-sage-2: #B0CFB7;
-  --brand-offwhite: #F8F6F7;  /* Off White */
-  --brand-gradient: linear-gradient(135deg, #0D3A3F 0%, #09282B 55%, #07201F 100%);
-  /* substituem o azul antigo #0147FF nas telas (classes bg-marca, text-marca-tx):
-     --marca = fundo/borda com texto branco por cima; --marca-tx = texto em destaque */
-  --marca-rgb: 9 40 43;        /* #09282B */
-  --marca-tx-rgb: 16 65 70;    /* #104146 */
-
   /* superfícies */
-  --bg: #F4F7F5;          /* fundo da página (off-white esverdeado) */
-  --surface: #FFFFFF;     /* cards, tabelas */
-  --surface-2: #EDF2EE;   /* hover, item ativo, trilhas de barra, chips */
-  --border: #DCE5DE;      /* toda borda e divisória */
+  --bg: #FAFAFA;          /* fundo da página */
+  --surface: #FFFFFF;     /* cards, sidebar, tabelas */
+  --surface-2: #F4F4F5;   /* hover, item ativo, trilhas de barra, chips */
+  --border: #E4E4E7;      /* toda borda e divisória */
 
   /* texto */
-  --text: #09282B;        /* texto principal e títulos (Dark Teal) */
-  --muted: #325A5E;       /* texto secundário */
-  --subtle: #587074;      /* rótulos, metadados (passa 4.5:1 no --bg) */
+  --text: #09090B;        /* texto principal e títulos */
+  --muted: #52525B;       /* texto secundário */
+  --subtle: #6B6B73;      /* rótulos, metadados (passa 4.5:1 no --bg) */
 
   /* ação primária: UM botão por tela */
-  --primary: #09282B;
-  --on-primary: #F8F6F7;
+  --primary: #09090B;
+  --on-primary: #FAFAFA;
 
   /* status: só para estado, nunca decoração */
   --danger: #B91C1C;  --danger-bg: #FEF2F2;   /* atrasado, urgente, bloqueia */
@@ -59,9 +41,9 @@
      Só os que faltavam ganham nome novo. */
   --surface-muted: var(--surface-2);
   --text-muted: var(--muted);
-  --border-strong: #C5D3C9;   /* borda de botão secundário e input */
-  --positive: #104146;        /* ação positiva principal, links (Concluir, Pedir) */
-  --on-positive: #F8F6F7;
+  --border-strong: #D4D4D8;   /* borda de botão secundário e input */
+  --positive: #0F766E;        /* ação positiva principal, links (Concluir, Pedir) */
+  --on-positive: #FFFFFF;
 
   /* setor em chip (fundo/texto), além do pontinho acima */
   --sector-comercial-bg: #E8EFFE;      --sector-comercial-fg: #1D4ED8;
@@ -76,7 +58,7 @@
   --fase-viagem: var(--primary);   --fase-viagem-bg: var(--primary);  --fase-viagem-fg: var(--on-primary);
   --fase-embarque: #D97706;        --fase-embarque-bg: #FEF3C7;       --fase-embarque-fg: #92400E;
   --fase-preparacao: #2563EB;      --fase-preparacao-bg: #E8EFFE;     --fase-preparacao-fg: #1D4ED8;
-  --fase-vendendo: #6B8580;        --fase-vendendo-bg: var(--surface-2); --fase-vendendo-fg: #325A5E;
+  --fase-vendendo: #71717A;        --fase-vendendo-bg: var(--surface-2); --fase-vendendo-fg: #3F3F46;
   --fase-concluida: #067647;       --fase-concluida-bg: #DCFAE6;      --fase-concluida-fg: #067647;
 
   --radius-card: 16px;  /* cards da ficha (spec) */
@@ -118,26 +100,22 @@
 }
 
 .dark {
-  /* noite com a marca: fundo quase preto esverdeado (igual ao Expedições),
-     texto off-white, e o primário vira o lime com texto teal. */
-  --bg: #0A0F0D;
-  --surface: #0F1614;
-  --surface-2: #17211E;
-  --border: #22302C;
-  --text: #F8F6F7;
-  --muted: #B4C2BB;
-  --subtle: #8A9C94;
-  --primary: #CCED60;
-  --on-primary: #09282B;
-  --marca-rgb: 16 65 70;       /* #104146: branco por cima = 11:1 */
-  --marca-tx-rgb: 204 237 96;  /* lime: texto em destaque no escuro */
+  --bg: #09090B;
+  --surface: #111113;
+  --surface-2: #1A1A1D;
+  --border: #27272A;
+  --text: #FAFAFA;
+  --muted: #A1A1AA;
+  --subtle: #8E8E96;
+  --primary: #FAFAFA;
+  --on-primary: #09090B;
   --danger: #F87171; --danger-bg: rgba(248, 113, 113, .12);
   --warn:   #FBBF24; --warn-bg:   rgba(251, 191, 36, .12);
   --ok:     #4ADE80; --ok-bg:     rgba(74, 222, 128, .12);
   --info:   #60A5FA; --info-bg:   rgba(96, 165, 250, .12);
-  --border-strong: #33443F;
-  --positive: #CCED60;
-  --on-positive: #09282B;
+  --border-strong: #3F3F46;
+  --positive: #2DD4BF;
+  --on-positive: #09090B;
   --sector-comercial-bg: rgba(96, 165, 250, .14);      --sector-comercial-fg: #93C5FD;
   --sector-financeiro-bg: rgba(167, 139, 250, .14);    --sector-financeiro-fg: #C4B5FD;
   --sector-operacoes-bg: rgba(251, 146, 60, .14);      --sector-operacoes-fg: #FDBA74;
@@ -145,7 +123,7 @@
   --sector-relacionamento-bg: rgba(45, 212, 191, .14); --sector-relacionamento-fg: #5EEAD4;
   --fase-embarque: #F59E0B;        --fase-embarque-bg: rgba(245, 158, 11, .14);  --fase-embarque-fg: #FCD34D;
   --fase-preparacao: #60A5FA;      --fase-preparacao-bg: rgba(96, 165, 250, .14); --fase-preparacao-fg: #93C5FD;
-  --fase-vendendo: #8A9C94;        --fase-vendendo-fg: #CDD8D2;
+  --fase-vendendo: #A1A1AA;        --fase-vendendo-fg: #D4D4D8;
   --fase-concluida: #4ADE80;       --fase-concluida-bg: rgba(74, 222, 128, .12);  --fase-concluida-fg: #86EFAC;
 }
 

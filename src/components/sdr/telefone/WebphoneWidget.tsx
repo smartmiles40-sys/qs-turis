@@ -169,7 +169,7 @@ export default function WebphoneWidget({ demo }: { demo?: WebphoneState } = {}) 
               />
               <div className="flex items-center gap-2 mt-2">
                 <button onClick={handleSaveNote} disabled={savingNote || !note.trim()}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50" style={{ background: "rgb(var(--marca-rgb))" }}>
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50" style={{ background: "#0147FF" }}>
                   {savingNote ? "Salvando…" : "Salvar no lead"}
                 </button>
                 {noteSaved && <span className="text-xs font-medium text-green-600">Salvo no lead + Bitrix ✓</span>}

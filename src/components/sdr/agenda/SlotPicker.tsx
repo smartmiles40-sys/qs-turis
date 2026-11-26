@@ -319,13 +319,13 @@ export default function SlotPicker({
                     onClick={() => selectDay(d)}
                     className={`shrink-0 w-[52px] rounded-lg border px-1 py-1.5 text-center transition-colors ${
                       active
-                        ? "border-marca bg-marca/5"
+                        ? "border-[#0147FF] bg-[#0147FF]/5"
                         : free > 0
                           ? "border-gray-200 bg-white hover:bg-gray-50"
                           : "border-gray-100 bg-gray-50"
                     }`}
                   >
-                    <span className={`block text-[10px] font-semibold uppercase ${active ? "text-marca-tx" : "text-gray-400"}`}>
+                    <span className={`block text-[10px] font-semibold uppercase ${active ? "text-[#0147FF]" : "text-gray-400"}`}>
                       {WEEKDAY_SHORT[d.getDay()]}
                     </span>
                     <span className={`block text-sm font-bold leading-tight ${free > 0 ? "text-gray-800" : "text-gray-400"}`}>
@@ -358,7 +358,7 @@ export default function SlotPicker({
                   onClick={() => { setDuracaoMin(d); onChange(null); }}
                   className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
                     duracaoMin === d
-                      ? "border-marca bg-marca text-white"
+                      ? "border-[#0147FF] bg-[#0147FF] text-white"
                       : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
                   }`}
                 >
@@ -396,7 +396,7 @@ export default function SlotPicker({
                 <button
                   type="button"
                   onClick={() => { setManual((v) => !v); onChange(null); }}
-                  className="text-[11px] font-semibold text-marca-tx hover:underline"
+                  className="text-[11px] font-semibold text-[#0147FF] hover:underline"
                 >
                   {manual ? "Voltar aos horários livres" : "Digitar outro horário"}
                 </button>
@@ -458,9 +458,9 @@ export default function SlotPicker({
                       title={title}
                       className={`rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
                         active
-                          ? "border-marca bg-marca text-white"
+                          ? "border-[#0147FF] bg-[#0147FF] text-white"
                           : disponivel
-                            ? "border-gray-200 bg-white text-gray-700 hover:border-marca hover:text-marca-tx"
+                            ? "border-gray-200 bg-white text-gray-700 hover:border-[#0147FF] hover:text-[#0147FF]"
                             : curto
                               // Curto ≠ ocupado: sem risco de o SDR achar que o
                               // closer está cheio quando é só a duração que não cabe.
@@ -477,8 +477,8 @@ export default function SlotPicker({
           </div>
 
           {value && (
-            <div className="rounded-lg border border-marca/20 bg-marca/5 px-3 py-2">
-              <p className="text-xs font-semibold text-marca-tx">
+            <div className="rounded-lg border border-[#0147FF]/20 bg-[#0147FF]/5 px-3 py-2">
+              <p className="text-xs font-semibold text-[#0147FF]">
                 {value.closerName} · {WEEKDAY_SHORT[value.start.getDay()]}{" "}
                 {String(value.start.getDate()).padStart(2, "0")}/{String(value.start.getMonth() + 1).padStart(2, "0")} às{" "}
                 {hhmm(value.start)} · {value.durationMin} min
