@@ -48,7 +48,7 @@ class PageErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
           <button
             onClick={() => this.setState({ hasError: false })}
             className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
-            style={{ background: "#0147FF" }}
+            style={{ background: "rgb(var(--marca-rgb))" }}
           >
             Tentar novamente
           </button>

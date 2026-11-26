@@ -512,7 +512,7 @@ export default function CoveragePanel({ onOpenLead }: { onOpenLead?: (leadId: st
             <h2 className="text-[16px] font-semibold text-gray-900">Leads Aguardando Contato</h2>
             <span
               className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 rounded-full text-[12px] font-bold text-white"
-              style={{ background: pendingLeads.length > 0 ? "#0147FF" : "#22C55E" }}
+              style={{ background: pendingLeads.length > 0 ? "rgb(var(--marca-rgb))" : "#22C55E" }}
             >
               {pendingLeads.length}
             </span>
@@ -591,7 +591,7 @@ export default function CoveragePanel({ onOpenLead }: { onOpenLead?: (leadId: st
                       {onOpenLead ? (
                         <button
                           onClick={() => onOpenLead(lead.id)}
-                          className="block max-w-full text-left text-[14px] font-medium text-gray-900 truncate hover:text-[#0147FF] hover:underline"
+                          className="block max-w-full text-left text-[14px] font-medium text-gray-900 truncate hover:text-marca-tx hover:underline"
                           title="Ver informações do lead"
                         >
                           {lead.name}
@@ -628,7 +628,7 @@ export default function CoveragePanel({ onOpenLead }: { onOpenLead?: (leadId: st
                       onClick={() => handleContact(lead.id)}
                       disabled={contactingId === lead.id}
                       className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-semibold text-white transition-colors hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
-                      style={{ background: "#0147FF" }}
+                      style={{ background: "rgb(var(--marca-rgb))" }}
                     >
                       <IconPhone />
                       {contactingId === lead.id ? "Registrando..." : "Contatar agora"}

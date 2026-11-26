@@ -51,7 +51,7 @@ export default function AnalisesPage({ onOpenLead }: { onOpenLead: (leadId: stri
               onClick={() => setTab(t.id)}
               className={`rounded-full px-4 h-9 text-[13px] font-semibold transition-colors ${
                 isActive
-                  ? "bg-[#0147FF] text-white"
+                  ? "bg-marca text-white"
                   : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
               }`}
             >

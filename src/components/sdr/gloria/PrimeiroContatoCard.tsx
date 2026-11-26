@@ -182,7 +182,7 @@ export default function PrimeiroContatoCard({
                 max={500}
                 value={teto}
                 onChange={(e) => setTeto(Number(e.target.value))}
-                className="w-24 px-3 py-1.5 text-[13px] rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
+                className="w-24 px-3 py-1.5 text-[13px] rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-marca/20"
               />
               <p className="text-[12px] text-gray-500 max-w-md">
                 Vira zero à meia-noite de São Paulo. Em <strong>0</strong> ninguém é abordado —
@@ -213,7 +213,7 @@ export default function PrimeiroContatoCard({
                   const m = modelos.find((x) => x.nome === e.target.value);
                   setRascunho(m ? { nome: m.nome, idioma: m.idioma, params: {} } : null);
                 }}
-                className="w-full max-w-lg px-3 py-1.5 text-[13px] rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
+                className="w-full max-w-lg px-3 py-1.5 text-[13px] rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-marca/20"
               >
                 <option value="">— nenhum (ela não puxa assunto) —</option>
                 {modelos.map((m) => (
@@ -243,7 +243,7 @@ export default function PrimeiroContatoCard({
                         onChange={(e) =>
                           setRascunho((r) => (r ? { ...r, params: { ...(r.params ?? {}), [v]: e.target.value } } : r))
                         }
-                        className="px-2.5 py-1 text-[12px] rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
+                        className="px-2.5 py-1 text-[12px] rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-marca/20"
                       >
                         <option value="">— escolha —</option>
                         {APELIDOS.map((a) => (
@@ -266,7 +266,7 @@ export default function PrimeiroContatoCard({
               onClick={() => void salvarTudo()}
               disabled={salvando}
               className="text-[12px] font-semibold px-4 py-1.5 rounded-lg text-white disabled:opacity-50"
-              style={{ background: "#0147FF" }}
+              style={{ background: "rgb(var(--marca-rgb))" }}
             >
               {salvando ? "Salvando..." : "Salvar"}
             </button>

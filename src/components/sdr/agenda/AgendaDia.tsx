@@ -1029,7 +1029,7 @@ export default function AgendaDia({ onOpenLead, dataInicial, demo, semBotaoAgend
 }
 
 const btnIcone =
-  "rounded-lg p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20";
+  "rounded-lg p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-marca/20";
 
 // ── Painel lateral ───────────────────────────────────────────────────────────
 
@@ -1106,7 +1106,7 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
           {/* O produto ao lado do nome: é a primeira coisa que o especialista
               precisa saber ao abrir a reunião — sobre o que ela é. */}
           {reuniao.title && reuniao.title !== reuniao.lead_name && (
-            <p className="truncate text-sm font-semibold" style={{ color: "#0147FF" }}>{reuniao.title}</p>
+            <p className="truncate text-sm font-semibold" style={{ color: "rgb(var(--marca-tx-rgb))" }}>{reuniao.title}</p>
           )}
           {reuniao.lead?.bitrix_id && <p className="text-xs text-gray-400">Negócio #{reuniao.lead.bitrix_id}</p>}
         </div>
@@ -1287,7 +1287,7 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
                 <button
                   key={op.valor}
                   onClick={() => onSal(op.valor)}
-                  className="flex-1 rounded-lg border py-1.5 text-xs font-bold transition focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
+                  className="flex-1 rounded-lg border py-1.5 text-xs font-bold transition focus:outline-none focus:ring-2 focus:ring-marca/20"
                   style={{
                     borderColor: on ? op.cor : "#E5E7EB",
                     background: on ? `${op.cor}18` : "transparent",
@@ -1412,7 +1412,7 @@ function BotaoDesfecho({ cor, icone, rotulo, onClick }: { cor: string; icone: Re
   return (
     <button
       onClick={onClick}
-      className="flex flex-col items-center gap-1 rounded-lg border py-2 text-xs font-bold transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20"
+      className="flex flex-col items-center gap-1 rounded-lg border py-2 text-xs font-bold transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-marca/20"
       style={{ borderColor: `${cor}44`, color: cor, background: `${cor}12` }}
     >
       {icone}

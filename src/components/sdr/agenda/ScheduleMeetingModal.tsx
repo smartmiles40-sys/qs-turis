@@ -35,7 +35,7 @@ function emailValido(v: string): boolean {
 }
 
 const inputClass =
-  "w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] transition-colors";
+  "w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca transition-colors";
 const labelClass = "block text-xs font-medium text-gray-700 mb-1";
 
 function leadLabel(l: Lead): string {
@@ -578,7 +578,7 @@ export default function ScheduleMeetingModal({
                     type="checkbox"
                     checked={gerarMeet}
                     onChange={(e) => setGerarMeet(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 accent-[#0147FF]"
+                    className="mt-0.5 w-4 h-4 accent-marca"
                   />
                   <span className="min-w-0">
                     <span className="block text-sm font-medium text-gray-800">Criar sala do Google Meet</span>
@@ -614,7 +614,7 @@ export default function ScheduleMeetingModal({
                       onClick={() => setTipo(op.v)}
                       className={`flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors ${
                         tipo === op.v
-                          ? "border-[#0147FF] bg-[#0147FF] text-white"
+                          ? "border-marca bg-marca text-white"
                           : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
                       }`}
                     >
@@ -665,7 +665,7 @@ export default function ScheduleMeetingModal({
           <button
             onClick={handleSave}
             disabled={saving || !pick || (!remarcando && !leadId)}
-            className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-semibold text-white hover:bg-[#0139D6] disabled:opacity-50"
+            className="px-4 py-2 rounded-lg bg-marca text-sm font-semibold text-white hover:bg-[#0139D6] disabled:opacity-50"
           >
             {saving ? "Salvando..." : remarcando ? "Remarcar" : "Agendar"}
           </button>

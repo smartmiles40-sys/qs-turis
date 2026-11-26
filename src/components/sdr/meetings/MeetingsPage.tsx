@@ -96,7 +96,7 @@ interface MeetingsPageProps {
 }
 
 const inputClass =
-  "w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF] transition-colors";
+  "w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca transition-colors";
 const labelClass = "block text-xs font-medium text-gray-700 mb-1";
 
 export default function MeetingsPage({ onOpenLead, aba: abaPedida, onAba, extras = [] }: MeetingsPageProps) {
@@ -812,7 +812,7 @@ export default function MeetingsPage({ onOpenLead, aba: abaPedida, onAba, extras
                       type="checkbox"
                       checked={fGerarMeet}
                       onChange={(e) => setFGerarMeet(e.target.checked)}
-                      className="mt-0.5 w-4 h-4 accent-[#0147FF]"
+                      className="mt-0.5 w-4 h-4 accent-marca"
                     />
                     <span className="min-w-0">
                       <span className="block text-sm font-medium text-gray-800">Criar sala do Google Meet</span>
@@ -907,7 +907,7 @@ export default function MeetingsPage({ onOpenLead, aba: abaPedida, onAba, extras
               <button
                 onClick={handleSave}
                 disabled={saving || !fLeadId || !fWhen}
-                className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
+                className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
               >
                 {saving ? "Salvando..." : editingId ? "Salvar alterações" : "Agendar"}
               </button>

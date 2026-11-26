@@ -271,7 +271,7 @@ export default function RetrospectivaModal({ user }: Props) {
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={close} />
       <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
         {/* Cabeçalho */}
-        <div className="px-6 pt-6 pb-5 shrink-0 relative" style={{ background: "linear-gradient(135deg,#0147FF,#3B82F6)" }}>
+        <div className="px-6 pt-6 pb-5 shrink-0 relative" style={{ background: "var(--brand-gradient)" }}>
           <button
             onClick={close}
             aria-label="Fechar"

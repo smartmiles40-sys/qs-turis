@@ -482,14 +482,14 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
               </div>
             )}
             <div>
-              <button onClick={onClose} className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] transition-colors">
+              <button onClick={onClose} className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] transition-colors">
                 Fechar
               </button>
             </div>
           </div>
         ) : !mapa ? (
           <div>
-            <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-200 rounded-xl py-10 cursor-pointer hover:border-[#0147FF]/50 hover:bg-[#0147FF]/5 transition-colors">
+            <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-200 rounded-xl py-10 cursor-pointer hover:border-marca/50 hover:bg-marca/5 transition-colors">
               <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
               </svg>
@@ -506,7 +506,7 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
                 }}
               />
             </label>
-            <button onClick={baixarModelo} className="mt-3 text-xs font-medium text-[#0147FF] hover:underline">
+            <button onClick={baixarModelo} className="mt-3 text-xs font-medium text-marca-tx hover:underline">
               Baixar planilha modelo
             </button>
           </div>
@@ -536,7 +536,7 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
                       value={mapa[chave]}
                       disabled={importando}
                       onChange={(e) => setMapa({ ...mapa, [chave]: Number(e.target.value) })}
-                      className={`flex-1 min-w-0 px-2 py-1.5 rounded-lg border text-xs bg-white focus:outline-none focus:border-[#0147FF] ${
+                      className={`flex-1 min-w-0 px-2 py-1.5 rounded-lg border text-xs bg-white focus:outline-none focus:border-marca ${
                         chave === "nome" && mapa.nome < 0 ? "border-red-300" : "border-gray-200"
                       }`}
                     >
@@ -621,7 +621,7 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
                 value={cadenceId}
                 disabled={importando}
                 onChange={(e) => setCadenceId(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:border-[#0147FF] mb-3"
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:border-marca mb-3"
               >
                 <option value="">Nenhuma lista (entram sem atividades)</option>
                 {cadenciasDisponiveis.map((c) => (
@@ -666,7 +666,7 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
                                 setEscolhidos(n);
                               }}
                               className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                                on ? "bg-[#0147FF] border-[#0147FF] text-white" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                                on ? "bg-marca border-marca text-white" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
                               }`}
                             >
                               {s.name}
@@ -693,7 +693,7 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
             {importando && (
               <div>
                 <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                  <div className="h-full rounded-full bg-[#0147FF] transition-all" style={{ width: `${Math.round((progresso / Math.max(entram.length, 1)) * 100)}%` }} />
+                  <div className="h-full rounded-full bg-marca transition-all" style={{ width: `${Math.round((progresso / Math.max(entram.length, 1)) * 100)}%` }} />
                 </div>
                 <p className="text-xs text-gray-500 mt-1 tabular-nums">Importando {progresso}/{entram.length}… Não feche esta janela.</p>
               </div>
@@ -710,7 +710,7 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
               <button
                 onClick={() => void importar()}
                 disabled={!podeImportar || importando}
-                className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
+                className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
               >
                 {importando ? "Importando..." : `Importar ${entram.length} lead${entram.length !== 1 ? "s" : ""}`}
               </button>

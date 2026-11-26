@@ -43,8 +43,8 @@ function Preview() {
               onClick={() => setI(idx)}
               style={{
                 padding: "8px 14px", borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: "pointer",
-                border: idx === i ? "1px solid #0147FF" : "1px solid #e5e7eb",
-                background: idx === i ? "#0147FF" : "#fff",
+                border: idx === i ? "1px solid rgb(var(--marca-rgb))" : "1px solid #e5e7eb",
+                background: idx === i ? "rgb(var(--marca-rgb))" : "#fff",
                 color: idx === i ? "#fff" : "#374151",
               }}
             >

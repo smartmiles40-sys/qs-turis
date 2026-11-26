@@ -289,7 +289,7 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
             link saem iguais aos de lá: é o mesmo ScheduleMeetingModal. */}
         <button
           onClick={() => setAgendando(true)}
-          className="shrink-0 px-3.5 py-2 rounded-lg bg-[#0147FF] text-white text-sm font-semibold hover:bg-[#0139cc]"
+          className="shrink-0 px-3.5 py-2 rounded-lg bg-marca text-white text-sm font-semibold hover:bg-[#0139cc]"
         >
           + Nova reunião
         </button>
@@ -385,16 +385,16 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                     registrada
                       ? "bg-gray-50 border-gray-200 opacity-60 hover:opacity-100"
                       : agoraNela
-                        ? "bg-white border-[#0147FF] ring-2 ring-[#0147FF]/15"
+                        ? "bg-white border-marca ring-2 ring-marca/15"
                         : "bg-white border-gray-200"
                   }`}
                 >
                   <div className="flex flex-col sm:flex-row sm:items-stretch">
                     {/* Horário: a âncora visual da linha */}
-                    <div className={`shrink-0 px-4 py-3 sm:w-32 sm:border-r border-gray-100 ${agoraNela ? "bg-[#0147FF]/5" : ""}`}>
+                    <div className={`shrink-0 px-4 py-3 sm:w-32 sm:border-r border-gray-100 ${agoraNela ? "bg-marca/5" : ""}`}>
                       <p className="text-lg font-bold text-gray-900 leading-none tabular-nums">{hhmm(ini)}</p>
                       <p className="text-[11px] text-gray-400 mt-1 tabular-nums">até {hhmm(fim)}</p>
-                      {agoraNela && <p className="text-[10px] font-bold text-[#0147FF] mt-1.5 uppercase">agora</p>}
+                      {agoraNela && <p className="text-[10px] font-bold text-marca-tx mt-1.5 uppercase">agora</p>}
                       {registrada
                         ? <p className="text-[10px] font-bold text-gray-500 mt-1.5 uppercase">{MEETING_STATUS_LABELS[m.status]}</p>
                         : passou && <p className="text-[10px] font-semibold text-gray-400 mt-1.5 uppercase">já passou</p>}
@@ -407,7 +407,7 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                       </p>
                       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-gray-500">
                         {m.origem === "autoagendamento" && (
-                          <span className="px-1.5 py-0.5 rounded font-bold" style={{ background: "#E0E9FF", color: "#0147FF" }}>
+                          <span className="px-1.5 py-0.5 rounded font-bold" style={{ background: "#E0E9FF", color: "rgb(var(--marca-tx-rgb))" }}>
                             o cliente marcou sozinho
                           </span>
                         )}
@@ -433,7 +433,7 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                             href={m.meeting_link}
                             target="_blank"
                             rel="noreferrer"
-                            className="px-3 py-1.5 rounded-lg bg-[#0147FF] text-white text-xs font-bold hover:bg-[#0139D6]"
+                            className="px-3 py-1.5 rounded-lg bg-marca text-white text-xs font-bold hover:bg-[#0139D6]"
                           >
                             Entrar no Meet
                           </a>
@@ -530,7 +530,7 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                               nao lembra de ter marcado — e a primeira reacao e
                               achar que o sistema errou. */}
                           {m.origem === "autoagendamento" && (
-                            <span className="shrink-0 rounded px-1.5 py-px text-[10px] font-bold" style={{ background: "#E0E9FF", color: "#0147FF" }}>
+                            <span className="shrink-0 rounded px-1.5 py-px text-[10px] font-bold" style={{ background: "#E0E9FF", color: "rgb(var(--marca-tx-rgb))" }}>
                               o cliente marcou
                             </span>
                           )}
