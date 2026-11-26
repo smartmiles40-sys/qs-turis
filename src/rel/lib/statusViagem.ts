@@ -441,6 +441,26 @@ export function proximaDataDaVenda(v: Pick<ViagemDatas, "data_embarque" | "data_
 }
 
 /**
+ * 26/11 (Bruno, caso Julia Trianda: 3 vendas de hotel no Japão): venda SEM
+ * aéreo nosso não tem "próximo voo" — a coluna mostrava a data de entrada no
+ * hotel como se fosse voo. Sem voo cadastrado e sem aéreo vendido, o texto diz
+ * o que a data é: "HOTEL" (entrada) / "SAÍDA HOTEL" (já hospedado), "PASSEIO",
+ * "SEGURO"… ou só "SEM AÉREO". null = a venda tem aéreo (segue a data/VOLTA).
+ */
+export function rotuloSemAereo(
+  v: Pick<ViagemDatas, "servico" | "aereo_vendido">,
+  prox: { qual: "ida" | "volta" } | null,
+): string | null {
+  if (vendaTemAereo(v)) return null;
+  const s = v.servico;
+  if (s === "hospedagem") return prox?.qual === "volta" ? "SAÍDA HOTEL" : "HOTEL";
+  if (s === "passeio") return "PASSEIO";
+  if (s === "seguro") return "SEGURO";
+  if (s === "cruzeiro") return "CRUZEIRO";
+  return "SEM AÉREO";
+}
+
+/**
  * Localizador do voo da vez, "sempre de acordo com o voo das pessoas que estão
  * em viagem": junta o localizador de TODAS as cópias do mesmo voo (uma por
  * passageiro — cada um pode ter o seu); se nenhuma cópia tem, usa o de outro

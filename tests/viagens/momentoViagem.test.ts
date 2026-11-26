@@ -77,3 +77,17 @@ test("localizador: o do voo da vez; cópias por passageiro somam; sem, pega a co
   const r3 = resumirVoos(V, cx, ms("2026-11-19T21:30:00-03:00"));
   assert.deepEqual(localizadoresDoVoo(vooDaVez(r3, ms("2026-11-19T21:30:00-03:00"), V).voo, r3), ["XYZ999"]);
 });
+
+test("Julia Trianda (26/11): venda de hotel sem aéreo não mostra data como próximo voo", async () => {
+  const { rotuloSemAereo } = await import("../../src/rel/lib/statusViagem.ts");
+  const agora = ms("2026-11-26T10:00:00-03:00");
+  const osaka: ViagemDatas = { status: "ativa", servico: "hospedagem", aereo_vendido: false, data_embarque: "2026-11-30", data_retorno: "2026-12-01" };
+  const toquio: ViagemDatas = { ...osaka, data_embarque: "2026-11-16", data_retorno: "2026-11-27" };
+  assert.equal(rotuloSemAereo(osaka, proximaDataDaVenda(osaka, agora)), "HOTEL");
+  assert.equal(rotuloSemAereo(toquio, proximaDataDaVenda(toquio, agora)), "SAÍDA HOTEL");
+  assert.equal(rotuloSemAereo({ servico: "seguro", aereo_vendido: false }, null), "SEGURO");
+  assert.equal(rotuloSemAereo({ servico: "pacote", aereo_vendido: false }, null), "SEM AÉREO");
+  // venda com aéreo segue a data (voo ou VOLTA)
+  assert.equal(rotuloSemAereo({ servico: "pacote", aereo_vendido: true }, null), null);
+  assert.equal(rotuloSemAereo({ servico: "aereo" }, null), null);
+});

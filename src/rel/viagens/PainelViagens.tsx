@@ -27,7 +27,7 @@ import { Aviso } from "../ui";
 import MapaMundi, { COR_EXP, COR_PAC, MarcaTipo, type PontoMapa } from "./MapaMundi";
 import { lugaresDe } from "./destinos";
 import { conferirViagens, contar, type Analise } from "../lib/problemas";
-import { codigoDe, localizadoresDoVoo, momentoDaViagem, proximaDataDaVenda, resumirVoos, vooDaVez, type Momento, type MomentoChave } from "../lib/statusViagem";
+import { codigoDe, localizadoresDoVoo, momentoDaViagem, proximaDataDaVenda, resumirVoos, rotuloSemAereo, vooDaVez, type Momento, type MomentoChave } from "../lib/statusViagem";
 import { ehVooQueVale } from "../lib/agendaServicos";
 import { FILTRO_QUADRO_VAZIO, PERIODOS_VOO, lerFiltroQuadro, passaNoQuadro, quantosAtivosQuadro, somaDias, type FiltroQuadro, type LinhaFiltravel, type PeriodoVoo } from "../lib/filtroQuadro";
 // 0359: check-in só de voo de verdade (a data do Bitrix de venda de hotel não é voo); trem segue
@@ -419,7 +419,10 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
                 const de = voo ? (aeroDe(voo.origem_codigo, voo.origem) || "—") : "—";
                 const para = voo ? (aeroDe(voo.destino_codigo, voo.destino) || v.destino || "—") : (v.destino || v.titulo);
                 // 24/11: sem voo cadastrado, a data da venda que ainda não passou (Gabriela Sobral: a ida 04/11 já foi → mostra a volta)
-                const ida = fim ? "CONCLUÍDA" : voo ? (voo.fonte === "bitrix" ? dataBoard(hojeDe(voo.partida_em)) : horaDoLugar(voo.partida_em, voo.partida_fuso).texto) : `${volta ? "VOLTA " : ""}${dataBoard(dia)}`;
+                // 26/11 (Julia Trianda): venda sem aéreo não tem voo — diz o que é a data (HOTEL 30/11, SEGURO…)
+                const semAereo = !fim && !voo ? rotuloSemAereo(v, dia ? { qual: volta ? "volta" : "ida" } : null) : null;
+                const ida = fim ? "CONCLUÍDA" : voo ? (voo.fonte === "bitrix" ? dataBoard(hojeDe(voo.partida_em)) : horaDoLugar(voo.partida_em, voo.partida_fuso).texto)
+                  : semAereo ? (dia && semAereo !== "SEM AÉREO" ? `${semAereo} ${dataBoard(dia)}` : semAereo) : `${volta ? "VOLTA " : ""}${dataBoard(dia)}`;
                 const loc = localizadores[0] ?? null;
                 const abrir = () => onAbrirViagem(v.id);
                 return (
@@ -430,7 +433,8 @@ function QuadroPacotes({ linhas, onAbrirViagem }: { linhas: LinhaPac[]; onAbrirV
                     <td className="px-2 py-2 uppercase whitespace-nowrap text-[11px] font-bold" style={{ color: "#B9C4C9" }}>{v.servico ? SERVICOS[v.servico].split(" ")[0] : "—"}</td>
                     <td className="px-2 py-2 uppercase max-w-[140px] truncate" style={{ color: "#B9C4C9" }}><Flap texto={de.slice(0, 16)} atraso={atraso} /></td>
                     <td className="px-2 py-2 uppercase max-w-[160px] truncate"><Flap texto={para.slice(0, 18)} atraso={atraso} /></td>
-                    <td className="px-2 py-2 whitespace-nowrap" style={{ color: "#FFD54F" }}><Flap texto={ida} atraso={atraso} /></td>
+                    <td className="px-2 py-2 whitespace-nowrap" style={{ color: semAereo ? "#8A979E" : "#FFD54F" }}
+                      title={semAereo ? "Venda sem aéreo nosso — não há voo pra acompanhar" : undefined}><Flap texto={ida} atraso={atraso} /></td>
                     <td className="px-2 py-2 whitespace-nowrap tracking-wider" style={{ color: loc ? "#F2F2F2" : "#5C6A71" }}
                       title={localizadores.length > 1 ? `Um localizador por passageiro neste voo: ${localizadores.join(", ")}` : undefined}>
                       {loc ? <><Flap texto={loc} atraso={atraso} />{localizadores.length > 1 && <span className="ml-1 text-[10.5px]" style={{ color: "#8A979E" }}>+{localizadores.length - 1}</span>}</> : "——"}
