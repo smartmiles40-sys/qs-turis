@@ -407,14 +407,14 @@ export function EscolherModelo({ atual, onEscolher }: { atual: ModeloProposta | 
     <div className="grid sm:grid-cols-4 gap-2">
       {(["pacote", "servicos", "seguro"] as ModeloProposta[]).map((m) => (
         <button key={m} type="button" onClick={() => onEscolher(m)} aria-pressed={atual === m}
-          className="rounded-xl border px-3 py-2.5 text-left"
+          className="qs-tam rounded-xl border px-3 py-2.5 text-left"
           style={atual === m ? { borderColor: "var(--rel)", background: "var(--rel-soft)" } : { borderColor: "var(--line)", background: "var(--card)" }}>
           <span className="block text-[13.5px] font-semibold" style={{ color: "var(--ink)" }}>{MODELOS[m].rotulo}</span>
           <span className="block text-[12px]" style={{ color: "var(--ink3)" }}>{MODELOS[m].dica}</span>
         </button>
       ))}
       <button type="button" onClick={() => onEscolher(null)} aria-pressed={atual === null}
-        className="rounded-xl border px-3 py-2.5 text-left"
+        className="qs-tam rounded-xl border px-3 py-2.5 text-left"
         style={atual === null ? { borderColor: "var(--rel)", background: "var(--rel-soft)" } : { borderColor: "var(--line)", background: "var(--card)" }}>
         <span className="block text-[13.5px] font-semibold" style={{ color: "var(--ink)" }}>Formato antigo</span>
         <span className="block text-[12px]" style={{ color: "var(--ink3)" }}>Opções e serviços livres (como antes)</span>

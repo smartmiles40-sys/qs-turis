@@ -160,7 +160,7 @@ export default function NumerosWhatsApp() {
     return (
       <div className="space-y-3">
         <div className="p-4 rounded-lg text-sm" style={{ background: "#FEE4E2", color: "#B42318" }}>{erro}</div>
-        <button onClick={() => void carregar()} className="px-3 py-2 text-sm rounded-lg border border-gray-200 hover:bg-gray-50">
+        <button onClick={() => void carregar()} className="qs-tam px-3 py-2 text-sm rounded-lg border border-gray-200 hover:bg-gray-50">
           Tentar de novo
         </button>
       </div>
@@ -311,7 +311,7 @@ export default function NumerosWhatsApp() {
               ) : (
                 <button
                   onClick={() => abrirAfastar(s)}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
+                  className="qs-tam w-full px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
                   Afastar (atestado, folga…)
                 </button>
               )}
@@ -399,7 +399,7 @@ export default function NumerosWhatsApp() {
                   const ativo = ateData === alvo;
                   return (
                     <button key={p.rotulo} type="button" onClick={() => setAteData(alvo)}
-                      className="px-3 py-2 text-sm rounded-lg border text-left"
+                      className="qs-tam px-3 py-2 text-sm rounded-lg border text-left"
                       style={{ borderColor: ativo ? AZUL : "#E5E7EB", background: ativo ? "#F5F8FF" : "#fff", color: ativo ? AZUL : "#374151" }}>
                       <span className="font-medium">{p.rotulo}</span>
                       <span className="block text-[11px] text-gray-400">até {dataBr(alvo)}</span>
@@ -434,7 +434,7 @@ export default function NumerosWhatsApp() {
 
             <div className="flex gap-2 justify-end pt-1">
               <button disabled={executando} onClick={() => setAfastando(null)}
-                className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
+                className="qs-tam px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
                 Cancelar
               </button>
               <button disabled={executando} onClick={() => void salvarAfastamento()}
@@ -456,7 +456,7 @@ export default function NumerosWhatsApp() {
             <div className="text-sm text-gray-700 leading-relaxed">{confirmacao.corpo}</div>
             <div className="flex gap-2 justify-end pt-2">
               <button disabled={executando} onClick={() => setConfirmacao(null)}
-                className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
+                className="qs-tam px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
                 Cancelar
               </button>
               <button disabled={executando} onClick={() => void confirmar()}

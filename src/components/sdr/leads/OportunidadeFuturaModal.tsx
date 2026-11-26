@@ -82,7 +82,7 @@ export default function OportunidadeFuturaModal({
             const ativo = data === valor;
             return (
               <button key={a.dias} type="button" onClick={() => setData(valor)}
-                      className={`rounded-lg border px-2.5 py-1 text-xs font-semibold ${ativo ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+                      className={`qs-tam-sm rounded-lg border px-2.5 py-1 text-xs font-semibold ${ativo ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
                 {a.rotulo}
               </button>
             );
@@ -130,7 +130,7 @@ export default function OportunidadeFuturaModal({
                   className="flex-1 rounded-lg bg-indigo-600 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50">
             {salvando ? "salvando…" : `Registrar — volta em ${dataCurta(data)}`}
           </button>
-          <button onClick={onFechar} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50">
+          <button onClick={onFechar} className="qs-tam rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50">
             Cancelar
           </button>
         </div>

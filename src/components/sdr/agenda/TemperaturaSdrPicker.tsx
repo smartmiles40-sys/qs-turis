@@ -42,7 +42,7 @@ export default function TemperaturaSdrPicker({
               aria-checked={ativo}
               disabled={disabled}
               onClick={() => onChange(t)}
-              className="rounded-lg border px-2 py-2 text-sm font-semibold transition-colors disabled:opacity-50"
+              className="qs-tam rounded-lg border px-2 py-2 text-sm font-semibold transition-colors disabled:opacity-50"
               style={{
                 borderColor: ativo ? chip.color : "#e5e7eb",
                 background: ativo ? chip.bg : "#F9FAFB",

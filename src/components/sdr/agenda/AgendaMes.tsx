@@ -518,7 +518,7 @@ export default function AgendaMes({ onOpenLead, onAbrirDia, demo, pendenciasDe, 
               <span className="ag-eyebrow">Suas pendências</span>
               {pendSel.map((p) => (
                 <button key={p.id} type="button" onClick={() => onOpenLead?.(p.lead_id)}
-                  className="flex w-full items-center gap-2.5 rounded-[10px] border border-dashed px-3 py-2 text-left"
+                  className="qs-tam flex w-full items-center gap-2.5 rounded-[10px] border border-dashed px-3 py-2 text-left"
                   style={{ borderColor: "var(--ag-border-3)" }}
                   title={p.notes ?? undefined}>
                   <span className="w-11 shrink-0 font-bold tabular">{shortTime(new Date(p.scheduled_at))}</span>

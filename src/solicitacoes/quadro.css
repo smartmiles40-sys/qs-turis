@@ -41,7 +41,7 @@
 .solq-pill[aria-pressed="true"] { border-color: var(--text); background: var(--text); color: var(--bg); }
 .solq-pill__n { font-size: 11px; font-weight: 700; opacity: .75; }
 .solq-select { height: 36px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text); font: 600 13px var(--font-sans); }
-.solq-btn { height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: var(--text); font: 600 14px var(--font-sans); cursor: pointer; white-space: nowrap; }
+.solq-btn { height: var(--h-btn); padding: 0 14px; border-radius: var(--radius-md); border: 1px solid var(--border); background: transparent; color: var(--text); font: 600 14px var(--font-sans); cursor: pointer; white-space: nowrap; }
 .solq-btn--pri { border-color: var(--text); background: var(--text); color: var(--bg); }
 .solq-btn:disabled { opacity: .5; cursor: default; }
 .solq button:focus-visible, .solq input:focus-visible, .solq textarea:focus-visible, .solq select:focus-visible, .solq summary:focus-visible { outline: 2px solid var(--q-azul); outline-offset: 2px; }

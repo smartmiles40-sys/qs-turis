@@ -340,7 +340,7 @@ export default function WhatsAppModal({ open, onClose, lead, ownerId, defaultTex
                 <button
                   onClick={() => void handlePedirPermissao()}
                   disabled={pedindoPermissao}
-                  className="mt-2 block w-full rounded-md bg-red-700 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-red-800 disabled:opacity-60"
+                  className="qs-tam mt-2 block w-full rounded-md bg-red-700 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-red-800 disabled:opacity-60"
                 >
                   {pedindoPermissao ? "Mandando o pedido…" : "Pedir permissão pra ligar"}
                 </button>

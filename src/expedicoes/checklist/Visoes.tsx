@@ -329,7 +329,7 @@ function Linha({ it, filhos, aberto, onAlternar, usuarios, onMudou, onEditar, on
 function BotaoIcone({ titulo, onClick, children }: { titulo: string; onClick: () => void; children: ReactNode }) {
   return (
     <button type="button" title={titulo} aria-label={titulo} onClick={onClick}
-      className="px-1.5 py-1 rounded-md text-[13px] hover:bg-[var(--card2)]" style={{ color: "var(--ink2)" }}>{children}</button>
+      className="qs-tam-sm px-1.5 py-1 rounded-md text-[13px] hover:bg-[var(--card2)]" style={{ color: "var(--ink2)" }}>{children}</button>
   );
 }
 

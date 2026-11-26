@@ -84,13 +84,13 @@ export default function LigacaoOficialWidget() {
         <div className="mt-3 flex gap-2">
           <button
             onClick={() => void desligarAtual()}
-            className="flex-1 rounded-md bg-red-700 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-red-800"
+            className="qs-tam flex-1 rounded-md bg-red-700 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-red-800"
           >
             Desligar
           </button>
           <button
             onClick={() => alternarMudoAtual()}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-[13px] text-gray-800 hover:bg-gray-50"
+            className="qs-tam rounded-md border border-gray-300 px-3 py-1.5 text-[13px] text-gray-800 hover:bg-gray-50"
           >
             {e.calado ? "Voltar a falar" : "Mudo"}
           </button>

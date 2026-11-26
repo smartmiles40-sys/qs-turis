@@ -137,7 +137,7 @@ export default function PrimeiroContatoCard({
         {podeMexer && (
           <button
             onClick={() => setAberto((v) => !v)}
-            className="shrink-0 text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
+            className="qs-tam shrink-0 text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
           >
             {aberto ? "Fechar" : "Configurar"}
           </button>
@@ -272,7 +272,7 @@ export default function PrimeiroContatoCard({
             </button>
             <button
               onClick={() => { setRascunho(salvo); void carregar(); }}
-              className="text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
+              className="qs-tam text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
             >
               Descartar
             </button>

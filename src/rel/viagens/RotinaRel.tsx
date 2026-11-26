@@ -130,7 +130,7 @@ function textos(a: Atividade): { quem: string; oQue: string; quando: string; cor
 function Copiar({ texto, rotulo = "Copiar" }: { texto: string; rotulo?: string }) {
   const [ok, setOk] = useState(false);
   return (
-    <button type="button" className="text-[11.5px] font-bold px-2 py-0.5 rounded-md border" style={{ borderColor: "var(--line)", color: ok ? "#16A34A" : "var(--ink2)", background: "var(--card)" }}
+    <button type="button" className="qs-tam-sm text-[11.5px] font-bold px-2 py-0.5 rounded-md border" style={{ borderColor: "var(--line)", color: ok ? "#16A34A" : "var(--ink2)", background: "var(--card)" }}
       onClick={() => { void navigator.clipboard?.writeText(texto).then(() => { setOk(true); setTimeout(() => setOk(false), 1500); }); }}>
       {ok ? "✓ copiado" : rotulo}
     </button>
@@ -684,7 +684,7 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
                 <div className="flex flex-wrap gap-2">
                   {[1, 2, 3, 5, 7].map((d) => (
                     <button key={d} type="button" onClick={() => setAguardar({ ...painel, dias: d })}
-                      className="px-3 py-1.5 rounded-lg text-[13px] font-bold border"
+                      className="qs-tam px-3 py-1.5 rounded-lg text-[13px] font-bold border"
                       style={painel.dias === d ? { background: "#0D9488", color: "#fff", borderColor: "#0D9488" } : { background: "var(--card)", color: "var(--ink)", borderColor: "var(--line)" }}>
                       {d === 1 ? "amanhã" : `em ${d} dias`}
                     </button>

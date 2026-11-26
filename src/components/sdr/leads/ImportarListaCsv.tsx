@@ -482,7 +482,7 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
               </div>
             )}
             <div>
-              <button onClick={onClose} className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] transition-colors">
+              <button onClick={onClose} className="qs-tam px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-marca/90 transition-colors">
                 Fechar
               </button>
             </div>
@@ -703,14 +703,14 @@ export default function ImportarListaCsv({ currentUser, isManager, users, cadenc
               <button
                 onClick={fechar}
                 disabled={importando}
-                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="qs-tam px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 Cancelar
               </button>
               <button
                 onClick={() => void importar()}
                 disabled={!podeImportar || importando}
-                className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
+                className="qs-tam px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-marca/90 disabled:opacity-50 transition-colors"
               >
                 {importando ? "Importando..." : `Importar ${entram.length} lead${entram.length !== 1 ? "s" : ""}`}
               </button>

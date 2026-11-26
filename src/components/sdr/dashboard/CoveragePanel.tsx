@@ -497,7 +497,7 @@ export default function CoveragePanel({ onOpenLead }: { onOpenLead?: (leadId: st
           <p className="text-sm text-red-700">{loadError}</p>
           <button
             onClick={() => fetchLeads(true)}
-            className="shrink-0 text-xs font-semibold text-red-700 border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-100 transition-colors"
+            className="qs-tam shrink-0 text-xs font-semibold text-red-700 border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-100 transition-colors"
           >
             Tentar de novo
           </button>

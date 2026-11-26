@@ -658,14 +658,14 @@ export default function ScheduleMeetingModal({
           <button
             onClick={onClose}
             disabled={saving}
-            className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="qs-tam px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
             Cancelar
           </button>
           <button
             onClick={handleSave}
             disabled={saving || !pick || (!remarcando && !leadId)}
-            className="px-4 py-2 rounded-lg bg-marca text-sm font-semibold text-white hover:bg-[#0139D6] disabled:opacity-50"
+            className="qs-tam px-4 py-2 rounded-lg bg-marca text-sm font-semibold text-white hover:bg-marca/90 disabled:opacity-50"
           >
             {saving ? "Salvando..." : remarcando ? "Remarcar" : "Agendar"}
           </button>

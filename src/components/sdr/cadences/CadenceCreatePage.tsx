@@ -540,7 +540,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
                 <option value="">Duplicar uma cadência existente…</option>
                 {otherCadences.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <button type="button" onClick={() => usarModelo(null)} className="px-3 py-2 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
+              <button type="button" onClick={() => usarModelo(null)} className="qs-tam px-3 py-2 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">
                 Começar em branco
               </button>
             </div>
@@ -867,7 +867,7 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
           <div className="flex flex-wrap gap-2">
             {statusOpcoes.map((s) => (
               <button key={s} type="button" onClick={() => updateForm("status", s)}
-                className={`px-3 py-2 rounded-lg border-2 text-xs font-semibold ${form.status === s ? "border-marca bg-marca/5 text-marca-tx" : "border-gray-200 text-gray-500"}`}>
+                className={`qs-tam px-3 py-2 rounded-lg border-2 text-xs font-semibold ${form.status === s ? "border-marca bg-marca/5 text-marca-tx" : "border-gray-200 text-gray-500"}`}>
                 {s === "rascunho" ? "Rascunho (ainda não recebe leads)" : s === "disponivel" ? "Disponível (já recebe leads)" : "Congelada"}
               </button>
             ))}
@@ -905,8 +905,8 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
             Os passos desta cadência não carregaram. Para proteger os dados, a edição fica bloqueada — salvar agora apagaria os passos reais.
           </p>
           <div className="flex items-center justify-center gap-3">
-            <button onClick={onBack} className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">Voltar</button>
-            <button onClick={loadCadence} className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-marca hover:bg-[#0139D6]">Tentar de novo</button>
+            <button onClick={onBack} className="qs-tam px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">Voltar</button>
+            <button onClick={loadCadence} className="qs-tam px-5 py-2 rounded-lg text-sm font-medium text-white bg-marca hover:bg-marca/90">Tentar de novo</button>
           </div>
         </div>
       </div>
@@ -955,18 +955,18 @@ export default function CadenceCreatePage({ cadenceId, onBack }: CadenceCreatePa
           </div>
           <div className="flex items-center gap-3">
             {activeStep > 1 && (
-              <button onClick={() => setActiveStep((s) => s - 1)} className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              <button onClick={() => setActiveStep((s) => s - 1)} className="qs-tam px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50">
                 Anterior
               </button>
             )}
             {activeStep < STEPS.length ? (
-              <button onClick={() => setActiveStep((s) => s + 1)} className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-marca hover:bg-[#0139D6]">
+              <button onClick={() => setActiveStep((s) => s + 1)} className="qs-tam px-5 py-2 rounded-lg text-sm font-medium text-white bg-marca hover:bg-marca/90">
                 Próximo
               </button>
             ) : (
               <button onClick={handleSave} disabled={saving || erros.length > 0 || precisaEscolher || sim === "carregando"}
                 title={erros[0]?.msg ?? (precisaEscolher ? "Escolha para quem vale a mudança" : undefined)}
-                className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium text-white bg-marca hover:bg-[#0139D6] disabled:opacity-50">
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium text-white bg-marca hover:bg-marca/90 disabled:opacity-50">
                 <IconCheck /> {saving ? "Salvando..." : isEdit ? "Salvar alterações" : "Criar cadência"}
               </button>
             )}

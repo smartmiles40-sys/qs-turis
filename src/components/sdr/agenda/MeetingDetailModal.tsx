@@ -372,7 +372,7 @@ export default function MeetingDetailModal({
               <button
                 onClick={criarSala}
                 disabled={criandoSala}
-                className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+                className="qs-tam mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
               >
                 {criandoSala ? "Criando a sala…" : "Criar sala do Meet"}
               </button>
@@ -558,7 +558,7 @@ export default function MeetingDetailModal({
                           key={mot}
                           onClick={() => marcarSal("recusado", mot)}
                           disabled={busy}
-                          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-left text-xs font-medium text-gray-700 hover:border-red-300 hover:bg-red-50 disabled:opacity-50"
+                          className="qs-tam w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-left text-xs font-medium text-gray-700 hover:border-red-300 hover:bg-red-50 disabled:opacity-50"
                         >
                           {mot}
                         </button>

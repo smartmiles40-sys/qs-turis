@@ -36,7 +36,7 @@ export function FaixaBloqueioDesfecho({ pendentes, onAbrir }: {
         <div className="mt-2 flex flex-wrap gap-1.5 pl-[26px]">
           {pendentes.slice(0, 12).map((p) => (
             <button key={p.id} onClick={() => onAbrir(p.id)}
-                    className="rounded-lg border border-red-200 bg-white px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100">
+                    className="qs-tam-sm rounded-lg border border-red-200 bg-white px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100">
               {dataCurta(p.scheduled_at)} · {p.lead_name || "cliente"}
             </button>
           ))}
@@ -59,7 +59,7 @@ export function ReuniaoTrancada({ pendentes, onFechar }: { pendentes: number; on
       </p>
       {onFechar && (
         <button onClick={onFechar}
-                className="mt-3 rounded-lg border border-red-200 bg-white px-4 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100">
+                className="qs-tam mt-3 rounded-lg border border-red-200 bg-white px-4 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100">
           Fechar
         </button>
       )}

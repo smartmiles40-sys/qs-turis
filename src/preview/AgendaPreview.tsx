@@ -138,7 +138,7 @@ function Preview() {
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <button
           onClick={() => setEscuro((v) => !v)}
-          className="rounded-lg border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+          className="qs-tam rounded-lg border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
         >
           {escuro ? "☀️ Modo claro" : "🌙 Modo noturno"}
         </button>

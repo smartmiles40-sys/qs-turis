@@ -178,7 +178,7 @@ export default function ModelosMeta() {
           {temOficial && (
             <button
               onClick={() => trocarNumero("")}
-              className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${phoneId === "" ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+              className={`qs-tam rounded-lg border px-3 py-1.5 text-sm font-semibold ${phoneId === "" ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
             >
               Número oficial
             </button>
@@ -187,7 +187,7 @@ export default function ModelosMeta() {
             <button
               key={n.phoneId}
               onClick={() => trocarNumero(n.phoneId)}
-              className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${phoneId === n.phoneId ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+              className={`qs-tam rounded-lg border px-3 py-1.5 text-sm font-semibold ${phoneId === n.phoneId ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}
             >
               {nomeDoNumero(n)}
               {n.numero && <span className="ml-1.5 text-[11px] font-normal text-gray-400">{n.numero}</span>}
@@ -219,7 +219,7 @@ export default function ModelosMeta() {
       {!criando && (
         <button
           onClick={() => setCriando(true)}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          className="qs-tam rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
         >
           {atual ? `Nova mensagem para ${nomeDoNumero(atual)}` : "Novo modelo"}
         </button>
@@ -354,14 +354,14 @@ export default function ModelosMeta() {
             <button
               onClick={() => { setCriando(false); setForm(VAZIO); setExemplos({}); setTipos({}); setTopo("nenhum"); setArquivoTopo(null); }}
               disabled={salvando}
-              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              className="qs-tam rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               onClick={() => void enviar()}
               disabled={salvando || !form.nome.trim() || !form.corpo.trim() || faltaExemplo || !!problemaTopo}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              className="qs-tam rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {salvando ? "Enviando…" : "Enviar para aprovação"}
             </button>
@@ -404,7 +404,7 @@ export default function ModelosMeta() {
                   </div>
                   <button
                     onClick={() => void excluir(m)}
-                    className="shrink-0 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-500 hover:border-red-200 hover:text-red-600"
+                    className="qs-tam shrink-0 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-500 hover:border-red-200 hover:text-red-600"
                   >
                     Excluir
                   </button>

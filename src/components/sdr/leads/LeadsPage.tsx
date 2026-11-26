@@ -742,7 +742,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
         <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={() => { setHandoverError(null); setShowHandover(true); }}
-            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            className="qs-tam px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
             Transferir leads
           </button>
@@ -751,7 +751,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             // Excel — buscada no banco na hora do clique, com os mesmos filtros.
             onClick={() => void exportarCsv()}
             disabled={exportando}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-wait"
+            className="qs-tam flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-60 disabled:cursor-wait"
             title={`Exportar os ${totalFiltrado} leads visíveis em CSV`}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -764,7 +764,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
           {executa && (
             <button
               onClick={() => setShowCsvModal(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              className="qs-tam flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -775,7 +775,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
           {executa && (
             <button
               onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] transition-colors"
+              className="qs-tam flex items-center gap-2 px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-marca/90 transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -1062,7 +1062,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
             </select>
             <button
               onClick={handleDeleteSelected}
-              className="px-3 py-1.5 rounded-lg border border-red-200 bg-white text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
+              className="qs-tam px-3 py-1.5 rounded-lg border border-red-200 bg-white text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
             >
               Excluir selecionados
             </button>
@@ -1076,7 +1076,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
           <span className="text-sm text-red-700">{loadError} A lista abaixo pode estar desatualizada.</span>
           <button
             onClick={retryFetchLeads}
-            className="px-3 py-1.5 rounded-lg border border-red-200 bg-white text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
+            className="qs-tam px-3 py-1.5 rounded-lg border border-red-200 bg-white text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
           >
             Tentar novamente
           </button>
@@ -1235,7 +1235,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                         <span className="text-red-600">{loadError}</span>
                         <button
                           onClick={retryFetchLeads}
-                          className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] transition-colors"
+                          className="qs-tam px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-marca/90 transition-colors"
                         >
                           Tentar novamente
                         </button>
@@ -1434,7 +1434,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                       resetForm();
                       onOpenLead(id);
                     }}
-                    className="px-3 py-1.5 rounded-lg bg-marca text-xs font-medium text-white hover:bg-[#0139D6] transition-colors"
+                    className="qs-tam px-3 py-1.5 rounded-lg bg-marca text-xs font-medium text-white hover:bg-marca/90 transition-colors"
                   >
                     Abrir lead
                   </button>
@@ -1443,7 +1443,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                     <button
                       onClick={() => handleCreateLead(true)}
                       disabled={saving}
-                      className="px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors"
+                      className="qs-tam px-3 py-1.5 rounded-lg border border-amber-300 bg-white text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors"
                     >
                       Cadastrar mesmo assim
                     </button>
@@ -1460,7 +1460,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
               <div className="flex flex-wrap items-center justify-end gap-3">
                 <button
                   onClick={() => { setShowCreateModal(false); resetForm(); }}
-                  className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  className="qs-tam px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                 >
                   Cancelar
                 </button>
@@ -1469,7 +1469,7 @@ export default function LeadsPage({ onOpenLead }: LeadsPageProps) {
                   // clique NÃO pode entrar como "force".
                   onClick={() => { void handleCreateLead(false); }}
                   disabled={saving || !formFirstName.trim()}
-                  className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
+                  className="qs-tam px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-marca/90 disabled:opacity-50 transition-colors"
                 >
                   {saving ? "Salvando..." : "Cadastrar"}
                 </button>

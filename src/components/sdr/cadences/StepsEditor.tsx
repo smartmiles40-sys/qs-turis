@@ -208,7 +208,7 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
                         const on = p.kind === k;
                         return (
                           <button key={k} type="button" onClick={() => escolherTipo(p.id, k)}
-                            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition ${
+                            className={`qs-tam-sm px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition ${
                               on ? "bg-marca text-white border-marca" : "bg-white text-gray-600 border-gray-200 hover:border-marca/50"
                             }`}>
                             {kindDef(k).label}
@@ -230,8 +230,8 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
 
                     {/* Ações */}
                     <div className="ml-auto flex items-center gap-1">
-                      <button type="button" onClick={() => duplicar(p.id)} className="px-2 py-1 rounded-lg text-[11px] text-gray-500 hover:bg-gray-50" title="Duplicar passo">Duplicar</button>
-                      <button type="button" onClick={() => remover(p.id)} className="px-2 py-1 rounded-lg text-[11px] text-gray-400 hover:text-red-600 hover:bg-red-50" title="Excluir passo">Excluir</button>
+                      <button type="button" onClick={() => duplicar(p.id)} className="qs-tam-sm px-2 py-1 rounded-lg text-[11px] text-gray-500 hover:bg-gray-50" title="Duplicar passo">Duplicar</button>
+                      <button type="button" onClick={() => remover(p.id)} className="qs-tam-sm px-2 py-1 rounded-lg text-[11px] text-gray-400 hover:text-red-600 hover:bg-red-50" title="Excluir passo">Excluir</button>
                     </div>
                   </div>
 
@@ -242,7 +242,7 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
                       return (
                         <button key={per.key} type="button" title={per.hint}
                           onClick={() => atualizar(p.id, { hora: per.time })}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition ${
+                          className={`qs-tam-sm px-2.5 py-1 rounded-lg text-[11px] font-medium border transition ${
                             on ? "bg-marca/10 text-marca-tx border-marca/40" : "bg-white text-gray-500 border-gray-200"
                           }`}>
                           {per.label}
@@ -288,7 +288,7 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
                       <span className="text-[11px] font-medium text-gray-600 mr-1">{def.textoLabel}</span>
                       {VARIAVEIS.map((v) => (
                         <button key={v.chave} type="button" onClick={() => inserirVariavel(p.id, v.chave)}
-                          className="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-gray-100 text-gray-600 hover:bg-marca/10 hover:text-marca-tx"
+                          className="qs-tam-sm px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-gray-100 text-gray-600 hover:bg-marca/10 hover:text-marca-tx"
                           title={`Inserir ${v.label}`}>
                           {v.chave}
                         </button>
@@ -334,11 +334,11 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
 
       <div className="flex flex-wrap gap-2 pt-2">
         <button type="button" onClick={() => adicionar(true)} disabled={lista.length === 0}
-          className="px-3 py-2 rounded-lg text-xs font-medium text-marca-tx border border-dashed border-marca/40 hover:bg-marca/5 disabled:opacity-40">
+          className="qs-tam px-3 py-2 rounded-lg text-xs font-medium text-marca-tx border border-dashed border-marca/40 hover:bg-marca/5 disabled:opacity-40">
           + Passo no mesmo dia
         </button>
         <button type="button" onClick={() => adicionar(false)}
-          className="px-3 py-2 rounded-lg text-xs font-medium text-white bg-marca hover:bg-[#0139D6]">
+          className="qs-tam px-3 py-2 rounded-lg text-xs font-medium text-white bg-marca hover:bg-marca/90">
           + Passo no dia seguinte
         </button>
       </div>

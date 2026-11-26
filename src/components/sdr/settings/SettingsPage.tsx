@@ -270,7 +270,7 @@ function MotivosSection() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-gray-900">Motivos de Perda</h2>
-        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-marca hover:bg-[#0139D6] transition-colors">
+        <button onClick={openAdd} className="qs-tam inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-marca hover:bg-marca/90 transition-colors">
           <PlusIcon /> Novo Motivo
         </button>
       </div>
@@ -353,7 +353,7 @@ function MotivosSection() {
               <button onClick={handleSave} disabled={saving || !form.label.trim()} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "rgb(var(--marca-rgb))" }}>
                 {saving ? "Salvando..." : editReason ? "Salvar" : "Criar"}
               </button>
-              <button onClick={() => setShowModal(false)} className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">Cancelar</button>
+              <button onClick={() => setShowModal(false)} className="qs-tam px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">Cancelar</button>
             </div>
           </div>
         </div>
@@ -499,7 +499,7 @@ function UsuariosSection() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-gray-900">Usuários e Permissões</h2>
-        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-marca hover:bg-[#0139D6] transition-colors">
+        <button onClick={openAdd} className="qs-tam inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-marca hover:bg-marca/90 transition-colors">
           <PlusIcon /> Adicionar Usuário
         </button>
       </div>
@@ -679,7 +679,7 @@ function UsuariosSection() {
               <button onClick={handleSave} disabled={saving || !form.name || !form.email} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "rgb(var(--marca-rgb))" }}>
                 {saving ? "Salvando..." : editUser ? "Salvar" : "Adicionar"}
               </button>
-              <button onClick={() => setShowModal(false)} className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">Cancelar</button>
+              <button onClick={() => setShowModal(false)} className="qs-tam px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">Cancelar</button>
             </div>
           </div>
         </div>
@@ -1380,7 +1380,7 @@ function WebfoneWebrtcSection() {
           <button onClick={handleSaveShared} disabled={savingShared} className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#2563EB" }}>
             {savingShared ? "Salvando..." : "Salvar padrões"}
           </button>
-          <button onClick={handleTest} disabled={testing} className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+          <button onClick={handleTest} disabled={testing} className="qs-tam px-4 py-2 rounded-lg text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50">
             {testing ? "Testando..." : "Testar minha conexão"}
           </button>
           {sharedSaved && <span className="text-sm font-medium text-green-600">Salvo ✓</span>}
@@ -1455,7 +1455,7 @@ function WebfoneWebrtcSection() {
                       {savingUser === u.id ? "Salvando..." : "Salvar ramal"}
                     </button>
                     {has && (
-                      <button onClick={() => handleRemoveUser(u.id)} className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50">
+                      <button onClick={() => handleRemoveUser(u.id)} className="qs-tam px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50">
                         Remover
                       </button>
                     )}
@@ -1916,7 +1916,7 @@ function RespostasProntasCard() {
             <button
               onClick={() => void salvar()}
               disabled={saving}
-              className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 transition-colors"
+              className="qs-tam px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-marca/90 disabled:opacity-40 transition-colors"
             >
               {saving ? "Salvando..." : "Salvar respostas"}
             </button>
@@ -2140,7 +2140,7 @@ function ClassificacaoSection() {
             <button
               onClick={save}
               disabled={saving}
-              className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 transition-colors"
+              className="qs-tam px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-marca/90 disabled:opacity-40 transition-colors"
             >
               {saving ? "Salvando..." : "Salvar regras"}
             </button>

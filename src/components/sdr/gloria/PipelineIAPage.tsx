@@ -550,7 +550,7 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
             )}
             <button
               onClick={() => void carregar()}
-              className="text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
+              className="qs-tam text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
             >
               Atualizar
             </button>
@@ -637,7 +637,7 @@ export default function PipelineIAPage({ onOpenLead }: { onOpenLead?: (leadId: s
           </div>
           <button
             onClick={() => setFormTeste((v) => !v)}
-            className="shrink-0 text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
+            className="qs-tam shrink-0 text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
           >
             {formTeste ? "Cancelar" : "Cadastrar lead de teste"}
           </button>

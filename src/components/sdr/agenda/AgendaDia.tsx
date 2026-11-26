@@ -1309,7 +1309,7 @@ function PainelReuniao({ reuniao, coluna, agora, onFechar, onStatus, onSal, onRe
                   <button
                     key={mot}
                     onClick={() => onSal("recusado", mot)}
-                    className="w-full rounded-lg border px-2.5 py-1.5 text-left text-xs font-semibold transition hover:brightness-95"
+                    className="qs-tam w-full rounded-lg border px-2.5 py-1.5 text-left text-xs font-semibold transition hover:brightness-95"
                     style={{ borderColor: "var(--line)", background: "var(--card)", color: "var(--ink2)" }}
                   >
                     {mot}

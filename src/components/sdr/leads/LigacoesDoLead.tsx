@@ -34,7 +34,7 @@ function Baixar({ g }: { g: Pick<GravacaoLigacao, "storage_path" | "inicio" | "t
       onClick={baixar}
       disabled={estado === "baixando"}
       title={estado === "erro" ? "Não deu pra baixar. Tente de novo." : "Baixar o áudio desta ligação"}
-      className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-60 ${estado === "erro" ? "border-red-300 text-red-600" : "border-gray-200 text-gray-700 hover:bg-gray-50"}`}
+      className={`qs-tam shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-60 ${estado === "erro" ? "border-red-300 text-red-600" : "border-gray-200 text-gray-700 hover:bg-gray-50"}`}
     >
       {estado === "baixando" ? "Baixando…" : estado === "erro" ? "Tentar de novo" : "⬇ Baixar"}
     </button>
@@ -61,7 +61,7 @@ function Ouvir({ g }: { g: Pick<GravacaoLigacao, "storage_path"> }) {
       <button
         onClick={abrir}
         disabled={carregando}
-        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-marca text-white hover:bg-[#0136cc] disabled:opacity-60"
+        className="qs-tam px-3 py-1.5 rounded-lg text-xs font-semibold bg-marca text-white hover:bg-marca/90 disabled:opacity-60"
       >
         {carregando ? "Abrindo…" : "▶ Ouvir"}
       </button>

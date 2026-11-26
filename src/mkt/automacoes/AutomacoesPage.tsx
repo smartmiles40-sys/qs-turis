@@ -651,7 +651,7 @@ function ModalGatilho({ form, setForm, fluxos, estado, onSalvo }: {
             <div className="grid gap-2 sm:grid-cols-2">
               {tiposPossiveis.map((t) => (
                 <button key={t} type="button" aria-pressed={form.tipo === t} onClick={() => setForm({ ...form, tipo: t, config: configInicial(t) })}
-                  className="rounded-lg border px-3 py-2 text-left text-[13px] font-semibold"
+                  className="qs-tam rounded-lg border px-3 py-2 text-left text-[13px] font-semibold"
                   style={form.tipo === t ? { background: COR_SUAVE, color: COR_TEXTO, borderColor: COR } : { borderColor: "var(--line)", color: "var(--ink2)" }}>
                   {ROTULO_GATILHO[t]}
                 </button>

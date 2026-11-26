@@ -331,7 +331,7 @@ export default function FupAnalyticsPanel() {
                 <button
                   key={p}
                   onClick={() => setDays(p)}
-                  className={`px-3 py-1.5 rounded-lg text-[13px] font-semibold border transition-colors ${
+                  className={`qs-tam px-3 py-1.5 rounded-lg text-[13px] font-semibold border transition-colors ${
                     days === p ? "text-white border-transparent" : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"
                   }`}
                   style={days === p ? { background: BLUE } : undefined}

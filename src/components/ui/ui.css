@@ -4,7 +4,7 @@
 
 .qs-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  height: var(--h-control); padding: 0 14px; border-radius: var(--radius-md);
+  height: var(--h-btn); padding: 0 14px; border-radius: var(--radius-md);
   font: 500 13px/1 var(--font-sans); white-space: nowrap; cursor: pointer;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
   transition: background-color .12s, opacity .12s;
@@ -17,7 +17,7 @@
 .qs-btn--ghost { background: transparent; border-color: transparent; color: var(--muted); }
 .qs-btn--ghost:hover { color: var(--text); }
 .qs-btn--destructive { color: var(--danger); }
-.qs-btn--sm { height: 30px; padding: 0 10px; font-size: 12px; }
+.qs-btn--sm { height: var(--h-btn-sm); padding: 0 10px; font-size: 12px; }
 .qs-btn--icon { padding: 0 8px; }
 
 .qs-badge {
@@ -246,8 +246,8 @@ html.dark .qs-search input { background: transparent; }
    primário/secundário. Sombra só em menu/modal. */
 .qs-btn2 {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  min-height: var(--h-touch); padding: 0 16px; border-radius: var(--radius-btn);
-  font: 600 14px/1.1 var(--font-sans); white-space: nowrap; cursor: pointer;
+  min-height: var(--h-btn); padding: 0 14px; border-radius: var(--radius-md);
+  font: 600 13px/1.1 var(--font-sans); white-space: nowrap; cursor: pointer;
   border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
   transition: background-color .12s, opacity .12s;
 }
@@ -260,9 +260,9 @@ html.dark .qs-search input { background: transparent; }
 .qs-btn2--positive:hover { background: var(--positive); opacity: .9; }
 .qs-btn2--ghost { background: transparent; border-color: transparent; color: var(--muted); }
 .qs-btn2--ghost:hover { color: var(--text); background: var(--surface-2); }
-.qs-btn2--sm { min-height: 32px; padding: 0 12px; font-size: 13px; border-radius: 8px; }
-.qs-btn2--icon { padding: 0; width: var(--h-touch); }
-.qs-btn2--sm.qs-btn2--icon { width: 32px; }
+.qs-btn2--sm { min-height: var(--h-btn-sm); padding: 0 10px; font-size: 12px; }
+.qs-btn2--icon { padding: 0; width: var(--h-btn); }
+.qs-btn2--sm.qs-btn2--icon { width: var(--h-btn-sm); }
 
 .qs-chip {
   display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 2px 8px;

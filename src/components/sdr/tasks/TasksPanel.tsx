@@ -5146,7 +5146,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </button>
               <button
                 onClick={() => { setShowExtraTaskModal(false); setExtraFromTaskId(null); }}
-                className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50"
+                className="qs-tam px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50"
               >
                 Cancelar
               </button>
@@ -5331,7 +5331,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </button>
               <button
                 onClick={() => setShowNewLeadModal(false)}
-                className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50"
+                className="qs-tam px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50"
               >
                 Cancelar
               </button>

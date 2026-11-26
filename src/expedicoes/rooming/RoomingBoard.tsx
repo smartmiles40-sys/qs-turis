@@ -236,7 +236,7 @@ export default function RoomingBoard({ expId, dados, recarregar }: { expId: stri
                   <Selo>{c.membros.length}</Selo>
                   {!somenteLeitura && (
                     <button type="button" onClick={() => setConexaoGaveta(c.membros.map((m) => m.id))}
-                      className="text-[11.5px] font-semibold px-1.5 py-0.5 rounded hover:bg-[var(--card2)]" style={{ color: "var(--ink2)" }}>Editar</button>
+                      className="qs-tam-sm text-[11.5px] font-semibold px-1.5 py-0.5 rounded hover:bg-[var(--card2)]" style={{ color: "var(--ink2)" }}>Editar</button>
                   )}
                   <BotaoExcluir icone={false} rotulo="Desfazer" titulo="Desfazer esta conexão?"
                     descricao="As pessoas deixam de ser tratadas como grupo de quarto. As alocações atuais de quarto não mudam."
@@ -449,7 +449,7 @@ function BlocoHotel({ t, r, expId, recolhido, onAlternar, onAdicionar, onDuplica
         ) : (
           <div className="flex min-w-0 items-center gap-1">
             <button type="button" onClick={onAlternar} aria-expanded={!recolhido} title={recolhido ? "Expandir hotel" : "Recolher hotel"}
-              className="flex items-center gap-2 min-w-0 text-left rounded-md px-1 py-0.5 -mx-1 hover:bg-[var(--card)]">
+              className="qs-tam-sm flex items-center gap-2 min-w-0 text-left rounded-md px-1 py-0.5 -mx-1 hover:bg-[var(--card)]">
               <span style={{ color: "var(--ink3)" }}><Ic d={recolhido ? I.direita : I.abaixo} t={16} /></span>
               <span style={{ color: "var(--ink3)" }}><Ic d={I.predio} /></span>
               <span className="font-bold text-[13px] truncate" style={{ color: "var(--ink)" }}>{t.hotel_cidade ?? "Hotel"}</span>
