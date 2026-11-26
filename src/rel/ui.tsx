@@ -135,7 +135,7 @@ export function Avatar({ nome, tamanho = 36 }: { nome: string; tamanho?: number 
   const ini = iniciaisDe(nome); // sem o "[V4] (STFV)" do começo (spec 29/10)
   return (
     <span
-      className="inline-flex items-center justify-center rounded-full font-bold flex-shrink-0"
+      className="qs-touca inline-flex items-center justify-center rounded-full font-bold flex-shrink-0"
       style={{ width: tamanho, height: tamanho, fontSize: tamanho * 0.36, background: "var(--rel-soft)", color: "var(--rel-ink)" }}
     >
       {ini || "?"}
