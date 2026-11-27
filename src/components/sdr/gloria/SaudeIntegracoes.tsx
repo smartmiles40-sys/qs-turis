@@ -143,7 +143,7 @@ export default function SaudeIntegracoes({ onRetrato }: { onRetrato?: (r: Retrat
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => setAberto((v) => !v)}
-            className="text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
+            className="qs-tam text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
           >
             {aberto ? "Fechar" : "Detalhes"}
           </button>

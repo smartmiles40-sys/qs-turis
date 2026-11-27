@@ -295,14 +295,14 @@ export default function SlotPicker({
                   type="button"
                   onClick={() => setStripStart(addDays(stripStart, -7))}
                   disabled={stripStart.getTime() <= startOfDay(new Date()).getTime()}
-                  className="px-2 py-0.5 rounded text-xs text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="qs-tam-sm px-2 py-0.5 rounded text-xs text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   ‹ semana
                 </button>
                 <button
                   type="button"
                   onClick={() => setStripStart(addDays(stripStart, 7))}
-                  className="px-2 py-0.5 rounded text-xs text-gray-500 hover:bg-gray-100"
+                  className="qs-tam-sm px-2 py-0.5 rounded text-xs text-gray-500 hover:bg-gray-100"
                 >
                   semana ›
                 </button>
@@ -317,7 +317,7 @@ export default function SlotPicker({
                     key={d.getTime()}
                     type="button"
                     onClick={() => selectDay(d)}
-                    className={`shrink-0 w-[52px] rounded-lg border px-1 py-1.5 text-center transition-colors ${
+                    className={`qs-tam shrink-0 w-[52px] rounded-lg border px-1 py-1.5 text-center transition-colors ${
                       active
                         ? "border-marca bg-marca/5"
                         : free > 0
@@ -356,7 +356,7 @@ export default function SlotPicker({
                   key={d}
                   type="button"
                   onClick={() => { setDuracaoMin(d); onChange(null); }}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
+                  className={`qs-tam px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
                     duracaoMin === d
                       ? "border-marca bg-marca text-white"
                       : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
@@ -456,7 +456,7 @@ export default function SlotPicker({
                       onClick={() => disponivel && pick(s)}
                       disabled={!disponivel}
                       title={title}
-                      className={`rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
+                      className={`qs-tam rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
                         active
                           ? "border-marca bg-marca text-white"
                           : disponivel

@@ -519,7 +519,7 @@ function ForaDoPrazo({ aberto, conversa, onFechar, onFeito }: { aberto: boolean;
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2" role="radiogroup" aria-label="Motivo">
           {Object.entries(MOTIVOS_SEM_SLA).map(([k, r]) => (
             <button key={k} role="radio" aria-checked={motivo === k} onClick={() => setMotivo(k)}
-              className="rounded-lg px-3 py-2 text-[13px] font-semibold border"
+              className="qs-tam rounded-lg px-3 py-2 text-[13px] font-semibold border"
               style={motivo === k ? { background: "var(--rel-soft)", color: "var(--rel-ink)", borderColor: "var(--rel)" } : { borderColor: "var(--line)", color: "var(--ink2)" }}>{r}</button>
           ))}
         </div>

@@ -109,13 +109,13 @@ function ItemAviso({ a, expandido, onExpandir }: { a: Aviso; expandido: boolean;
         </div>
         <div className="flex flex-wrap gap-1.5 mt-2 pl-4">
           {a.link && (
-            <button type="button" onClick={() => ctx.abrir(a)} className="px-2.5 py-1 rounded-lg text-[12px] font-semibold bg-marca text-white hover:opacity-90">
+            <button type="button" onClick={() => ctx.abrir(a)} className="qs-tam-sm px-2.5 py-1 rounded-lg text-[12px] font-semibold bg-marca text-white hover:opacity-90">
               Abrir no QS
             </button>
           )}
           {solId && (
             <button type="button" onClick={onExpandir} aria-expanded={expandido}
-              className="px-2.5 py-1 rounded-lg text-[12px] font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50">
+              className="qs-tam-sm px-2.5 py-1 rounded-lg text-[12px] font-semibold border border-slate-300 text-slate-700 hover:bg-slate-50">
               {expandido ? "Fechar" : "Responder aqui"}
             </button>
           )}
@@ -199,12 +199,12 @@ function SolRapida({ id }: { id: string }) {
             className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[13px] text-slate-800 focus:outline-none focus:border-marca" />
           <div className="flex gap-1.5 mt-1.5">
             <button type="button" disabled={enviando} onClick={() => void fazer("comentar")}
-              className="px-3 py-1.5 rounded-lg text-[12px] font-semibold bg-marca text-white disabled:opacity-50">
+              className="qs-tam px-3 py-1.5 rounded-lg text-[12px] font-semibold bg-marca text-white disabled:opacity-50">
               {enviando ? "Enviando…" : "Responder"}
             </button>
             {podeAssumir && (
               <button type="button" disabled={enviando} onClick={() => void fazer("aceitar")}
-                className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-marca text-marca-tx bg-white disabled:opacity-50">
+                className="qs-tam px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-marca text-marca-tx bg-white disabled:opacity-50">
                 Assumir
               </button>
             )}
@@ -229,8 +229,8 @@ export function TelaNova({ user, onFechar }: { user: SdrUser; onFechar: () => vo
         <p className="text-[15px] font-bold text-slate-900">Pedido enviado ✓</p>
         <p className="text-[13px] text-slate-600 mt-1">Ele entrou na fila do outro setor. Você recebe um aviso aqui quando responderem.</p>
         <div className="flex justify-center gap-2 mt-4">
-          <button type="button" onClick={() => abrirNoQS(hash)} className="px-3 py-2 rounded-lg text-[13px] font-semibold bg-marca text-white">Ver no QS</button>
-          <button type="button" onClick={() => setCriada(null)} className="px-3 py-2 rounded-lg text-[13px] font-semibold border border-slate-300 text-slate-700">Fazer outro</button>
+          <button type="button" onClick={() => abrirNoQS(hash)} className="qs-tam px-3 py-2 rounded-lg text-[13px] font-semibold bg-marca text-white">Ver no QS</button>
+          <button type="button" onClick={() => setCriada(null)} className="qs-tam px-3 py-2 rounded-lg text-[13px] font-semibold border border-slate-300 text-slate-700">Fazer outro</button>
         </div>
       </div>
     );

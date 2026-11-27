@@ -26,7 +26,7 @@ export function Botao({ variante = "secundario", className = "", children, ...re
   };
   return (
     <button type="button" {...rest}
-      className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-semibold transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      className={`qs-tam inline-flex items-center justify-center gap-1.5 px-3 rounded-lg text-[13px] font-semibold transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
       style={{ ...estilos[variante], ...rest.style }}>
       {children}
     </button>

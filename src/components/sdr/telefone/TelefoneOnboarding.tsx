@@ -118,14 +118,14 @@ export default function TelefoneOnboarding({ user }: Props) {
             <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2">Seu ramal</p>
             <div className="flex items-center gap-2">
               <span className="text-2xl font-bold text-gray-900 font-mono">{ramal.ramal}</span>
-              <button onClick={() => copy(ramal.ramal, "ramal")} className="text-[11px] px-2 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-white">
+              <button onClick={() => copy(ramal.ramal, "ramal")} className="qs-tam-sm text-[11px] px-2 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-white">
                 {copied === "ramal" ? "Copiado ✓" : "Copiar"}
               </button>
             </div>
             {ramal.login && (
               <div className="flex items-center gap-2 mt-2 text-[13px] text-gray-600">
                 <span className="font-mono truncate">{ramal.login}</span>
-                <button onClick={() => copy(ramal.login as string, "login")} className="shrink-0 text-[11px] px-2 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-white">
+                <button onClick={() => copy(ramal.login as string, "login")} className="qs-tam-sm shrink-0 text-[11px] px-2 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-white">
                   {copied === "login" ? "Copiado ✓" : "Copiar"}
                 </button>
               </div>

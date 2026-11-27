@@ -236,7 +236,7 @@ export default function RoomingBoard({ expId, dados, recarregar }: { expId: stri
                   <Selo>{c.membros.length}</Selo>
                   {!somenteLeitura && (
                     <button type="button" onClick={() => setConexaoGaveta(c.membros.map((m) => m.id))}
-                      className="text-[11.5px] font-semibold px-1.5 py-0.5 rounded hover:bg-[var(--card2)]" style={{ color: "var(--ink2)" }}>Editar</button>
+                      className="qs-tam-sm text-[11.5px] font-semibold px-1.5 py-0.5 rounded hover:bg-[var(--card2)]" style={{ color: "var(--ink2)" }}>Editar</button>
                   )}
                   <BotaoExcluir icone={false} rotulo="Desfazer" titulo="Desfazer esta conexão?"
                     descricao="As pessoas deixam de ser tratadas como grupo de quarto. As alocações atuais de quarto não mudam."

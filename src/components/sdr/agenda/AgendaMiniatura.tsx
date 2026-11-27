@@ -243,7 +243,7 @@ export default function AgendaMiniatura({ responsavel, closerId, dia, onEscolher
               type="button"
               disabled={!atende}
               onClick={() => setDiaSelMs(ms)}
-              className={`flex-1 rounded-lg border px-0.5 py-1 text-center transition ${atende ? "hover:brightness-95" : "cursor-default"}`}
+              className={`qs-tam-sm flex-1 rounded-lg border px-0.5 py-1 text-center transition ${atende ? "hover:brightness-95" : "cursor-default"}`}
               style={{
                 borderColor: escolhido ? "var(--green)" : "var(--line)",
                 background: escolhido ? "rgba(18,161,138,.14)" : atende ? "var(--card)" : "transparent",

@@ -55,6 +55,7 @@ import {
 import { criarCotacao, fetchRotas } from "@/lib/qs/produtoGanhoDados";
 import FormularioCotacao from "@/components/sdr/produto/FormularioCotacao";
 import SlaFilaHoje from "@/components/sdr/sla/SlaFilaHoje";
+import { celebrarNatal, fraseNatalDoDia } from "@/natal/natal";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -2629,6 +2630,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     if (DAILY_DONE >= dailyGoal && !celebrationShown) {
       setCelebrationShown(true);
       setShowCelebration(true);
+      celebrarNatal(); // Clima de Natal: chuva de estrelinhas (no-op fora de dezembro)
       setTimeout(() => setShowCelebration(false), 3000);
     }
   }, [DAILY_DONE, dailyGoal, celebrationShown]);
@@ -4593,8 +4595,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 </>
               ) : (
                 <>
-                  <span className="text-3xl mb-2">🎯</span>
+                  <span className="text-3xl mb-2">{fraseNatalDoDia() ? "🎄" : "🎯"}</span>
                   <p className="mt-2 text-sm font-bold" style={{ color: "var(--ink)" }}>Tudo limpo!</p>
+                  {fraseNatalDoDia() && <p className="text-xs mt-1 font-semibold" style={{ color: "var(--ink2)" }}>{fraseNatalDoDia()}</p>}
                   <p className="text-xs mt-1" style={{ color: "var(--ink3)" }}>{antigasTasks.length > 0 ? "Nenhuma atividade para hoje." : "Nenhuma atividade pendente. Cadastre um novo lead para começar."}</p>
                   <button onClick={() => setShowNewLeadModal(true)} className="mt-4 qsx-btn qsx-btn-orange">
                     + Cadastrar Lead
@@ -5146,7 +5149,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </button>
               <button
                 onClick={() => { setShowExtraTaskModal(false); setExtraFromTaskId(null); }}
-                className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50"
+                className="qs-tam px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50"
               >
                 Cancelar
               </button>
@@ -5331,7 +5334,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               </button>
               <button
                 onClick={() => setShowNewLeadModal(false)}
-                className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50"
+                className="qs-tam px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50"
               >
                 Cancelar
               </button>

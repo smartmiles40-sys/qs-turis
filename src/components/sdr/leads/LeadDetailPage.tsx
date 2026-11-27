@@ -1530,7 +1530,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
                     <div className="flex items-center gap-2 flex-wrap mt-4 pt-3 border-t border-gray-100">
                       <button
                         onClick={() => setReuniaoAberta(meeting)}
-                        className="px-3 py-1.5 rounded-lg bg-blue-50 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
+                        className="qs-tam px-3 py-1.5 rounded-lg bg-blue-50 text-xs font-medium text-blue-700 hover:bg-blue-100 transition-colors"
                       >
                         Lançar desfecho / remarcar
                       </button>
@@ -1953,7 +1953,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
                     key={days}
                     onClick={() => scheduleReEngagement(days)}
                     disabled={schedulingReContact}
-                    className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-marca hover:bg-marca/5 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    className="qs-tam flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 bg-white text-sm font-semibold text-gray-700 hover:border-marca hover:bg-marca/5 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
                     {days} dias
                   </button>
@@ -2090,14 +2090,14 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100">
               <button
                 onClick={() => setShowHandoverModal(false)}
-                className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
+                className="qs-tam px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleHandover}
                 disabled={!selectedCloser || savingHandover}
-                className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 transition-colors flex items-center gap-2"
+                className="qs-tam px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 transition-colors flex items-center gap-2"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12" />
@@ -2198,14 +2198,14 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
             <div className="flex items-center justify-end gap-3 mt-6">
               <button
                 onClick={() => setShowEditModal(false)}
-                className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
+                className="qs-tam px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
               >
                 Cancelar
               </button>
               <button
                 onClick={saveLeadEdit}
                 disabled={savingEdit}
-                className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-marca hover:bg-[#0139D6] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="qs-tam px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-marca hover:bg-marca/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {savingEdit ? "Salvando..." : "Salvar alterações"}
               </button>
@@ -2244,14 +2244,14 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
             <div className="flex items-center justify-end gap-3 mt-5">
               <button
                 onClick={() => setShowWonModal(false)}
-                className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
+                className="qs-tam px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
               >
                 Cancelar
               </button>
               <button
                 onClick={confirmWon}
                 disabled={savingWon}
-                className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="qs-tam px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {savingWon ? "Salvando..." : "Confirmar GANHO"}
               </button>

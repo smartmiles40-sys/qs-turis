@@ -35,6 +35,7 @@ import ModeloModal from "../atendimento/ModeloModal";
 import { Aviso, Botao, Modal } from "../ui";
 import { EtapaModal } from "./EtapasViagem";
 import type { ItemAtividade } from "./AtividadesRel";
+import { fraseNatalDoDia } from "@/natal/natal";
 
 const COR_SIT: Record<string, string> = { atrasada: "#DC2626", a_fazer: "#D97706", aguardando: "#64748B" };
 const WA = "#25D366";
@@ -130,7 +131,7 @@ function textos(a: Atividade): { quem: string; oQue: string; quando: string; cor
 function Copiar({ texto, rotulo = "Copiar" }: { texto: string; rotulo?: string }) {
   const [ok, setOk] = useState(false);
   return (
-    <button type="button" className="text-[11.5px] font-bold px-2 py-0.5 rounded-md border" style={{ borderColor: "var(--line)", color: ok ? "#16A34A" : "var(--ink2)", background: "var(--card)" }}
+    <button type="button" className="qs-tam-sm text-[11.5px] font-bold px-2 py-0.5 rounded-md border" style={{ borderColor: "var(--line)", color: ok ? "#16A34A" : "var(--ink2)", background: "var(--card)" }}
       onClick={() => { void navigator.clipboard?.writeText(texto).then(() => { setOk(true); setTimeout(() => setOk(false), 1500); }); }}>
       {ok ? "✓ copiado" : rotulo}
     </button>
@@ -684,7 +685,7 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
                 <div className="flex flex-wrap gap-2">
                   {[1, 2, 3, 5, 7].map((d) => (
                     <button key={d} type="button" onClick={() => setAguardar({ ...painel, dias: d })}
-                      className="px-3 py-1.5 rounded-lg text-[13px] font-bold border"
+                      className="qs-tam px-3 py-1.5 rounded-lg text-[13px] font-bold border"
                       style={painel.dias === d ? { background: "#0D9488", color: "#fff", borderColor: "#0D9488" } : { background: "var(--card)", color: "var(--ink)", borderColor: "var(--line)" }}>
                       {d === 1 ? "amanhã" : `em ${d} dias`}
                     </button>
@@ -705,7 +706,8 @@ export default function RotinaRel({ itens, equipe, abrirViagem, abrirExpedicao, 
         );
       })() : (
         <section className="rel-card p-6 text-center">
-          <p className="text-[16px] font-bold" style={{ color: "var(--ink)" }}>Tudo em dia por hoje. 🎉</p>
+          <p className="text-[16px] font-bold" style={{ color: "var(--ink)" }}>Tudo em dia por hoje. {fraseNatalDoDia() ? "🎄" : "🎉"}</p>
+          {fraseNatalDoDia() && <p className="text-[13px] mt-1 font-semibold" style={{ color: "var(--ink2)" }}>{fraseNatalDoDia()}</p>}
           <p className="text-[13px] mt-1" style={{ color: "var(--ink3)" }}>{porGrupo.proximas.length ? `Nos próximos 7 dias: ${porGrupo.proximas.length} atividade${porGrupo.proximas.length === 1 ? "" : "s"}.` : "Nada previsto pros próximos 7 dias."}</p>
         </section>
       )}

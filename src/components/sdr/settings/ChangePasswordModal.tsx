@@ -133,7 +133,7 @@ export default function ChangePasswordModal({ open, onClose }: Props) {
               type="button"
               onClick={handleClose}
               disabled={saving}
-              className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
+              className="qs-tam px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50 disabled:opacity-50"
             >
               Cancelar
             </button>

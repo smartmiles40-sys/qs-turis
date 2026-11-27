@@ -289,7 +289,7 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
             link saem iguais aos de lá: é o mesmo ScheduleMeetingModal. */}
         <button
           onClick={() => setAgendando(true)}
-          className="shrink-0 px-3.5 py-2 rounded-lg bg-marca text-white text-sm font-semibold hover:bg-[#0139cc]"
+          className="qs-tam shrink-0 px-3.5 py-2 rounded-lg bg-marca text-white text-sm font-semibold hover:bg-marca/90"
         >
           + Nova reunião
         </button>
@@ -332,7 +332,7 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                 </div>
                 <button
                   onClick={() => setDetalhe(m)}
-                  className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-bold hover:bg-amber-700"
+                  className="qs-tam shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-bold hover:bg-amber-700"
                 >
                   {/* O SDR não registra o desfecho — quem esteve na call é que
                       sabe no que deu. Ele abre pra ver com quem cobrar. */}
@@ -433,7 +433,7 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                             href={m.meeting_link}
                             target="_blank"
                             rel="noreferrer"
-                            className="px-3 py-1.5 rounded-lg bg-marca text-white text-xs font-bold hover:bg-[#0139D6]"
+                            className="px-3 py-1.5 rounded-lg bg-marca text-white text-xs font-bold hover:bg-marca/90"
                           >
                             Entrar no Meet
                           </a>
@@ -444,14 +444,14 @@ export default function MinhaAgendaPage({ onOpenLead }: Props) {
                         ))}
                         <button
                           onClick={() => onOpenLead(m.lead_id)}
-                          className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-semibold hover:bg-gray-50"
+                          className="qs-tam px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-semibold hover:bg-gray-50"
                         >
                           Ver histórico
                         </button>
                         {!trancada(m) && (
                           <button
                             onClick={() => setDetalhe(m)}
-                            className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-semibold hover:bg-gray-50"
+                            className="qs-tam px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs font-semibold hover:bg-gray-50"
                           >
                             {!registrada && passou ? "Registrar desfecho" : "Detalhes"}
                           </button>

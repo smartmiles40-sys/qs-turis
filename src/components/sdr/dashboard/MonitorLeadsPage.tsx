@@ -456,13 +456,13 @@ export default function MonitorLeadsPage({ onOpenLead }: Props) {
                 )}
                 {!filtro && (
                   <button type="button" onClick={() => abrirLista(gestor ? { sdr: null, canal: null, soFds: false, rotulo: "Todos" } : { sdr: eu, canal: null, soFds: false, rotulo: "Meus leads" })}
-                          className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold border bg-white hover:bg-gray-50" style={{ borderColor: LINHA }}>
+                          className="qs-tam px-3 py-1.5 rounded-lg text-[12.5px] font-semibold border bg-white hover:bg-gray-50" style={{ borderColor: LINHA }}>
                     {gestor ? "Ver todos" : "Ver os meus"}
                   </button>
                 )}
                 {listaVisivel.length > 0 && (
                   <button type="button" onClick={baixarCsv}
-                          className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold bg-blue-600 text-white hover:bg-blue-700">
+                          className="qs-tam px-3 py-1.5 rounded-lg text-[12.5px] font-semibold bg-blue-600 text-white hover:bg-blue-700">
                     Baixar planilha ({listaVisivel.length})
                   </button>
                 )}

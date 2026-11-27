@@ -550,7 +550,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
         </div>
         <button
           onClick={onCreateCadence}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-marca hover:bg-[#0139D6] transition-colors"
+          className="qs-tam inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-marca hover:bg-marca/90 transition-colors"
         >
           <IconPlus />
           Criar Cadência
@@ -762,7 +762,7 @@ export default function CadencesPage({ onCreateCadence, onEditCadence }: Cadence
                         {(cadence._active_leads_count ?? 0) > 0 ? (
                           <button
                             onClick={() => openLeadsModal(cadence, true)}
-                            className="text-sm font-bold text-marca-tx self-start underline decoration-dotted underline-offset-2 hover:text-[#0139D6] transition"
+                            className="text-sm font-bold text-marca-tx self-start underline decoration-dotted underline-offset-2 hover:text-marca-tx transition"
                             title="Ver os leads em prospecção nesta cadência"
                           >
                             {cadence._active_leads_count ?? 0}

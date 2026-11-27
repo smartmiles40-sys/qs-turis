@@ -72,7 +72,7 @@ export default function Avisos({ exp }: { exp?: ExpedicaoRow } = {}) {
         <div className="flex flex-wrap gap-1" role="group" aria-label="Filtrar avisos">
           {(["todos", "critico", "atencao"] as Filtro[]).map((f) => (
             <button key={f} onClick={() => setFiltro(f)} aria-pressed={filtro === f}
-              className="px-3 py-1.5 rounded-lg text-[12.5px] font-semibold border"
+              className="qs-tam px-3 py-1.5 rounded-lg text-[12.5px] font-semibold border"
               style={filtro === f ? { background: "var(--ink)", color: "var(--bg)", borderColor: "var(--ink)" } : { background: "var(--card)", color: "var(--ink2)", borderColor: "var(--line)" }}>
               {f === "todos" ? `Todos (${lista.length})` : f === "critico" ? `Críticos (${criticos})` : `Atenção (${atencoes})`}
             </button>

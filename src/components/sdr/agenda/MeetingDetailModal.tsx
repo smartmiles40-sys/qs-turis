@@ -372,7 +372,7 @@ export default function MeetingDetailModal({
               <button
                 onClick={criarSala}
                 disabled={criandoSala}
-                className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+                className="qs-tam mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
               >
                 {criandoSala ? "Criando a sala…" : "Criar sala do Meet"}
               </button>

@@ -68,7 +68,7 @@ export function Botao({ variante = "secundario", className = "", children, ...re
   return (
     <button
       {...rest}
-      className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-semibold transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      className={`qs-tam inline-flex items-center justify-center gap-1.5 px-3.5 rounded-lg text-[13px] font-semibold transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
       style={{ ...estilos[variante], ...rest.style }}
     >
       {children}
@@ -135,7 +135,7 @@ export function Avatar({ nome, tamanho = 36 }: { nome: string; tamanho?: number 
   const ini = iniciaisDe(nome); // sem o "[V4] (STFV)" do começo (spec 29/10)
   return (
     <span
-      className="inline-flex items-center justify-center rounded-full font-bold flex-shrink-0"
+      className="qs-touca inline-flex items-center justify-center rounded-full font-bold flex-shrink-0"
       style={{ width: tamanho, height: tamanho, fontSize: tamanho * 0.36, background: "var(--rel-soft)", color: "var(--rel-ink)" }}
     >
       {ini || "?"}

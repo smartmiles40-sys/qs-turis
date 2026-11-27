@@ -9,6 +9,7 @@ import { loadWorkHours, overdueCutoff } from "@/lib/workHours";
 // Avisos (0196): solicitações, prazos e reuniões entram neste mesmo sino.
 import { useAvisos } from "@/avisos/AvisosProvider";
 import { AjustesDeAvisos, ListaDeAvisos } from "@/avisos/SinoDeAvisos";
+import { fraseNatalDoDia } from "@/natal/natal";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -576,7 +577,7 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
                   <IconEmptyCheck />
                 </span>
                 <p className="text-[13px] font-semibold text-gray-900 mb-0.5">Tudo em dia!</p>
-                <p className="text-[11px] text-gray-400">Nenhum lembrete pendente para você agora.</p>
+                <p className="text-[11px] text-gray-400">{fraseNatalDoDia() ?? "Nenhum lembrete pendente para você agora."}</p>
               </div>
             ) : (
               <>

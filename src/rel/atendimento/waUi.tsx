@@ -69,7 +69,7 @@ export function corDoNome(s: string) {
 export function AvatarWa({ nome, tamanho = 49 }: { nome: string; tamanho?: number }) {
   const ini = nome.trim().split(/\s+/).filter((p) => /\p{L}/u.test(p[0] || "")).slice(0, 2).map((p) => p[0].toUpperCase()).join("");
   return (
-    <span aria-hidden className="inline-flex items-center justify-center rounded-full font-semibold flex-shrink-0 select-none"
+    <span aria-hidden className="qs-touca inline-flex items-center justify-center rounded-full font-semibold flex-shrink-0 select-none"
       style={{ width: tamanho, height: tamanho, fontSize: tamanho * 0.38, background: corDoNome(nome), color: "#fff" }}>
       {ini || (
         <svg width={tamanho * 0.55} height={tamanho * 0.55} viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-5 0-9 2.5-9 5.5V22h18v-2.5C21 16.5 17 14 12 14z" /></svg>

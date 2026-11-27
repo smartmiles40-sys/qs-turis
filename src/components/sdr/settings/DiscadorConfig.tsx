@@ -80,7 +80,7 @@ export default function DiscadorConfig() {
       <button
         onClick={() => void salvar()}
         disabled={salvando}
-        className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+        className="qs-tam rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
       >
         {salvando ? "Salvando…" : "Salvar"}
       </button>

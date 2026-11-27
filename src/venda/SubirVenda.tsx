@@ -76,6 +76,7 @@ import BlocosDaVenda from "./BlocosDaVenda";
 import { STATUS_ANALISE, abrirPedidoSem0230, analisarRascunho, analisarVendaGravada, type Analise } from "./analise";
 import { anexarPropostas, desfazerAnexos, listarPropostasDaVenda, vincularPropostas, type PropostaAnexada } from "./propostaAnexo";
 import { CampoPropostaVenda } from "./PropostasAnexadas";
+import { celebrarNatal } from "@/natal/natal";
 
 const PASSOS = ["Quem comprou", "O que vendeu", "Detalhes", "Pagamento", "Análise"] as const;
 const PASSO_ANALISE = PASSO.analise;
@@ -705,6 +706,7 @@ A regra é subir a venda com a maior parte já emitida. Consolidar mesmo assim? 
           if (b && !b.ok && b.status === "erro") bx = ` Gravado no QS, mas o Bitrix recusou: ${b.mensagem ?? "sem motivo"}. Use "Tentar agora" no cartão (o QS também tenta sozinho).`;
         }
         const an = await guardarAnalise(r.venda_id);
+        celebrarNatal(); // Clima de Natal: chuva de estrelinhas (no-op fora de dezembro)
         // 0425: avisos que não barram (ex.: item sem valor entrou como incluso R$ 0).
         const avc = c.avisos.length ? ` Confira: ${c.avisos.join(" ")}` : "";
         const dono = relResp ? responsaveisRel?.find((u) => u.id === relResp)?.name : null;
@@ -714,6 +716,7 @@ A regra é subir a venda com a maior parte já emitida. Consolidar mesmo assim? 
       }
 
       const an = acao === "reservar" || consolidada ? await guardarAnalise(r.venda_id) : "";
+      if (acao === "reservar") celebrarNatal(); // reservou a vaga = virou venda
       // Salvar/Reservar NÃO bloqueiam por IATA: só avisam (o Consolidar bloqueia).
       const semIata = problemasIata.length ? ` Atenção: ${problemasIata.length} pendência(s) no aéreo (código IATA dos aeroportos) — corrija antes de consolidar.` : "";
       if (pv) { onSalvo({ tom: semIata ? "aviso" : pv.tom, mensagem: `${acao === "reservar" ? "Vaga reservada. " : ""}${pv.mensagem}${aviso}${an}${semIata}` }); return; }

@@ -900,14 +900,14 @@ export default function MeetingsPage({ onOpenLead, aba: abaPedida, onAba, extras
             <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
               <button
                 onClick={closeModal}
-                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                className="qs-tam px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving || !fLeadId || !fWhen}
-                className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
+                className="qs-tam px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-marca/90 disabled:opacity-50 transition-colors"
               >
                 {saving ? "Salvando..." : editingId ? "Salvar alterações" : "Agendar"}
               </button>

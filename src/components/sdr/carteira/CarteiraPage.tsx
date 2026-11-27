@@ -490,7 +490,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
         <button
           onClick={() => { setSorteioAberto(true); setQuantidade("30"); setSorteioCadencia(""); }}
           disabled={livres.length === 0 || !!progresso}
-          className="shrink-0 px-4 py-2.5 rounded-xl bg-marca text-white text-sm font-bold hover:bg-[#0139cc] disabled:opacity-50"
+          className="qs-tam shrink-0 px-4 py-2.5 rounded-xl bg-marca text-white text-sm font-bold hover:bg-marca/90 disabled:opacity-50"
           title={livres.length === 0
             ? (resumoTela.length ? "Nenhum lead livre no recorte atual" : "Todos os leads da carteira já têm atividade aberta")
             : `Escolha Lead Score, tempo sem contato e cadência e sorteie pra fila de hoje (${livres.length} livres)`}
@@ -528,7 +528,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
           <button
             key={k}
             onClick={() => { setFiltro(k); if (k !== "esquecidos") setDonoFiltro(null); }}
-            className={`px-3 py-2 rounded-lg text-sm font-medium border ${
+            className={`qs-tam px-3 py-2 rounded-lg text-sm font-medium border ${
               filtro === k ? "bg-gray-900 text-white border-gray-900" : "bg-white text-gray-600 border-gray-200"
             }`}
           >
@@ -538,7 +538,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
         {donoFiltro && (
           <button
             onClick={() => setDonoFiltro(null)}
-            className="px-3 py-2 rounded-lg text-sm font-medium border border-amber-200 bg-amber-50 text-amber-800"
+            className="qs-tam px-3 py-2 rounded-lg text-sm font-medium border border-amber-200 bg-amber-50 text-amber-800"
           >
             Só {saude.find((s) => s.owner_id === donoFiltro)?.nome ?? "um SDR"} ✕
           </button>
@@ -552,14 +552,14 @@ export default function CarteiraPage({ onOpenLead }: Props) {
           <button
             onClick={() => void rodarLote(itens.filter((i) => selecionados.has(i.chave)), null)}
             disabled={!!progresso}
-            className="px-3 py-1.5 rounded-lg bg-marca text-white text-xs font-bold disabled:opacity-50"
+            className="qs-tam px-3 py-1.5 rounded-lg bg-marca text-white text-xs font-bold disabled:opacity-50"
           >
             Reiniciar hoje
           </button>
           <button
             onClick={() => setLoteCadencia("")}
             disabled={!!progresso}
-            className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-xs font-bold disabled:opacity-50"
+            className="qs-tam px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-xs font-bold disabled:opacity-50"
           >
             Reiniciar com outra cadência
           </button>
@@ -648,13 +648,13 @@ export default function CarteiraPage({ onOpenLead }: Props) {
                         title={i.temCadencia
                           ? "Repete a cadência que ele já tinha, com as atividades caindo hoje"
                           : "Esse lead nunca esteve numa cadência — use Reiniciar cadência"}
-                        className="px-3 py-1.5 rounded-lg bg-marca text-white text-xs font-bold hover:bg-[#0139cc] disabled:opacity-40"
+                        className="qs-tam px-3 py-1.5 rounded-lg bg-marca text-white text-xs font-bold hover:bg-marca/90 disabled:opacity-40"
                       >
                         Reiniciar hoje
                       </button>
                       <button
                         onClick={() => { setReiniciando(i); setCadenciaEscolhida(""); }}
-                        className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-xs font-bold hover:bg-gray-50"
+                        className="qs-tam px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-xs font-bold hover:bg-gray-50"
                         title="Escolher outra cadência pra este lead"
                       >
                         Reiniciar cadência
@@ -791,12 +791,12 @@ export default function CarteiraPage({ onOpenLead }: Props) {
             </p>
 
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setSorteioAberto(false)} className="px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+              <button onClick={() => setSorteioAberto(false)} className="qs-tam px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
                 Cancelar
               </button>
               <button
                 onClick={() => void confirmarSorteio()}
-                className="px-4 py-2 rounded-lg bg-marca text-white text-sm font-semibold"
+                className="qs-tam px-4 py-2 rounded-lg bg-marca text-white text-sm font-semibold"
               >
                 Sortear e colocar na fila
               </button>
@@ -830,13 +830,13 @@ export default function CarteiraPage({ onOpenLead }: Props) {
             </p>
 
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setReiniciando(null)} className="px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+              <button onClick={() => setReiniciando(null)} className="qs-tam px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
                 Cancelar
               </button>
               <button
                 onClick={() => void confirmarReinicio()}
                 disabled={!cadenciaEscolhida || salvando}
-                className="px-4 py-2 rounded-lg bg-marca text-white text-sm font-semibold disabled:opacity-50"
+                className="qs-tam px-4 py-2 rounded-lg bg-marca text-white text-sm font-semibold disabled:opacity-50"
               >
                 {salvando ? "Criando…" : "Colocar na fila de hoje"}
               </button>
@@ -866,7 +866,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
             </select>
 
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setLoteCadencia(null)} className="px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+              <button onClick={() => setLoteCadencia(null)} className="qs-tam px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
                 Cancelar
               </button>
               <button
@@ -877,7 +877,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
                   void rodarLote(alvos, cad || null);
                 }}
                 disabled={!loteCadencia}
-                className="px-4 py-2 rounded-lg bg-marca text-white text-sm font-semibold disabled:opacity-50"
+                className="qs-tam px-4 py-2 rounded-lg bg-marca text-white text-sm font-semibold disabled:opacity-50"
               >
                 Colocar na fila de hoje
               </button>

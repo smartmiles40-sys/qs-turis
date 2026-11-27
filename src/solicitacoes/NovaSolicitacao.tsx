@@ -178,7 +178,7 @@ export default function NovaSolicitacao({ aberto, deSetor, alvo, paraInicial, so
           <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Setor que recebe">
             {destinos.map((s) => (
               <button key={s} type="button" role="radio" aria-checked={para === s} onClick={() => setPara(s)}
-                className="rounded-lg px-3 py-2 text-[13px] font-semibold border flex items-center justify-center gap-2"
+                className="qs-tam rounded-lg px-3 py-2 text-[13px] font-semibold border flex items-center justify-center gap-2"
                 style={para === s ? { borderColor: COR_SETOR[s], background: `${COR_SETOR[s]}14`, color: "var(--ink)" } : { borderColor: "var(--line)", color: "var(--ink2)" }}>
                 <span className="w-2 h-2 rounded-full" style={{ background: COR_SETOR[s] }} aria-hidden />{NOME_SETOR[s]}
               </button>

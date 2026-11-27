@@ -465,7 +465,7 @@ export default function GoalsPage() {
         </h1>
         <button
           onClick={openAddModal}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-marca hover:bg-[#0139D6] transition-colors"
+          className="qs-tam inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-marca hover:bg-marca/90 transition-colors"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="5" x2="12" y2="19" />
@@ -641,13 +641,13 @@ export default function GoalsPage() {
 
             <div className="flex justify-end gap-3 pt-2">
               <button onClick={closeModal}
-                className="px-4 py-2 text-sm font-medium text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
+                className="qs-tam px-4 py-2 text-sm font-medium text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
                 Cancelar
               </button>
               <button
                 onClick={handleSaveGoal}
                 disabled={saving || !modal.target_value}
-                className="px-4 py-2 text-sm font-medium text-white rounded-lg bg-marca hover:bg-[#0139D6] disabled:opacity-50 transition-colors"
+                className="qs-tam px-4 py-2 text-sm font-medium text-white rounded-lg bg-marca hover:bg-marca/90 disabled:opacity-50 transition-colors"
               >
                 {saving ? "Salvando..." : modal.editingId ? "Salvar" : "Criar Meta"}
               </button>

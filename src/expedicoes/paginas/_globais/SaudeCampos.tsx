@@ -24,7 +24,7 @@ export function SaudeCampos({ valor, onMudar, expedicaoId, passageiroId, leitura
             <div className="flex gap-1.5" role="group" aria-label={q.curto}>
               {(["Sim", "Não"] as const).map((opt) => (
                 <button type="button" key={opt} disabled={leitura} aria-pressed={val === opt} onClick={() => set(q.campo, val === opt ? "" : opt)}
-                  className="px-3 py-1 rounded-md border text-[12px] font-semibold disabled:cursor-default"
+                  className="qs-tam-sm px-3 py-1 rounded-md border text-[12px] font-semibold disabled:cursor-default"
                   style={val === opt ? { background: "var(--ink)", color: "var(--bg)", borderColor: "var(--ink)" } : { background: "var(--card)", color: "var(--ink2)", borderColor: "var(--line)" }}>
                   {opt}
                 </button>

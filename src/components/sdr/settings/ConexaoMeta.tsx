@@ -169,7 +169,7 @@ export default function ConexaoMeta() {
     return (
       <div className="space-y-3">
         <div className="p-4 rounded-lg text-sm" style={{ background: "#FEE4E2", color: "#B42318" }}>{erro}</div>
-        <button onClick={() => void carregar()} className="px-3 py-2 text-sm rounded-lg border border-gray-200">Tentar de novo</button>
+        <button onClick={() => void carregar()} className="qs-tam px-3 py-2 text-sm rounded-lg border border-gray-200">Tentar de novo</button>
       </div>
     );
   }
@@ -242,7 +242,7 @@ export default function ConexaoMeta() {
                       : "Modelos: —"}
                   </span>
                   <button disabled={ocupado} onClick={() => void copiarModelos(n)}
-                    className="shrink-0 rounded-md px-2 py-1 font-medium border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40">
+                    className="qs-tam-sm shrink-0 rounded-md px-2 py-1 font-medium border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40">
                     Copiar modelos do oficial
                   </button>
                 </div>
@@ -257,7 +257,7 @@ export default function ConexaoMeta() {
                 </button>
                 {ligado && (
                   <button disabled={ocupado} onClick={() => void desconectar(n)}
-                    className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
+                    className="qs-tam px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
                     {n.origem === "vercel" ? "Desativar" : "Desconectar"}
                   </button>
                 )}
@@ -340,7 +340,7 @@ export default function ConexaoMeta() {
             )}
             <div className="flex gap-2 justify-end pt-2">
               <button disabled={ocupado} onClick={() => setPedido(null)}
-                className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700">Cancelar</button>
+                className="qs-tam px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700">Cancelar</button>
               <button disabled={ocupado} onClick={() => void conectar(pedido)}
                 className="px-3 py-2 text-sm rounded-lg font-medium text-white disabled:opacity-60" style={{ background: AZUL }}>
                 {ocupado ? "Conectando…" : "Abrir a janela da Meta"}

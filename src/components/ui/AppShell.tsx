@@ -19,6 +19,8 @@ import { abrirGestao, podeAbrirGestao } from "@/gestao/acesso";
 import ChangePasswordModal from "@/components/sdr/settings/ChangePasswordModal";
 import { Avatar } from "./index";
 import { Icon } from "./icons";
+import { Neve } from "@/natal/Neve";
+import { useNatal } from "@/natal/natal";
 import "./ui.css";
 
 export interface ShellItem {
@@ -116,6 +118,7 @@ export default function AppShell({
 }) {
   const { currentUser, trocarArea, logout } = useQsAuth();
   const { isDark, toggleTheme } = useTheme();
+  const natal = useNatal();
   const [setorAberto, setSetorAberto] = useState(false);
   const [userAberto, setUserAberto] = useState(false);
   const [gaveta, setGaveta] = useState(false);
@@ -229,6 +232,13 @@ export default function AppShell({
         <button type="button" className="qs-nav" onClick={toggleTheme}>
           {isDark ? Icon.sol : Icon.lua}<span className="qs-nav__label">{isDark ? "Modo claro" : "Modo noite"}</span>
         </button>
+        {natal.epoca && (
+          <button type="button" className="qs-nav" onClick={natal.alternar} title="Toquinha, pisca-pisca e neve até 6/1">
+            <span aria-hidden style={{ width: 16, textAlign: "center", fontSize: 14, lineHeight: 1 }}>🎄</span>
+            <span className="qs-nav__label">Clima de Natal</span>
+            <span className="qs-nav__n">{natal.ligado ? "ligado" : "desligado"}</span>
+          </button>
+        )}
         <div className="qs-sector" ref={userRef} style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <button type="button" className="qs-nav" style={{ height: 44, flex: 1 }} aria-haspopup="menu" aria-expanded={userAberto} onClick={() => setUserAberto((v) => !v)}>
             <Avatar name={currentUser.name} size={28} />
@@ -271,6 +281,7 @@ export default function AppShell({
       {gaveta && <div className="qs-scrim" onClick={() => setGaveta(false)} aria-hidden />}
       {side}
       <main className={`qs-main ${mainClassName ?? ""}`}>{children}</main>
+      <Neve />
       {after}
       <ChangePasswordModal open={senha} onClose={() => setSenha(false)} />
     </div>

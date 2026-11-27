@@ -389,7 +389,7 @@ export default function MensagemAutomatica() {
         <button
           onClick={() => void salvar()}
           disabled={salvando}
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="qs-tam rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {salvando ? "Salvando…" : "Salvar"}
         </button>

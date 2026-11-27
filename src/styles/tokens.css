@@ -111,6 +111,9 @@
 
   /* alturas */
   --h-control: 36px;  /* botão, input, seletor */
+  /* Altura ÚNICA de botão (26/11): todo botão do QS usa uma destas duas. */
+  --h-btn: 36px;      /* botão normal */
+  --h-btn-sm: 30px;   /* botão pequeno (tabela, linha, chip de ação) */
   --h-nav-item: 34px;
   --sidebar-w: 240px;
   --content-max: 1180px;      /* listas e fichas */
@@ -151,3 +154,13 @@
 
 html { font-family: var(--font-sans); font-size: var(--text-base); background: var(--bg); color: var(--text); }
 .tabular { font-variant-numeric: tabular-nums; }
+
+/* Celular: alvo de toque confortável. */
+@media (max-width: 767px) {
+  :root { --h-btn: 44px; --h-btn-sm: 36px; }
+}
+
+/* Botões soltos (Tailwind) entram no padrão com estas classes. O <button>
+   já centraliza o conteúdo na vertical sozinho; só a altura muda. */
+button.qs-tam    { min-height: var(--h-btn);    padding-top: 0; padding-bottom: 0; }
+button.qs-tam-sm { min-height: var(--h-btn-sm); padding-top: 0; padding-bottom: 0; }

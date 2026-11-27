@@ -232,7 +232,7 @@ export default function LigacaoWhatsApp() {
           <button
             onClick={() => void ativar()}
             disabled={ocupado}
-            className="mt-3 rounded-md bg-gray-900 px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
+            className="qs-tam mt-3 rounded-md bg-gray-900 px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
           >
             Ativar chamadas neste número
           </button>
@@ -274,7 +274,7 @@ export default function LigacaoWhatsApp() {
             : ocupado ? "Aguarde a operação anterior terminar."
             : "Manda a pergunta no WhatsApp da pessoa (exige conversa aberta de 24h)."
           }
-          className="mt-2 rounded-md bg-gray-900 px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
+          className="qs-tam mt-2 rounded-md bg-gray-900 px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
         >
           Enviar pedido de permissão
         </button>
@@ -384,7 +384,7 @@ export default function LigacaoWhatsApp() {
             <button
               onClick={() => void ligar()}
               disabled={!podeMexer || !ligado}
-              className="rounded-md bg-green-700 px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
+              className="qs-tam rounded-md bg-green-700 px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
             >
               Ligar
             </button>
@@ -392,13 +392,13 @@ export default function LigacaoWhatsApp() {
             <>
               <button
                 onClick={() => void desligar()}
-                className="rounded-md bg-red-700 px-3 py-1.5 text-[13px] font-medium text-white"
+                className="qs-tam rounded-md bg-red-700 px-3 py-1.5 text-[13px] font-medium text-white"
               >
                 Desligar
               </button>
               <button
                 onClick={() => { const c = !calado; setCalado(c); ligacao.mudo(c); }}
-                className="rounded-md border border-gray-300 px-3 py-1.5 text-[13px] text-gray-800"
+                className="qs-tam rounded-md border border-gray-300 px-3 py-1.5 text-[13px] text-gray-800"
               >
                 {calado ? "Voltar a falar" : "Mudo"}
               </button>

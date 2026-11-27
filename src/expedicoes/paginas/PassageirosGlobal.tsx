@@ -292,13 +292,13 @@ function ColunaFiltro({ col, ordemCol, ordemDir, onOrdem, filtro, onFiltro }: {
   const ativo = ordemCol === col.key || filtro.trim().length > 0;
   const botaoOrdem = (d: "asc" | "desc", rot: string) => (
     <button type="button" onClick={() => onOrdem(d)} aria-pressed={ordemCol === col.key && ordemDir === d}
-      className="flex-1 rounded-md px-2 py-1 text-[12px] border font-semibold"
+      className="qs-tam-sm flex-1 rounded-md px-2 py-1 text-[12px] border font-semibold"
       style={ordemCol === col.key && ordemDir === d ? { background: "var(--ink)", color: "var(--bg)", borderColor: "var(--ink)" } : { borderColor: "var(--line)", color: "var(--ink2)" }}>{rot}</button>
   );
   return (
     <span className="relative inline-block">
       <button type="button" onClick={() => setAberto((a) => !a)} aria-expanded={aberto}
-        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-semibold border"
+        className="qs-tam-sm inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-semibold border"
         style={ativo ? { background: "var(--rel-soft)", color: "var(--rel-ink)", borderColor: "transparent" } : { background: "var(--card)", color: "var(--ink2)", borderColor: "var(--line)" }}>
         {col.label}{ordemCol === col.key ? (ordemDir === "asc" ? " ↑" : " ↓") : ""} ▾
       </button>
