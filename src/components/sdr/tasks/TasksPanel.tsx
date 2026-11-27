@@ -46,6 +46,7 @@ import type { ItemFila } from "@/lib/discador/motor";
 import CotandoAereo from "@/components/sdr/aereo/CotandoAereo";
 import { loadWorkHours, minutesLeftToday, minutesWorkedToday, DEFAULT_WORK_HOURS, nextExecutionDay, nextWorkMoment, clampToWorkWindow, scheduleWeekdays, isWithinHours, workdaysBetween, type WorkHours } from "@/lib/workHours";
 import type { SdrUser } from "../types";
+import IgPendentesFila from "@/components/sdr/instagram/IgPendentesFila";
 import RelogioPrimeiroContato, { type LeadEsperando } from "./RelogioPrimeiroContato";
 import ProdutoGanhoPicker from "@/components/sdr/produto/ProdutoGanhoPicker";
 import {
@@ -4418,6 +4419,7 @@ export default function TasksPanel({ onOpenLead, ownerFilter: ownerFilterProp, o
           </div>
 
           <RelogioPrimeiroContato esperando={esperandoPrimeiroContato} onAtender={selectActive} />
+          <IgPendentesFila sdrId={podeFiltrarSdr ? ownerFilter : null} onOpenLead={onOpenLead} />
 
           {/* Canais (segmentado) à esquerda; contagens + filtros à direita */}
           <div className="flex items-center justify-between gap-3 flex-wrap">

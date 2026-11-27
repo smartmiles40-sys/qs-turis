@@ -46,6 +46,7 @@ import { getLeadScore, getSdrTemperature, TEMPERATURAS, chipDaTemperatura, type 
 import { loadWorkHours, nextWorkMoment } from "@/lib/workHours";
 import { useQsAuth, canSeeAllData } from "@/contexts/QsAuthContext";
 import WhatsAppModal from "@/components/sdr/whatsapp/WhatsAppModal";
+import InstagramDoLead, { conversaIgDoLead, type ConversaIg } from "@/components/sdr/instagram/InstagramDoLead";
 import ScheduleMeetingModal from "@/components/sdr/agenda/ScheduleMeetingModal";
 import MeetingDetailModal from "@/components/sdr/agenda/MeetingDetailModal";
 import { setMeetingStatus, desfechoDaOportunidadeFutura } from "@/lib/qs/meetings";
@@ -299,6 +300,11 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
 
   // ── WhatsApp (Task 3) ──
   const [showWhatsApp, setShowWhatsApp] = useState(false);
+  // ── Instagram (27/11): DM do lead pro @ da agência, amarrada pelo @ (0430) ──
+  const [showInstagram, setShowInstagram] = useState(false);
+  const [convIg, setConvIg] = useState<ConversaIg | null>(null);
+  const recarregarIg = useCallback(() => { void conversaIgDoLead(leadId).then(setConvIg); }, [leadId]);
+  useEffect(() => { recarregarIg(); }, [recarregarIg]);
 
   // ── Sprint 4 (A1): editar/excluir lead, notas, contatos, reuniões etc. ──
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1771,6 +1777,19 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
           <button type="button" className="fl-btn fl-btn--whats" onClick={() => setShowWhatsApp(true)} title="Abrir WhatsApp">
             <IcWhats />WhatsApp
           </button>
+          {(lead.instagram || convIg) && (
+            <button type="button" className="fl-btn" onClick={() => setShowInstagram(true)}
+              title={convIg ? "Conversa do Instagram da agência com este lead" : "Ainda sem DM — abre o perfil e explica como a conversa chega"}
+              style={{ color: "#C13584", borderColor: "#E9B3D3", position: "relative" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.5" cy="6.5" r="1" fill="currentColor" /></svg>
+              Instagram
+              {convIg && convIg.nao_lidas > 0 && (
+                <span aria-label={`${convIg.nao_lidas} não lidas`} style={{ marginLeft: 4, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999, background: "#DD2A7B", color: "#fff", fontSize: 11, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                  {convIg.nao_lidas}
+                </span>
+              )}
+            </button>
+          )}
           {papel === "sdr" ? (
             <>
               <button type="button" className="fl-btn" onClick={() => setShowMeetingModal(true)}>Agendar reunião</button>
@@ -2276,6 +2295,10 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
           nome={lead.full_name || null} onFechar={() => setEnviarFin(false)}
           onEnviado={() => { setEnviarFin(false); setSinalFin((n) => n + 1); notifySuccess("Enviado ao Financeiro."); }} />
       </ComCoresDoRel>
+
+      <InstagramDoLead leadId={lead.id} instagram={lead.instagram ?? null}
+        nome={lead.full_name || `${lead.first_name ?? ""} ${lead.last_name ?? ""}`.trim() || "Lead"}
+        aberto={showInstagram} onFechar={() => { setShowInstagram(false); recarregarIg(); }} onMudou={recarregarIg} />
 
       {/* WhatsApp Modal (Task 3) */}
       <WhatsAppModal
