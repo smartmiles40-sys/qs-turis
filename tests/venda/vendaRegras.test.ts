@@ -154,3 +154,25 @@ test("família da ficha: sugere só quem ainda não está em 'Quem vai' e traz o
   assert.equal(v.vinculo, "filho");
   assert.equal(viajanteDaFicha(ficha[2], viajanteVazio(false, "", "k8")).vinculo, "");
 });
+
+// 27/11 (0426): turma da pessoa — só guarda quando difere da turma do item.
+test("restaurarViajantes: turma própria só quando difere da do item", () => {
+  const r = restaurarViajantes({
+    item: { valor: 2000, dados: { grupo_id: "g1" }, passageiros: [] },
+    linhas: [
+      { id: "p1", cliente_id: "c1", nome_completo: "Ana", grupo_id: "g1", valor_contratado_brl: 1000 },
+      { id: "p2", cliente_id: "c2", nome_completo: "Beto", grupo_id: "g2", valor_contratado_brl: 1000 },
+    ],
+    compradorClienteId: "c1",
+  });
+  const ana = r.viajantes.find((v) => v.comprador)!;
+  const beto = r.viajantes.find((v) => !v.comprador)!;
+  assert.equal(ana.grupo_id, "");
+  assert.equal(beto.grupo_id, "g2");
+});
+
+test("viajantesParaJson leva a turma da pessoa", () => {
+  const js = viajantesParaJson([{ ...viajanteVazio(true, "", "k1"), grupo_id: "g2" }, viajanteVazio(false, "Beto", "k2")], "Ana");
+  assert.equal(js[0].grupo_id, "g2");
+  assert.equal(js[1].grupo_id, null);
+});

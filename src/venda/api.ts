@@ -46,6 +46,14 @@ export interface ExpedicaoVaga {
   na_fila?: number;
   /** 0368: com a venda informada, quantos ocupados já são DESTA venda (tabela ou fila). Ausente = banco sem a 0368. */
   desta_venda?: number;
+  /** 0426: turmas da expedição (vazio = expedição de turma única). Ausente = banco sem a 0426. */
+  grupos?: GrupoExpedicao[];
+}
+
+/** 0426: turma da expedição (G1/G2… ou subgrupo de voo), com datas e lugares próprios. */
+export interface GrupoExpedicao {
+  id: string; nome: string; data_embarque: string | null; data_retorno: string | null;
+  pax_planejados: number | null; ocupados: number;
 }
 
 export interface PaxParaQuarto { id: string; nome: string; quarto_desejado: string | null; tem_par: boolean; venda_id: string | null }
@@ -72,6 +80,9 @@ export async function listarExpedicoesParaVenda(vendaId?: string | null): Promis
     ...e, pax_planejados: Number(e.pax_planejados) || 0, ocupados: Number(e.ocupados) || 0, vagas: Number(e.vagas) || 0,
     ...(e.na_fila != null ? { na_fila: Number(e.na_fila) || 0 } : {}),
     ...(e.desta_venda != null ? { desta_venda: Number(e.desta_venda) || 0 } : {}),
+    grupos: Array.isArray(e.grupos) ? e.grupos.map((g) => ({
+      ...g, pax_planejados: g.pax_planejados != null ? Number(g.pax_planejados) : null, ocupados: Number(g.ocupados) || 0,
+    })) : [],
   }));
   // Preço SEM aéreo (0220): a RPC da 0214 não devolve. Quem tem acesso às Expedições
   // (Ops) lê direto; o closer não enxerga a tabela (RLS exp_tem_acesso) e fica sem —
@@ -104,6 +115,8 @@ export interface VendaGravada {
   rascunho: unknown;
   /** Linhas de qs_venda_pagamentos; null = tabela ainda não existe (usa o `pagamento` antigo). */
   pagamentos: unknown[] | null;
+  /** 0423: quem cuida no Relacionamento (null = fila sem dono). undefined = banco sem a coluna. */
+  rel_responsavel_id?: string | null;
 }
 
 /** O banco já tem o modelo da sprint final (qs_vendas.estado)? Uma consulta por sessão. */
@@ -117,7 +130,7 @@ export function temModeloNovo(): Promise<boolean> {
   return modeloNovo;
 }
 
-type Extras = Pick<VendaGravada, "estado" | "obs_financeiro" | "rascunho" | "pagamentos">;
+type Extras = Pick<VendaGravada, "estado" | "obs_financeiro" | "rascunho" | "pagamentos" | "rel_responsavel_id">;
 /** Colunas/tabelas novas da sprint final, lidas à parte: banco sem a migration devolve o "jeito antigo". */
 async function extrasDaVenda(vendaId: string): Promise<Extras> {
   const out: Extras = { estado: null, obs_financeiro: "", rascunho: null, pagamentos: null };
@@ -130,6 +143,9 @@ async function extrasDaVenda(vendaId: string): Promise<Extras> {
   }
   const { data: pg, error: e2 } = await supabase.from("qs_venda_pagamentos").select("ordem, forma, valor, data, parcelas, obs").eq("venda_id", vendaId).order("ordem");
   if (!e2) out.pagamentos = (pg ?? []) as unknown[];
+  // 0423: à parte — banco sem a coluna só não traz o dono.
+  const { data: rr, error: e3 } = await supabase.from("qs_vendas").select("rel_responsavel_id").eq("id", vendaId).maybeSingle();
+  if (!e3 && rr) out.rel_responsavel_id = ((rr as { rel_responsavel_id: string | null }).rel_responsavel_id) ?? null;
   return out;
 }
 
@@ -171,7 +187,7 @@ export async function fichaDoComprador(p: { clienteId?: string | null; leadId?: 
 export async function passageirosDosItens(itemIds: string[]): Promise<Record<string, PaxLinha[]>> {
   if (!itemIds.length) return {};
   const { data, error } = await supabase.from("passageiros")
-    .select("id, venda_item_id, cliente_id, nome_completo, telefone, email, cpf, data_nascimento, valor_contratado_brl, valor_pago_brl, aereo_incluso, quarto_desejado, quarto_par_id, acompanhante_dividir_com, status_reserva")
+    .select("id, venda_item_id, cliente_id, nome_completo, telefone, email, cpf, data_nascimento, valor_contratado_brl, valor_pago_brl, aereo_incluso, quarto_desejado, quarto_par_id, acompanhante_dividir_com, status_reserva, grupo_id")
     .in("venda_item_id", itemIds);
   if (error) return {};
   const out: Record<string, PaxLinha[]> = {};
@@ -212,6 +228,8 @@ export interface PayloadVenda {
   rascunho?: unknown;
   /** Rel/Ops: re-salvar na mesma janela atualiza a mesma venda (a RPC ignora se não souber). */
   venda_id?: string | null;
+  /** 0423: quem cuida no Relacionamento. undefined = não mexe; null/"" = fila sem dono. */
+  rel_responsavel_id?: string | null;
 }
 
 export interface ResultadoVenda {
@@ -246,6 +264,8 @@ export function montarPayload(p: PayloadVenda, nomeDoItem: (i: ItemVenda) => str
     divide_com_passageiro_id: v.divide.startsWith("p:") ? v.divide.slice(2) : null,
     divide_com_nome: v.divide === "t" ? v.divide_nome : null,
     responsavel_chave: v.comprador ? null : v.responsavel || null,
+    // 0426: turma só desta pessoa (vazio = a do item, dados.grupo_id).
+    grupo_id: i.tipo === "expedicao" ? v.grupo_id || null : null,
   })));
   const pg = p.pagamento;
   return {
@@ -269,6 +289,7 @@ export function montarPayload(p: PayloadVenda, nomeDoItem: (i: ItemVenda) => str
     ...(p.acao ? { acao: p.acao } : {}),
     ...(p.rascunho !== undefined ? { rascunho: p.rascunho } : {}),
     ...(p.venda_id ? { venda_id: p.venda_id } : {}),
+    ...(p.rel_responsavel_id !== undefined ? { rel_responsavel_id: p.rel_responsavel_id || null } : {}),
   };
 }
 
@@ -295,7 +316,7 @@ export async function salvarFamilia(payload: ReturnType<typeof familiaParaPayloa
   return { venda_id: r.venda_id ?? "", pessoas: Number(r.pessoas) || 0, ids: Array.isArray(r.ids) ? r.ids : [] };
 }
 
-export interface ResultadoConsolidar { ok: boolean; faltas: string[] }
+export interface ResultadoConsolidar { ok: boolean; faltas: string[]; /** 0425: não barram (ex.: item sem valor entrou como incluso). */ avisos: string[] }
 
 export async function consolidarVenda(vendaId: string): Promise<ResultadoConsolidar> {
   const { data, error } = await supabase.rpc("venda_consolidar", { p_venda: vendaId });
@@ -303,9 +324,10 @@ export async function consolidarVenda(vendaId: string): Promise<ResultadoConsoli
     if (semFuncao(error.message, "venda_consolidar")) throw new Error(`Consolidar a venda ainda não está ligado no banco (${FALTA_FINAL}). A venda ficou salva.`);
     throw new Error(erroDaVenda(error));
   }
-  const r = (data ?? {}) as { ok?: boolean; faltas?: unknown };
+  const r = (data ?? {}) as { ok?: boolean; faltas?: unknown; avisos?: unknown };
   const faltas = Array.isArray(r.faltas) ? r.faltas.map(String).filter(Boolean) : [];
-  return { ok: r.ok === true && !faltas.length, faltas };
+  const avisos = Array.isArray(r.avisos) ? r.avisos.map(String).filter(Boolean) : [];
+  return { ok: r.ok === true && !faltas.length, faltas, avisos };
 }
 
 /** Cancela a venda (0367): vaga volta, comissão sai, a receber cancelado, viagem do Rel e Bitrix sinalizados. */
@@ -372,6 +394,8 @@ export function erroDaVenda(e: unknown): string {
     "viajante-sem-chave": "A lista de quem viaja veio quebrada. Feche e abra de novo.",
     "vagas-invalidas": "Número de vagas inválido.",
     "motivo-obrigatorio": "Escreva o motivo (fica registrado).",
+    "grupo-invalido": "A turma escolhida não é dessa expedição. Escolha a turma de novo (atualize a tela se a expedição mudou).",
+    "responsavel-invalido": "Quem vai cuidar no Relacionamento precisa ser alguém ativo do Relacionamento. Escolha outra pessoa.",
   };
   for (const [k, v] of Object.entries(mapa)) if (m.includes(k)) return v;
   return erroAmigavel(e);

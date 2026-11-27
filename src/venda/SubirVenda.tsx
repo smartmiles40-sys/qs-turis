@@ -43,7 +43,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Stepper } from "@/components/ui";
 import { Aviso, Botao, Campo, Entrada, Etiqueta, Modal } from "@/rel/ui";
 import { ORDEM_TIPOS_VENDA, TIPOS, camposDoTipo, datasDoTipo, tipoVendaBitrix, type TipoItem } from "@/propostas/lib";
-import { brl, emPreVenda, espelharNoBitrix, nomeDoLead, type Negocio } from "@/closer/lib";
+import { brl, emPreVenda, espelharNoBitrix, nomeDoLead, responsaveisDoRel, type Negocio } from "@/closer/lib";
 import {
   itemPrincipal, itemVendaVazio, itensDaPropostaAprovada, listarItensDaVenda, marcarPreVenda, nomeSugerido,
   salvarItensDaVenda, somaDosItens, type ItemVenda, type ResultadoPreVenda,
@@ -131,6 +131,10 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
   const [especial, setEspecial] = useState(false);
   const [especialObs, setEspecialObs] = useState("");
   const [obs, setObs] = useState("");
+  // 27/11 (0423): quem cuida da viagem no Relacionamento ("" = fila sem dono do Rel).
+  const [relResp, setRelResp] = useState("");
+  const [responsaveisRel, setResponsaveisRel] = useState<{ id: string; name: string }[] | null>(null);
+  useEffect(() => { if (aberto && responsaveisRel === null) responsaveisDoRel().then(setResponsaveisRel).catch(() => setResponsaveisRel([])); }, [aberto]); // eslint-disable-line react-hooks/exhaustive-deps
   const [expedicoes, setExpedicoes] = useState<ExpedicaoVaga[] | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [lendoVoucher, setLendoVoucher] = useState(false);
@@ -174,7 +178,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
     if (!aberto) return;
     let vivo = true;
     setCarregando(true); setPronto(false); setErro(null); setInfo(null); setFaltas(null); setPasso(0);
-    setLinhas([linhaVazia()]); setObsFin(""); setEspecial(false); setEspecialObs(""); setObs("");
+    setLinhas([linhaVazia()]); setObsFin(""); setEspecial(false); setEspecialObs(""); setObs(""); setRelResp("");
     setAnalise(null); setErroAnalise(null); setRestaurado(null);
     setPropostasJa([]); setPropostasNovas([]); setDaFicha([]); setOutros([]); setVendaId(null); setAcompsFicha([]);
     if (ehCloser) listarPropostasDaVenda({ negocioId: negocio!.id }).then((l) => vivo && setPropostasJa(l)).catch(() => undefined);
@@ -284,6 +288,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
       if (venda) {
         setEspecial(venda.condicao_especial); setEspecialObs(venda.condicao_obs); setObs(venda.observacoes);
         setObsFin(venda.obs_financeiro || venda.pagamento.obs || "");
+        setRelResp(venda.rel_responsavel_id ?? "");
       }
       setLinhas(linhasIni);
       setItens(lista);
@@ -302,6 +307,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
         setValores(r.valores); setViajantes(r.viajantes); setOutros(r.outros.filter((v) => !v.comprador));
         setLinhas(r.linhas.length ? r.linhas : [linhaVazia()]);
         setEspecial(r.especial); setEspecialObs(r.especialObs); setObs(r.obs); setObsFin(r.obsFin);
+        if (r.relResp !== undefined) setRelResp(r.relResp);
         setPasso(r.passo);
         setRestaurado({ de: pick.de, em: r.salvo_em });
       }
@@ -338,7 +344,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
   function montarRascunho(): RascunhoTela {
     return {
       v: VERSAO_RASCUNHO, salvo_em: new Date().toISOString(), passo: Math.min(passo, PASSO.pagamento),
-      pessoa, itens, valores, viajantes, outros, linhas, especial, especialObs, obs, obsFin,
+      pessoa, itens, valores, viajantes, outros, linhas, especial, especialObs, obs, obsFin, relResp,
     };
   }
   // Foto da tela logo depois de abrir: só guarda rascunho quando a pessoa MUDA algo (senão
@@ -604,6 +610,7 @@ export default function SubirVenda({ origem, aberto, onFechar, onSalvo, negocio,
         pagamento: pagamentoLegadoDasLinhas(linhas, obsFin), pagamentos: linhasParaPayload(linhas), obs_financeiro: obsFin,
         condicao_especial: especial, condicao_obs: especialObs, observacoes: obs,
         acao, rascunho: montarRascunho(), venda_id: vendaId,
+        rel_responsavel_id: relResp || null,
       }, nomeSugerido));
     } catch (e) {
       await desfazerAnexos(novosIds).catch(() => undefined); // venda não gravou: não deixa a proposta solta
@@ -698,7 +705,11 @@ A regra é subir a venda com a maior parte já emitida. Consolidar mesmo assim? 
           if (b && !b.ok && b.status === "erro") bx = ` Gravado no QS, mas o Bitrix recusou: ${b.mensagem ?? "sem motivo"}. Use "Tentar agora" no cartão (o QS também tenta sozinho).`;
         }
         const an = await guardarAnalise(r.venda_id);
-        onSalvo({ tom: bx || pv?.tom === "aviso" ? "aviso" : "ok", mensagem: `Venda consolidada! ${brl(r.total)} — a viagem nasce no Relacionamento e as contas a receber no Financeiro.${aviso}${an}${pv && pv.tom === "aviso" ? ` ${pv.mensagem}` : ""}${bx}` });
+        // 0425: avisos que não barram (ex.: item sem valor entrou como incluso R$ 0).
+        const avc = c.avisos.length ? ` Confira: ${c.avisos.join(" ")}` : "";
+        const dono = relResp ? responsaveisRel?.find((u) => u.id === relResp)?.name : null;
+        const rel = dono ? ` Quem cuida no Relacionamento: ${dono}.` : " A viagem entra na fila sem dono do Relacionamento.";
+        onSalvo({ tom: bx || avc || pv?.tom === "aviso" ? "aviso" : "ok", mensagem: `Venda consolidada! ${brl(r.total)} — a viagem nasce no Relacionamento e as contas a receber no Financeiro.${rel}${aviso}${an}${avc}${pv && pv.tom === "aviso" ? ` ${pv.mensagem}` : ""}${bx}` });
         return;
       }
 
@@ -956,6 +967,13 @@ A regra é subir a venda com a maior parte já emitida. Consolidar mesmo assim? 
               {especial && (
                 <Campo rotulo="Qual condição? *"><Entrada value={especialObs} onChange={(e) => setEspecialObs(e.target.value)} placeholder="Ex.: ExpedAmigo — indicou a Ana, 5% off" /></Campo>
               )}
+              <Campo rotulo="Quem vai cuidar no Relacionamento" dica="Essa pessoa vira a dona da viagem quando a venda consolidar. Sem ninguém, a viagem cai na fila sem dono do Rel.">
+                <select className="rel-input" value={relResp} disabled={responsaveisRel === null} onChange={(e) => setRelResp(e.target.value)}>
+                  <option value="">{responsaveisRel === null ? "Carregando…" : "Ninguém ainda (fila sem dono do Rel)"}</option>
+                  {relResp && responsaveisRel && !responsaveisRel.some((u) => u.id === relResp) && <option value={relResp}>Responsável já escolhido</option>}
+                  {(responsaveisRel ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </Campo>
               <Campo rotulo="Observações pra quem vem depois" dica="Relacionamento e Operacional leem.">
                 <textarea className="rel-input" rows={2} value={obs} onChange={(e) => setObs(e.target.value)} />
               </Campo>

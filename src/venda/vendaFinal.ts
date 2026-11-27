@@ -405,6 +405,8 @@ export interface RascunhoTela {
   especialObs: string;
   obs: string;
   obsFin: string;
+  /** 0423: quem cuida no Relacionamento ("" = fila sem dono). Rascunho antigo não tem. */
+  relResp?: string;
 }
 
 /** Chave do localStorage: um rascunho por cartão (closer) ou por cliente/viagem (Rel/Ops). */
@@ -424,6 +426,7 @@ export function lerRascunho(bruto: unknown): RascunhoTela | null {
     v: VERSAO_RASCUNHO, salvo_em: String(r.salvo_em), passo: Math.min(Math.max(Number(r.passo) || 0, 0), PASSO.pagamento),
     pessoa: r.pessoa, itens: r.itens, valores: r.valores ?? {}, viajantes: r.viajantes ?? {}, outros: Array.isArray(r.outros) ? r.outros : [],
     linhas: r.linhas, especial: !!r.especial, especialObs: txt(r.especialObs), obs: txt(r.obs), obsFin: txt(r.obsFin),
+    ...(typeof r.relResp === "string" ? { relResp: r.relResp } : {}),
   };
 }
 

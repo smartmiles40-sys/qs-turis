@@ -40,6 +40,8 @@ export interface Viajante {
   divide_nome: string;
   /** 0351: menor de idade — quem assina por ele(a): "" = o comprador · chave de outro viajante desta venda. */
   responsavel?: string;
+  /** 0426: turma (grupos_expedicao) SÓ desta pessoa; "" / ausente = a mesma do item (item.dados.grupo_id). */
+  grupo_id?: string;
   /** Ficha (rel_clientes) e linha de `passageiros`, quando já gravado. */
   cliente_id?: string | null;
   passageiro_id?: string | null;
@@ -177,6 +179,8 @@ export interface PaxJson {
   quarto_par_id?: string | null;
   /** 0351: chave do viajante que responde pelo menor ("" / null = o comprador). */
   responsavel_chave?: string | null;
+  /** 0426: turma da pessoa (a venda_subir grava a efetiva; a tela guarda só a que difere do item). */
+  grupo_id?: string | null;
 }
 
 /** Viajantes da tela → json do item (guarda tudo: reabrir o rascunho não perde nada). */
@@ -192,6 +196,7 @@ export function viajantesParaJson(vs: Viajante[], nomeComprador: string): PaxJso
     aereo_incluso: v.aereo_incluso, quarto_desejado: vazio(v.quarto_desejado),
     divide: v.divide || null, divide_nome: v.divide === "t" ? vazio(v.divide_nome) : null,
     responsavel_chave: v.comprador ? null : v.responsavel || null,
+    grupo_id: v.grupo_id || null,
   }));
 }
 
@@ -211,6 +216,8 @@ export interface PaxLinha {
   quarto_par_id?: string | null;
   acompanhante_dividir_com?: string | null;
   status_reserva?: string | null;
+  /** 0426: turma (grupos_expedicao). */
+  grupo_id?: string | null;
 }
 
 /** Acompanhante da ficha do comprador (cad_ler_pessoa): o vínculo e os documentos. */
@@ -282,6 +289,8 @@ export function restaurarViajantes(p: {
       quarto_desejado: txt(l?.quarto_desejado ?? j?.quarto_desejado),
       divide: txt(j?.divide), divide_nome: txt(j?.divide_nome),
       responsavel: txt(j?.responsavel_chave),
+      // 0426: turma própria só quando difere da do item (igual = "mesma da venda").
+      grupo_id: (() => { const g = txt(l?.grupo_id ?? j?.grupo_id); return g && g !== txt(p.item.dados?.grupo_id) ? g : ""; })(),
       cliente_id: cid, passageiro_id: l?.id ?? j?.passageiro_id ?? null,
       // marca do comprador vinda do json (as outras regras logo abaixo)
       comprador: j?.comprador === true,

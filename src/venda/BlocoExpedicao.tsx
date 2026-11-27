@@ -23,19 +23,26 @@
 // lotada não trava mais. 0368: "Reservar vaga" com o espelho ligado (fila
 // exp_venda_pax_pendentes) também ocupa vaga; a etiqueta mostra quantas
 // "reservadas aguardando a troca do sistema".
+//
+// 27/11 (0426): expedição com turmas (grupos_expedicao: G1/G2… com datas e lugares
+// próprios) → "Qual turma?" no item (dados.grupo_id; as datas do item viram as da
+// turma) e, se alguém vai em outra, "Turma desta pessoa" no cartão dela.
 // -----------------------------------------------------------------------------
 import { useEffect, useMemo, useState } from "react";
 import { Aviso, Botao, Campo, Entrada, Etiqueta } from "@/rel/ui";
 import { QUARTOS_EXPEDICAO } from "@/propostas/lib";
 import type { ItemVenda } from "@/closer/vendaItens";
 import { brl, dataBr } from "@/closer/lib";
-import { lerValor, passageirosParaQuarto, viajanteNovo, type ExpedicaoVaga, type PaxParaQuarto, type Viajante } from "./api";
+import { lerValor, passageirosParaQuarto, viajanteNovo, type ExpedicaoVaga, type GrupoExpedicao, type PaxParaQuarto, type Viajante } from "./api";
 import { mostrarValor, precoTabela, sugerirValor, trocarAereo, valorAjustado } from "./vendaRegras";
 import DadosDoViajante from "./DadosDoViajante";
 import { jaOcupamVaga, textoNaFila } from "./vendaFinal";
 
 const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 const mesAno = (iso: string | null) => (iso ? `${MESES[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}` : "");
+/** "G1 — 22/08 a 30/08 · 3 de 12 lugares" */
+const rotuloTurma = (g: GrupoExpedicao) =>
+  `${g.nome}${g.data_embarque ? ` — ${dataBr(g.data_embarque)}${g.data_retorno ? ` a ${dataBr(g.data_retorno)}` : ""}` : ""}${g.pax_planejados ? ` · ${g.ocupados} de ${g.pax_planejados} lugares` : g.ocupados ? ` · ${g.ocupados} já vendidos` : ""}`;
 
 export default function BlocoExpedicao({ item, viajantes, expedicoes, carregandoExp, nomeComprador, onItem, onViajantes, podeAbrirVaga }: {
   item: ItemVenda;
@@ -64,7 +71,8 @@ export default function BlocoExpedicao({ item, viajantes, expedicoes, carregando
   useEffect(() => { if ((item.valor ?? 0) !== soma) onItem({ valor: soma }); }, [soma]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function escolher(e: ExpedicaoVaga | null) {
-    if (!e) { onItem({ dados: { ...item.dados, expedicao_id: "" } }); return; }
+    if (!e) { onItem({ dados: { ...item.dados, expedicao_id: "", grupo_id: "", grupo: "" } }); return; }
+    const trocou = e.id !== expId;
     // 12/11: trocou a expedição → o nome automático acompanha (antes ficava "Islândia" com a Tailândia escolhida).
     // Nome digitado à mão (diferente do automático da expedição anterior) fica.
     const automaticoAnterior = item.dados.expedicao ? `Expedição ${item.dados.expedicao}` : "";
@@ -73,12 +81,41 @@ export default function BlocoExpedicao({ item, viajantes, expedicoes, carregando
     const trocarNome = !nomeAtual || nomeAtual === automaticoAnterior || (!item.dados.expedicao && /^Expedição /.test(nomeAtual));
     onItem({
       nome: trocarNome ? `Expedição ${e.nome}` : item.nome,
-      data_inicio: e.data_embarque ?? "", data_fim: e.data_retorno ?? "",
-      dados: { ...item.dados, expedicao_id: e.id, expedicao: e.nome, codigo: e.codigo, edicao: mesAno(e.data_embarque) },
+      // Mesma expedição com turma já escolhida: as datas continuam as da turma.
+      data_inicio: (!trocou && e.grupos?.find((g) => g.id === item.dados.grupo_id)?.data_embarque) || (e.data_embarque ?? ""),
+      data_fim: (!trocou && e.grupos?.find((g) => g.id === item.dados.grupo_id)?.data_retorno) || (e.data_retorno ?? ""),
+      // Trocou de expedição: a turma da anterior não vale mais (a mesma expedição mantém).
+      dados: { ...item.dados, expedicao_id: e.id, expedicao: e.nome, codigo: e.codigo, edicao: mesAno(e.data_embarque),
+        ...(trocou ? { grupo_id: "", grupo: "" } : {}) },
     });
     // Sugere o preço de tabela (com ou sem aéreo) pra quem ainda não tem valor.
-    onViajantes(viajantes.map((v) => (v.valor_contratado ? v : { ...v, valor_contratado: sugerirValor(v, e) })));
+    onViajantes(viajantes.map((v) => ({
+      ...v, ...(v.valor_contratado ? {} : { valor_contratado: sugerirValor(v, e) }), ...(trocou ? { grupo_id: "" } : {}),
+    })));
   }
+
+  // ── Turma (0426) ──
+  const grupos = exp?.grupos ?? [];
+  const grupoId = item.dados.grupo_id ?? "";
+  const turma = grupos.find((g) => g.id === grupoId) ?? null;
+  function escolherTurma(id: string) {
+    const g = grupos.find((x) => x.id === id) ?? null;
+    onItem({
+      // As datas do item seguem a turma (sem turma: as da expedição).
+      data_inicio: (g?.data_embarque ?? exp?.data_embarque) ?? "", data_fim: (g?.data_retorno ?? exp?.data_retorno) ?? "",
+      dados: { ...item.dados, grupo_id: g?.id ?? "", grupo: g?.nome ?? "", edicao: mesAno(g?.data_embarque ?? exp?.data_embarque ?? null) },
+    });
+    // Quem tinha escolhido justamente essa turma "à parte" volta pra "a mesma da venda".
+    if (g && viajantes.some((v) => v.grupo_id === g.id)) onViajantes(viajantes.map((v) => (v.grupo_id === g.id ? { ...v, grupo_id: "" } : v)));
+  }
+  // Turma que sumiu da lista (apagada pelo Ops): limpa pra não dar 'grupo-invalido'.
+  useEffect(() => {
+    if (!exp || !exp.grupos) return;
+    if (grupoId && !grupos.some((g) => g.id === grupoId)) onItem({ dados: { ...item.dados, grupo_id: "", grupo: "" } });
+    if (viajantes.some((v) => v.grupo_id && !grupos.some((g) => g.id === v.grupo_id))) {
+      onViajantes(viajantes.map((v) => (v.grupo_id && !grupos.some((g) => g.id === v.grupo_id) ? { ...v, grupo_id: "" } : v)));
+    }
+  }, [exp?.id, grupos.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 26/11: a expedição veio marcada do contrato (só o id) → completa nome, datas e
   // valor de tabela sozinha, como se o vendedor tivesse escolhido na lista.
@@ -120,6 +157,19 @@ export default function BlocoExpedicao({ item, viajantes, expedicoes, carregando
             ? ` · tabela do Operacional: ${exp.preco_venda_brl ? `${brl(exp.preco_venda_brl)} com aéreo` : "com aéreo não cadastrado"}${exp.preco_sem_aereo_brl ? ` / ${brl(exp.preco_sem_aereo_brl)} sem aéreo` : ""}`
             : " · o Operacional ainda não cadastrou o preço"}
         </p>
+      )}
+      {exp && grupos.length > 0 && (
+        <Campo rotulo="Qual turma?" dica={grupos.length > 1
+          ? "Esta expedição tem mais de uma turma (datas próprias). O passageiro já nasce na turma certa pro Operacional."
+          : "A turma desta expedição."}>
+          <select className="rel-input" value={grupoId} onChange={(ev) => escolherTurma(ev.target.value)}>
+            <option value="">{grupos.length > 1 ? "Escolha a turma…" : "Sem turma (o Operacional define)"}</option>
+            {grupos.map((g) => <option key={g.id} value={g.id}>{rotuloTurma(g)}</option>)}
+          </select>
+        </Campo>
+      )}
+      {exp && grupos.length > 1 && !turma && (
+        <Aviso>Escolha a turma. Sem ela, o Operacional precisa colocar cada passageiro na turma depois.</Aviso>
       )}
       {(lotada || faltaVaga) && (
         <Aviso tom="erro">
@@ -206,6 +256,16 @@ export default function BlocoExpedicao({ item, viajantes, expedicoes, carregando
                     <div className="mt-2"><Entrada placeholder="Nome de quem divide" value={v.divide_nome} onChange={(e) => mudar(v.chave, { divide_nome: e.target.value })} /></div>
                   )}
                 </div>
+                {grupos.length > 1 && (
+                  <div className="sm:col-span-2">
+                    <Campo rotulo="Turma desta pessoa" dica="Só se ela for numa turma diferente do resto da venda.">
+                      <select className="rel-input" value={v.grupo_id ?? ""} onChange={(e) => mudar(v.chave, { grupo_id: e.target.value })}>
+                        <option value="">{turma ? `A mesma da venda (${turma.nome})` : "A mesma da venda"}</option>
+                        {grupos.filter((g) => g.id !== grupoId).map((g) => <option key={g.id} value={g.id}>{rotuloTurma(g)}</option>)}
+                      </select>
+                    </Campo>
+                  </div>
+                )}
                 <DadosDoViajante v={v} viajantes={viajantes} nomeComprador={nomeComprador} dataViagem={exp?.data_embarque}
                   onMudar={(p) => mudar(v.chave, p)} />
               </div>
