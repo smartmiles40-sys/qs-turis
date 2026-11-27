@@ -490,7 +490,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
         <button
           onClick={() => { setSorteioAberto(true); setQuantidade("30"); setSorteioCadencia(""); }}
           disabled={livres.length === 0 || !!progresso}
-          className="shrink-0 px-4 py-2.5 rounded-xl bg-[#0147FF] text-white text-sm font-bold hover:bg-[#0139cc] disabled:opacity-50"
+          className="shrink-0 px-4 py-2.5 rounded-xl bg-marca text-white text-sm font-bold hover:bg-[#0139cc] disabled:opacity-50"
           title={livres.length === 0
             ? (resumoTela.length ? "Nenhum lead livre no recorte atual" : "Todos os leads da carteira já têm atividade aberta")
             : `Escolha Lead Score, tempo sem contato e cadência e sorteie pra fila de hoje (${livres.length} livres)`}
@@ -547,12 +547,12 @@ export default function CarteiraPage({ onOpenLead }: Props) {
 
       {/* ── Barra do lote ───────────────────────────────────────────────── */}
       {selecionados.size > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-[#0147FF]/30 bg-[#0147FF]/[0.04] px-3 py-2">
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-marca/30 bg-marca/[0.04] px-3 py-2">
           <span className="text-[13px] font-bold text-gray-900">{selecionados.size} selecionado(s)</span>
           <button
             onClick={() => void rodarLote(itens.filter((i) => selecionados.has(i.chave)), null)}
             disabled={!!progresso}
-            className="px-3 py-1.5 rounded-lg bg-[#0147FF] text-white text-xs font-bold disabled:opacity-50"
+            className="px-3 py-1.5 rounded-lg bg-marca text-white text-xs font-bold disabled:opacity-50"
           >
             Reiniciar hoje
           </button>
@@ -575,7 +575,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
             Colocando na fila… {progresso.feitos} de {progresso.total}
           </p>
           <div className="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden">
-            <div className="h-full bg-[#0147FF] transition-[width]" style={{ width: `${(progresso.feitos / progresso.total) * 100}%` }} />
+            <div className="h-full bg-marca transition-[width]" style={{ width: `${(progresso.feitos / progresso.total) * 100}%` }} />
           </div>
         </div>
       )}
@@ -619,7 +619,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
                   <div className="min-w-0 flex-1">
                     <button
                       onClick={() => i.leadId && onOpenLead(i.leadId)}
-                      className="text-sm font-semibold text-gray-900 hover:text-[#0147FF] truncate block text-left"
+                      className="text-sm font-semibold text-gray-900 hover:text-marca-tx truncate block text-left"
                     >
                       {i.nome ?? "Sem nome"}
                     </button>
@@ -648,7 +648,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
                         title={i.temCadencia
                           ? "Repete a cadência que ele já tinha, com as atividades caindo hoje"
                           : "Esse lead nunca esteve numa cadência — use Reiniciar cadência"}
-                        className="px-3 py-1.5 rounded-lg bg-[#0147FF] text-white text-xs font-bold hover:bg-[#0139cc] disabled:opacity-40"
+                        className="px-3 py-1.5 rounded-lg bg-marca text-white text-xs font-bold hover:bg-[#0139cc] disabled:opacity-40"
                       >
                         Reiniciar hoje
                       </button>
@@ -702,7 +702,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
                   aria-pressed={filtros.temp === k}
                   onClick={() => setFiltros((f) => ({ ...f, temp: f.temp === k ? "" : k }))}
                   className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                    filtros.temp === k ? "bg-[#0147FF] text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                    filtros.temp === k ? "bg-marca text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                   }`}
                 >
                   {TEMP_ROTULO[k]}
@@ -713,7 +713,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
                 aria-pressed={filtros.temp === SEM_SCORE}
                 onClick={() => setFiltros((f) => ({ ...f, temp: f.temp === SEM_SCORE ? "" : SEM_SCORE }))}
                 className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                  filtros.temp === SEM_SCORE ? "bg-[#0147FF] text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                  filtros.temp === SEM_SCORE ? "bg-marca text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                 }`}
               >
                 Sem score
@@ -748,7 +748,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
               </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[#0147FF]/[0.06] px-3 py-2">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-marca/[0.06] px-3 py-2">
               <span className="text-[13px] text-gray-800" aria-live="polite">
                 <strong>{disponiveis.length}</strong> lead(s) livre(s) {temFiltroCarteira(filtros) ? "nesses filtros" : "na carteira"}
               </span>
@@ -796,7 +796,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
               </button>
               <button
                 onClick={() => void confirmarSorteio()}
-                className="px-4 py-2 rounded-lg bg-[#0147FF] text-white text-sm font-semibold"
+                className="px-4 py-2 rounded-lg bg-marca text-white text-sm font-semibold"
               >
                 Sortear e colocar na fila
               </button>
@@ -836,7 +836,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
               <button
                 onClick={() => void confirmarReinicio()}
                 disabled={!cadenciaEscolhida || salvando}
-                className="px-4 py-2 rounded-lg bg-[#0147FF] text-white text-sm font-semibold disabled:opacity-50"
+                className="px-4 py-2 rounded-lg bg-marca text-white text-sm font-semibold disabled:opacity-50"
               >
                 {salvando ? "Criando…" : "Colocar na fila de hoje"}
               </button>
@@ -877,7 +877,7 @@ export default function CarteiraPage({ onOpenLead }: Props) {
                   void rodarLote(alvos, cad || null);
                 }}
                 disabled={!loteCadencia}
-                className="px-4 py-2 rounded-lg bg-[#0147FF] text-white text-sm font-semibold disabled:opacity-50"
+                className="px-4 py-2 rounded-lg bg-marca text-white text-sm font-semibold disabled:opacity-50"
               >
                 Colocar na fila de hoje
               </button>

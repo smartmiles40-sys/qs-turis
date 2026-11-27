@@ -208,7 +208,7 @@ function LossReasonsChart({
           </span>
           <div className="flex-1 h-7 bg-gray-100 rounded-md overflow-hidden relative">
             <div
-              className="h-full rounded-md bg-[#0147FF]"
+              className="h-full rounded-md bg-marca"
               style={{ width: `${(reason.count / maxCount) * 100}%`, opacity: 0.75 }}
             />
             <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-700">
@@ -526,7 +526,7 @@ function FupQueue({ stages, note }: { stages: { fupDay: number; overdue: boolean
           >
             <span className="text-[12.5px] font-bold text-gray-500">{b.label}</span>
             <div className="h-5 rounded-md bg-[#E8EEFF] overflow-hidden flex">
-              <div className="h-full" style={{ width: `${goodPct}%`, background: "#0147FF" }} />
+              <div className="h-full" style={{ width: `${goodPct}%`, background: "rgb(var(--marca-rgb))" }} />
               <div className="h-full" style={{ width: `${latePct}%`, background: "#DC2626", opacity: 0.9 }} />
             </div>
             <span className="text-[12.5px] font-bold text-right tabular-nums text-gray-700">
@@ -1853,7 +1853,7 @@ export default function SdrDashboard() {
                 <select
                   value={selectedUser}
                   onChange={(e) => setSelectedUser(e.target.value)}
-                  className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#0147FF] focus:ring-2 focus:ring-blue-100"
+                  className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-marca focus:ring-2 focus:ring-blue-100"
                 >
                   {allUsers.map((u: any) => (
                     <option key={u.id} value={u.id}>{u.name}</option>
@@ -1873,9 +1873,9 @@ export default function SdrDashboard() {
                 onClick={() => setSelectedPeriod(p.id)}
                 className="px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
                 style={{
-                  background: selectedPeriod === p.id ? "#0147FF" : "transparent",
+                  background: selectedPeriod === p.id ? "rgb(var(--marca-rgb))" : "transparent",
                   color: selectedPeriod === p.id ? "#fff" : "#6B7280",
-                  border: selectedPeriod === p.id ? "1px solid #0147FF" : "1px solid #E5E7EB",
+                  border: selectedPeriod === p.id ? "1px solid rgb(var(--marca-rgb))" : "1px solid #E5E7EB",
                 }}
               >
                 {p.label}
@@ -1890,14 +1890,14 @@ export default function SdrDashboard() {
                 type="date"
                 value={customStart}
                 onChange={(e) => setCustomStart(e.target.value)}
-                className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#0147FF]"
+                className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-marca"
               />
               <span className="text-xs text-gray-400">até</span>
               <input
                 type="date"
                 value={customEnd}
                 onChange={(e) => setCustomEnd(e.target.value)}
-                className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#0147FF]"
+                className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-marca"
               />
             </div>
           )}
@@ -2468,7 +2468,7 @@ export default function SdrDashboard() {
                         <tr key={row.id} className="border-b border-gray-50">
                           <td className="py-1.5 text-xs font-medium text-gray-900 truncate max-w-[140px]">{row.name}</td>
                           <td className="py-1.5 text-center text-xs font-bold text-gray-700">{row.count}</td>
-                          <td className="py-1.5 text-center text-xs font-bold" style={{ color: "#0147FF" }}>{row.daily ?? "—"}</td>
+                          <td className="py-1.5 text-center text-xs font-bold" style={{ color: "rgb(var(--marca-tx-rgb))" }}>{row.daily ?? "—"}</td>
                           <td className="py-1.5 text-center text-xs text-gray-400">{row.monthly}</td>
                         </tr>
                       ))}

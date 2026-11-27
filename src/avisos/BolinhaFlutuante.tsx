@@ -123,7 +123,7 @@ export default function BolinhaFlutuante({ pulso }: { pulso: number }) {
         className={`qs-bolinha-avisos fixed z-[80] rounded-full flex items-center justify-center select-none touch-none ${pulso && n ? "qs-bol-vai" : ""}`}
         style={{
           left: pos.x, top: pos.y, width: TAM, height: TAM, cursor: "grab",
-          background: n ? "#0147FF" : "#334155", color: "#fff",
+          background: n ? "rgb(var(--marca-rgb))" : "#334155", color: "#fff",
           boxShadow: "0 4px 14px rgba(0,0,0,.28)",
         }}
       >

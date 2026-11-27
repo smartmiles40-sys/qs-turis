@@ -98,7 +98,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
           <pre style={{ background: "var(--err-bg)", padding: 16, borderRadius: 8, fontSize: 13, whiteSpace: "pre-wrap" }}>
             {this.state.error.message}{"\n\n"}{this.state.error.stack}
           </pre>
-          <button onClick={() => this.setState({ error: null })} style={{ marginTop: 16, padding: "8px 20px", background: "#0147FF", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>
+          <button onClick={() => this.setState({ error: null })} style={{ marginTop: 16, padding: "8px 20px", background: "rgb(var(--marca-rgb))", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>
             Tentar novamente
           </button>
         </div>
@@ -163,7 +163,7 @@ function AppContent() {
           <button
             onClick={() => window.location.reload()}
             className="mt-1 px-4 py-2 rounded-lg text-sm font-bold text-white"
-            style={{ background: "#0147FF" }}
+            style={{ background: "rgb(var(--marca-rgb))" }}
           >
             Tentar de novo
           </button>
@@ -178,7 +178,7 @@ function AppContent() {
         <div className="flex flex-col items-center gap-3">
           <div
             className="flex items-center justify-center w-10 h-10 rounded-xl text-white font-bold text-sm animate-pulse"
-            style={{ background: "#0147FF" }}
+            style={{ background: "rgb(var(--marca-rgb))" }}
           >
             QS
           </div>

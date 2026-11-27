@@ -173,9 +173,9 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
               onDrop={(e) => { e.preventDefault(); if (arrastando) mover(arrastando, p.id); setArrastando(null); setAlvo(null); }}
               className={`relative rounded-xl border bg-white p-3 transition ${
                 erro ? "border-red-300 bg-red-50/40" : "border-gray-100"
-              } ${arrastando === p.id ? "opacity-40" : ""} ${alvo === p.id ? "ring-2 ring-[#0147FF]/40" : ""}`}
+              } ${arrastando === p.id ? "opacity-40" : ""} ${alvo === p.id ? "ring-2 ring-marca/40" : ""}`}
             >
-              {alvo === p.id && <span className="absolute -top-1 left-3 right-3 h-0.5 rounded bg-[#0147FF]" />}
+              {alvo === p.id && <span className="absolute -top-1 left-3 right-3 h-0.5 rounded bg-marca" />}
 
               <div className="flex items-start gap-2">
                 {/* Alça + subir/descer (teclado/celular, onde arrastar é ruim) */}
@@ -184,8 +184,8 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
                     onMouseDown={() => setPegando(p.id)}
                     onMouseUp={() => setPegando(null)}
                     className="cursor-grab select-none text-base leading-none px-1" title="Arraste para reordenar" aria-hidden>⠿</span>
-                  <button type="button" onClick={() => subir(p.id)} className="text-[10px] text-gray-400 hover:text-[#0147FF]" title="Subir" aria-label="Subir passo">▲</button>
-                  <button type="button" onClick={() => descer(p.id)} className="text-[10px] text-gray-400 hover:text-[#0147FF]" title="Descer" aria-label="Descer passo">▼</button>
+                  <button type="button" onClick={() => subir(p.id)} className="text-[10px] text-gray-400 hover:text-marca-tx" title="Subir" aria-label="Subir passo">▲</button>
+                  <button type="button" onClick={() => descer(p.id)} className="text-[10px] text-gray-400 hover:text-marca-tx" title="Descer" aria-label="Descer passo">▼</button>
                 </div>
 
                 <div className="flex-1 min-w-0 space-y-2">
@@ -209,7 +209,7 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
                         return (
                           <button key={k} type="button" onClick={() => escolherTipo(p.id, k)}
                             className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition ${
-                              on ? "bg-[#0147FF] text-white border-[#0147FF]" : "bg-white text-gray-600 border-gray-200 hover:border-[#0147FF]/50"
+                              on ? "bg-marca text-white border-marca" : "bg-white text-gray-600 border-gray-200 hover:border-marca/50"
                             }`}>
                             {kindDef(k).label}
                           </button>
@@ -218,7 +218,7 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
                       <select
                         value={MAIN_KINDS.includes(p.kind) ? "" : p.kind}
                         onChange={(e) => e.target.value && escolherTipo(p.id, e.target.value as StepKind)}
-                        className={`px-2 py-1 rounded-lg text-[11px] border bg-white ${MAIN_KINDS.includes(p.kind) ? "border-gray-200 text-gray-500" : "border-[#0147FF] text-[#0147FF] font-semibold"}`}
+                        className={`px-2 py-1 rounded-lg text-[11px] border bg-white ${MAIN_KINDS.includes(p.kind) ? "border-gray-200 text-gray-500" : "border-marca text-marca-tx font-semibold"}`}
                         aria-label="Outros canais"
                       >
                         <option value="">Outros…</option>
@@ -243,7 +243,7 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
                         <button key={per.key} type="button" title={per.hint}
                           onClick={() => atualizar(p.id, { hora: per.time })}
                           className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition ${
-                            on ? "bg-[#0147FF]/10 text-[#0147FF] border-[#0147FF]/40" : "bg-white text-gray-500 border-gray-200"
+                            on ? "bg-marca/10 text-marca-tx border-marca/40" : "bg-white text-gray-500 border-gray-200"
                           }`}>
                           {per.label}
                         </button>
@@ -288,7 +288,7 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
                       <span className="text-[11px] font-medium text-gray-600 mr-1">{def.textoLabel}</span>
                       {VARIAVEIS.map((v) => (
                         <button key={v.chave} type="button" onClick={() => inserirVariavel(p.id, v.chave)}
-                          className="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-gray-100 text-gray-600 hover:bg-[#0147FF]/10 hover:text-[#0147FF]"
+                          className="px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-gray-100 text-gray-600 hover:bg-marca/10 hover:text-marca-tx"
                           title={`Inserir ${v.label}`}>
                           {v.chave}
                         </button>
@@ -300,7 +300,7 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
                       onChange={(e) => atualizar(p.id, { texto: e.target.value })}
                       placeholder={def.textoPlaceholder}
                       rows={2}
-                      className={`w-full px-3 py-2 rounded-lg border text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-[#0147FF] resize-y bg-white ${
+                      className={`w-full px-3 py-2 rounded-lg border text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-marca resize-y bg-white ${
                         def.mensagem && !p.texto.trim() ? "border-amber-300" : "border-gray-200"
                       }`}
                     />
@@ -326,7 +326,7 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
           onDragOver={(e) => { e.preventDefault(); setAlvo("__fim"); }}
           onDragLeave={() => setAlvo(null)}
           onDrop={(e) => { e.preventDefault(); mover(arrastando, null); setArrastando(null); setAlvo(null); }}
-          className={`h-10 rounded-xl border-2 border-dashed text-[11px] flex items-center justify-center ${alvo === "__fim" ? "border-[#0147FF] text-[#0147FF]" : "border-gray-200 text-gray-400"}`}
+          className={`h-10 rounded-xl border-2 border-dashed text-[11px] flex items-center justify-center ${alvo === "__fim" ? "border-marca text-marca-tx" : "border-gray-200 text-gray-400"}`}
         >
           Soltar no fim
         </div>
@@ -334,11 +334,11 @@ export default function StepsEditor({ passos, onChange, enabledChannels, datasPo
 
       <div className="flex flex-wrap gap-2 pt-2">
         <button type="button" onClick={() => adicionar(true)} disabled={lista.length === 0}
-          className="px-3 py-2 rounded-lg text-xs font-medium text-[#0147FF] border border-dashed border-[#0147FF]/40 hover:bg-[#0147FF]/5 disabled:opacity-40">
+          className="px-3 py-2 rounded-lg text-xs font-medium text-marca-tx border border-dashed border-marca/40 hover:bg-marca/5 disabled:opacity-40">
           + Passo no mesmo dia
         </button>
         <button type="button" onClick={() => adicionar(false)}
-          className="px-3 py-2 rounded-lg text-xs font-medium text-white bg-[#0147FF] hover:bg-[#0139D6]">
+          className="px-3 py-2 rounded-lg text-xs font-medium text-white bg-marca hover:bg-[#0139D6]">
           + Passo no dia seguinte
         </button>
       </div>

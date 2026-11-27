@@ -5325,7 +5325,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 }}
                 disabled={savingLead || !newLead.full_name || !newLead.phone}
                 className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
-                style={{ background: "#0147FF" }}
+                style={{ background: "rgb(var(--marca-rgb))" }}
               >
                 {savingLead ? "Salvando..." : "Cadastrar"}
               </button>

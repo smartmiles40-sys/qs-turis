@@ -270,7 +270,7 @@ function MotivosSection() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-gray-900">Motivos de Perda</h2>
-        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#0147FF] hover:bg-[#0139D6] transition-colors">
+        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-marca hover:bg-[#0139D6] transition-colors">
           <PlusIcon /> Novo Motivo
         </button>
       </div>
@@ -301,7 +301,7 @@ function MotivosSection() {
           <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none">
             <span
               onClick={() => setShowArchived(!showArchived)}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${showArchived ? "bg-[#0147FF]" : "bg-gray-200"}`}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${showArchived ? "bg-marca" : "bg-gray-200"}`}
             >
               <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${showArchived ? "translate-x-4" : "translate-x-0.5"}`} />
             </span>
@@ -350,7 +350,7 @@ function MotivosSection() {
               {errorMsg && <p className="text-xs text-red-600">{errorMsg}</p>}
             </div>
             <div className="flex items-center gap-3 mt-5">
-              <button onClick={handleSave} disabled={saving || !form.label.trim()} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#0147FF" }}>
+              <button onClick={handleSave} disabled={saving || !form.label.trim()} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "rgb(var(--marca-rgb))" }}>
                 {saving ? "Salvando..." : editReason ? "Salvar" : "Criar"}
               </button>
               <button onClick={() => setShowModal(false)} className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">Cancelar</button>
@@ -499,7 +499,7 @@ function UsuariosSection() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-gray-900">Usuários e Permissões</h2>
-        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-[#0147FF] hover:bg-[#0139D6] transition-colors">
+        <button onClick={openAdd} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white rounded-lg bg-marca hover:bg-[#0139D6] transition-colors">
           <PlusIcon /> Adicionar Usuário
         </button>
       </div>
@@ -526,7 +526,7 @@ function UsuariosSection() {
                 <tr key={user.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50/40 transition-colors">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-[#0147FF] flex items-center justify-center text-white text-xs font-semibold shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-marca flex items-center justify-center text-white text-xs font-semibold shrink-0">
                         {user.name.split(" ").map((w) => w[0]).join("").slice(0, 2)}
                       </div>
                       <span className="text-sm text-gray-900 font-medium">
@@ -676,7 +676,7 @@ function UsuariosSection() {
               <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{saveError}</div>
             )}
             <div className="flex items-center gap-3 mt-5">
-              <button onClick={handleSave} disabled={saving || !form.name || !form.email} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#0147FF" }}>
+              <button onClick={handleSave} disabled={saving || !form.name || !form.email} className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50" style={{ background: "rgb(var(--marca-rgb))" }}>
                 {saving ? "Salvando..." : editUser ? "Salvar" : "Adicionar"}
               </button>
               <button onClick={() => setShowModal(false)} className="px-4 py-2.5 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">Cancelar</button>
@@ -766,7 +766,7 @@ function ProdutosSection() {
           onClick={addProduct}
           disabled={adding || !newProduct.trim()}
           className="px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50"
-          style={{ background: "#0147FF" }}
+          style={{ background: "rgb(var(--marca-rgb))" }}
         >
           {adding ? "Adicionando..." : "+ Adicionar"}
         </button>
@@ -780,7 +780,7 @@ function ProdutosSection() {
               <button
                 onClick={() => toggleProduct(p.id, p.is_active)}
                 className="relative w-10 h-5 rounded-full transition-colors"
-                style={{ background: p.is_active ? "#0147FF" : "#D1D5DB" }}
+                style={{ background: p.is_active ? "rgb(var(--marca-rgb))" : "#D1D5DB" }}
               >
                 <span
                   className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
@@ -869,12 +869,12 @@ function CanaisSection() {
           <div
             key={ch.type}
             className={`flex items-center justify-between p-4 bg-white border rounded-xl ${
-              ch.enabled ? "border-[#0147FF]/20" : "border-gray-100"
+              ch.enabled ? "border-marca/20" : "border-gray-100"
             }`}
           >
             <div className="flex items-center gap-4">
               <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                ch.enabled ? "bg-[#0147FF]/10 text-[#0147FF]" : "bg-gray-100 text-gray-400"
+                ch.enabled ? "bg-marca/10 text-marca-tx" : "bg-gray-100 text-gray-400"
               }`}>
                 <ChannelSvgIcon type={ch.type} />
               </div>
@@ -892,7 +892,7 @@ function CanaisSection() {
               <button
                 onClick={() => toggleChannel(ch.type)}
                 className="relative w-11 h-6 rounded-full transition-colors duration-200"
-                style={{ background: ch.enabled ? "#0147FF" : "#D1D5DB" }}
+                style={{ background: ch.enabled ? "rgb(var(--marca-rgb))" : "#D1D5DB" }}
               >
                 <span
                   className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200"
@@ -904,8 +904,8 @@ function CanaisSection() {
         ))}
       </div>
 
-      <div className="p-4 bg-[#0147FF]/5 border border-[#0147FF]/10 rounded-xl">
-        <p className="text-xs text-[#0147FF]">
+      <div className="p-4 bg-marca/5 border border-marca/10 rounded-xl">
+        <p className="text-xs text-marca-tx">
           <strong>Dica:</strong> Os canais habilitados aparecerão como opções na construção de cadências e no painel de atividades.
           Canais desabilitados não serão removidos de cadências existentes.
         </p>
@@ -1817,7 +1817,7 @@ function ModoAparelhoCard({ users }: { users: { id: string; name: string; role: 
                             disabled={saving}
                             className="px-2.5 py-1 font-semibold transition-colors disabled:opacity-60"
                             style={est === k
-                              ? { background: "#0147FF", color: "#fff" }
+                              ? { background: "rgb(var(--marca-rgb))", color: "#fff" }
                               : { background: "transparent", color: "#64748B" }}
                           >
                             {label}
@@ -1896,7 +1896,7 @@ function RespostasProntasCard() {
                 onChange={(e) => mudar(i, { texto: e.target.value })}
                 placeholder="Texto da resposta"
                 rows={2}
-                className="flex-1 min-w-0 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+                className="flex-1 min-w-0 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca"
               />
               <button
                 onClick={() => setLista((l) => (l ?? []).filter((_, k) => k !== i))}
@@ -1909,14 +1909,14 @@ function RespostasProntasCard() {
           <div className="flex items-center justify-between">
             <button
               onClick={() => setLista((l) => [...(l ?? []), { atalho: "", texto: "" }])}
-              className="text-sm font-semibold text-[#0147FF] hover:underline"
+              className="text-sm font-semibold text-marca-tx hover:underline"
             >
               + Adicionar resposta
             </button>
             <button
               onClick={() => void salvar()}
               disabled={saving}
-              className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 transition-colors"
+              className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 transition-colors"
             >
               {saving ? "Salvando..." : "Salvar respostas"}
             </button>
@@ -2023,7 +2023,7 @@ function AtendimentoSection() {
                 onChange={(e) => setSignMap({ ...signMap, [u.id]: e.target.value })}
                 placeholder={nomeCurto(u.name) || "nome"}
                 maxLength={40}
-                className="w-44 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+                className="w-44 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca"
               />
             </div>
           ))}
@@ -2107,13 +2107,13 @@ function ClassificacaoSection() {
                 value={r.match}
                 onChange={(e) => setRules(rules.map((x, j) => (j === i ? { ...x, match: e.target.value } : x)))}
                 placeholder="ex.: indicac|resgate"
-                className="flex-1 min-w-[160px] px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+                className="flex-1 min-w-[160px] px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca"
               />
               <span className="text-xs text-gray-400 shrink-0">→</span>
               <select
                 value={r.temperatura}
                 onChange={(e) => setRules(rules.map((x, j) => (j === i ? { ...x, temperatura: e.target.value } : x)))}
-                className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0147FF]/20 focus:border-[#0147FF]"
+                className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-marca/20 focus:border-marca"
               >
                 <option value="Quente">Quente</option>
                 <option value="Morno">Morno</option>
@@ -2133,14 +2133,14 @@ function ClassificacaoSection() {
           <div className="flex items-center justify-between pt-1">
             <button
               onClick={() => setRules([...rules, { match: "", temperatura: "Morno" }])}
-              className="inline-flex items-center gap-1.5 text-sm font-medium text-[#0147FF] hover:underline"
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-marca-tx hover:underline"
             >
               <PlusIcon /> Adicionar regra
             </button>
             <button
               onClick={save}
               disabled={saving}
-              className="px-4 py-2 rounded-lg bg-[#0147FF] text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 transition-colors"
+              className="px-4 py-2 rounded-lg bg-marca text-sm font-medium text-white hover:bg-[#0139D6] disabled:opacity-40 transition-colors"
             >
               {saving ? "Salvando..." : "Salvar regras"}
             </button>
@@ -2203,7 +2203,7 @@ export default function SettingsPage() {
                         onClick={() => setActiveSection(item.key)}
                         className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors ${
                           activeSection === item.key
-                            ? "bg-[#0147FF]/5 text-[#0147FF] font-medium"
+                            ? "bg-marca/5 text-marca-tx font-medium"
                             : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                         }`}
                       >

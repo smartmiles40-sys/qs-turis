@@ -531,7 +531,7 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
               {total > 0 && (
                 <span
                   className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold text-white"
-                  style={{ background: "#0147FF" }}
+                  style={{ background: "rgb(var(--marca-rgb))" }}
                 >
                   {total}
                 </span>
@@ -541,7 +541,7 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
               {total > 0 && (
                 <button
                   onClick={dismissAll}
-                  className="text-[11px] font-semibold text-[#0147FF] hover:underline"
+                  className="text-[11px] font-semibold text-marca-tx hover:underline"
                   title="Dispensar todas as notificações atuais"
                 >
                   Marcar todas como lidas
@@ -558,7 +558,7 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
                 </button>
               )}
               {loading && (
-                <span className="w-3.5 h-3.5 border-2 border-gray-200 border-t-[#0147FF] rounded-full animate-spin" />
+                <span className="w-3.5 h-3.5 border-2 border-gray-200 border-t-marca rounded-full animate-spin" />
               )}
             </div>
           </div>
@@ -751,7 +751,7 @@ export default function NotificationsPanel({ onGoToTasks, onOpenLead }: Notifica
           {/* Rodapé */}
           <button
             onClick={goToTasks}
-            className="shrink-0 border-t border-gray-100 px-4 py-2.5 text-[12px] font-semibold text-[#0147FF] hover:bg-gray-50 transition-colors text-center"
+            className="shrink-0 border-t border-gray-100 px-4 py-2.5 text-[12px] font-semibold text-marca-tx hover:bg-gray-50 transition-colors text-center"
           >
             Abrir painel de atividades
           </button>

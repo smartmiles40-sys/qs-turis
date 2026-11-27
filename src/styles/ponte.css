@@ -49,8 +49,8 @@ html:root {
 }
 
 html.dark:root {
-  --rel: #3F3F46;          /* branco por cima = 10:1 */
-  --rel-hover: #52525B;
+  --rel: #104146;          /* teal da marca; branco por cima = 11:1 */
+  --rel-hover: #325A5E;
   --rel-ink: var(--text);
   --rel-soft: var(--surface-2);
 }
@@ -58,8 +58,8 @@ html.dark:root {
 /* tokens.css define --bg / --warn-bg / --ok-bg com o MESMO nome que o app antigo;
    declarar "--warn-bg: var(--warn-bg)" acima seria ciclo. Estes valores
    repetem os do tokens.css de propósito. */
-html:root { --bg: #FAFAFA; --warn-bg: #FEFCE8; --ok-bg: #F0FDF4; }
-html.dark:root { --bg: #09090B; --warn-bg: rgba(251, 191, 36, .12); --ok-bg: rgba(74, 222, 128, .12); }
+html:root { --bg: #F4F7F5; --warn-bg: #FEFCE8; --ok-bg: #F0FDF4; }
+html.dark:root { --bg: #0A0F0D; --warn-bg: rgba(251, 191, 36, .12); --ok-bg: rgba(74, 222, 128, .12); }
 
 html .cores-rel,
 html .cores-central {
@@ -69,7 +69,7 @@ html .cores-central {
   --rel-soft: var(--surface-2);
 }
 html.dark .cores-rel,
-html.dark .cores-central { --rel: #3F3F46; --rel-hover: #52525B; }
+html.dark .cores-central { --rel: #104146; --rel-hover: #325A5E; }
 
 /* tipografia */
 body { font-family: var(--font-sans); font-size: var(--text-base); color: var(--text); background: var(--bg); }
@@ -77,9 +77,10 @@ body { font-family: var(--font-sans); font-size: var(--text-base); color: var(--
 /* Azul da marca nas telas antigas (botões com classe Tailwind): vira o
    primário neutro. Estilos inline (style={{background:"#0147FF"}}) não são
    alcançáveis por CSS — esses saem quando cada tela for redesenhada. */
-html .bg-\[\#0147FF\], html .bg-blue-600 { background-color: #18181B; }
-html.dark .bg-\[\#0147FF\], html.dark .bg-blue-600 { background-color: #3F3F46; }
-html .hover\:bg-\[\#0038CC\]:hover, html .hover\:bg-blue-700:hover { background-color: #27272A; }
+html .bg-\[\#0147FF\], html .bg-blue-600 { background-color: #09282B; }
+html.dark .bg-\[\#0147FF\], html.dark .bg-blue-600 { background-color: #104146; }
+html .hover\:bg-\[\#0038CC\]:hover, html .hover\:bg-blue-700:hover { background-color: #104146; }
+html.dark .hover\:bg-\[\#0038CC\]:hover, html.dark .hover\:bg-blue-700:hover { background-color: #325A5E; }
 html .text-\[\#0147FF\] { color: var(--text); }
 html .border-\[\#0147FF\] { border-color: var(--text); }
 

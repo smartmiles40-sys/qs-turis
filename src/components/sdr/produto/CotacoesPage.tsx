@@ -289,7 +289,7 @@ function ModalEtapa({ p, onCancelar, onConfirmar }: {
             <div className="mt-1 grid grid-cols-3 gap-1.5">
               {CANAIS.map((c) => (
                 <button key={c.v} type="button" onClick={() => setCanal(c.v)} className="rounded-lg border py-1.5 text-[12px] font-medium"
-                  style={canal === c.v ? { background: "#0147FF", borderColor: "#0147FF", color: "#fff" } : sty}>{c.rotulo}</button>
+                  style={canal === c.v ? { background: "rgb(var(--marca-rgb))", borderColor: "rgb(var(--marca-rgb))", color: "#fff" } : sty}>{c.rotulo}</button>
               ))}
             </div>
           </div>
@@ -316,7 +316,7 @@ function ModalEtapa({ p, onCancelar, onConfirmar }: {
         {erro && <p className="text-xs" style={{ color: "#DC2626" }}>{erro}</p>}
         <div className="flex gap-2 pt-1">
           <button type="button" onClick={onCancelar} disabled={salvando} className="flex-1 rounded-lg border py-2 text-sm font-medium" style={sty}>Cancelar</button>
-          <button type="button" onClick={() => void confirmar()} disabled={salvando} className="flex-1 rounded-lg py-2 text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#0147FF" }}>
+          <button type="button" onClick={() => void confirmar()} disabled={salvando} className="flex-1 rounded-lg py-2 text-sm font-semibold text-white disabled:opacity-50" style={{ background: "rgb(var(--marca-rgb))" }}>
             {salvando ? "Salvando…" : "Confirmar"}
           </button>
         </div>

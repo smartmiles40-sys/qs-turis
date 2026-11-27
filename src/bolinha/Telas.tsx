@@ -39,7 +39,7 @@ function Linha({ onClick, children, titulo }: { onClick?: () => void; children: 
   const cls = "w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 bg-white mb-1.5 block";
   if (!onClick) return <div className={cls}>{children}</div>;
   return (
-    <button type="button" onClick={onClick} title={titulo ?? "Abrir no QS"} className={`${cls} hover:border-[#0147FF] hover:bg-[#F4F7FF] transition-colors`}>
+    <button type="button" onClick={onClick} title={titulo ?? "Abrir no QS"} className={`${cls} hover:border-marca hover:bg-[#F4F7FF] transition-colors`}>
       {children}
     </button>
   );
@@ -109,7 +109,7 @@ function ItemAviso({ a, expandido, onExpandir }: { a: Aviso; expandido: boolean;
         </div>
         <div className="flex flex-wrap gap-1.5 mt-2 pl-4">
           {a.link && (
-            <button type="button" onClick={() => ctx.abrir(a)} className="px-2.5 py-1 rounded-lg text-[12px] font-semibold bg-[#0147FF] text-white hover:opacity-90">
+            <button type="button" onClick={() => ctx.abrir(a)} className="px-2.5 py-1 rounded-lg text-[12px] font-semibold bg-marca text-white hover:opacity-90">
               Abrir no QS
             </button>
           )}
@@ -196,15 +196,15 @@ function SolRapida({ id }: { id: string }) {
         <div className="mt-2">
           <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={2} maxLength={2000}
             placeholder="Escreva a resposta…" aria-label="Resposta"
-            className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[13px] text-slate-800 focus:outline-none focus:border-[#0147FF]" />
+            className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[13px] text-slate-800 focus:outline-none focus:border-marca" />
           <div className="flex gap-1.5 mt-1.5">
             <button type="button" disabled={enviando} onClick={() => void fazer("comentar")}
-              className="px-3 py-1.5 rounded-lg text-[12px] font-semibold bg-[#0147FF] text-white disabled:opacity-50">
+              className="px-3 py-1.5 rounded-lg text-[12px] font-semibold bg-marca text-white disabled:opacity-50">
               {enviando ? "Enviando…" : "Responder"}
             </button>
             {podeAssumir && (
               <button type="button" disabled={enviando} onClick={() => void fazer("aceitar")}
-                className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-[#0147FF] text-[#0147FF] bg-white disabled:opacity-50">
+                className="px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-marca text-marca-tx bg-white disabled:opacity-50">
                 Assumir
               </button>
             )}
@@ -229,7 +229,7 @@ export function TelaNova({ user, onFechar }: { user: SdrUser; onFechar: () => vo
         <p className="text-[15px] font-bold text-slate-900">Pedido enviado ✓</p>
         <p className="text-[13px] text-slate-600 mt-1">Ele entrou na fila do outro setor. Você recebe um aviso aqui quando responderem.</p>
         <div className="flex justify-center gap-2 mt-4">
-          <button type="button" onClick={() => abrirNoQS(hash)} className="px-3 py-2 rounded-lg text-[13px] font-semibold bg-[#0147FF] text-white">Ver no QS</button>
+          <button type="button" onClick={() => abrirNoQS(hash)} className="px-3 py-2 rounded-lg text-[13px] font-semibold bg-marca text-white">Ver no QS</button>
           <button type="button" onClick={() => setCriada(null)} className="px-3 py-2 rounded-lg text-[13px] font-semibold border border-slate-300 text-slate-700">Fazer outro</button>
         </div>
       </div>
@@ -279,7 +279,7 @@ export function TelaBuscar({ user }: { user: SdrUser }) {
     <div>
       <input autoFocus value={termo} onChange={(e) => setTermo(e.target.value)} type="search"
         placeholder="Nome, telefone ou CPF…" aria-label="Buscar cliente ou lead"
-        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-[14px] text-slate-800 focus:outline-none focus:border-[#0147FF] mb-3" />
+        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-[14px] text-slate-800 focus:outline-none focus:border-marca mb-3" />
       {buscando && <Vazio>Buscando…</Vazio>}
       {erro && <Erro>{erro}</Erro>}
       {termo.trim().length < 2 && <Vazio>Digite pelo menos 2 letras (ou os números do telefone/CPF).</Vazio>}
@@ -381,7 +381,7 @@ export function TelaHoje({ user }: { user: SdrUser }) {
             ))}
             {h.esteira.length > 8 && (
               <Linha onClick={() => abrirNoQS(rotas.esteira())}>
-                <span className="text-[12.5px] font-semibold text-[#0147FF]">Ver as {h.esteira.length} na Esteira</span>
+                <span className="text-[12.5px] font-semibold text-marca-tx">Ver as {h.esteira.length} na Esteira</span>
               </Linha>
             )}
           </>}
@@ -425,20 +425,20 @@ export function TelaPerguntar({ conversa, setConversa }: { conversa: MensagemCha
             <div className="flex flex-col gap-1.5">
               {SUGESTOES.map((s) => (
                 <button key={s} type="button" onClick={() => void enviar(s)}
-                  className="text-left px-3 py-2 rounded-xl border border-slate-200 bg-white text-[13px] text-slate-700 hover:border-[#0147FF]">{s}</button>
+                  className="text-left px-3 py-2 rounded-xl border border-slate-200 bg-white text-[13px] text-slate-700 hover:border-marca">{s}</button>
               ))}
             </div>
           </div>
         )}
         {conversa.map((m, i) => (
           <div key={i} className={`flex mb-2 ${m.de === "eu" ? "justify-end" : "justify-start"}`}>
-            <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[13px] leading-snug whitespace-pre-wrap ${m.de === "eu" ? "bg-[#0147FF] text-white rounded-br-md" : "bg-white border border-slate-200 text-slate-800 rounded-bl-md"}`}>
+            <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[13px] leading-snug whitespace-pre-wrap ${m.de === "eu" ? "bg-marca text-white rounded-br-md" : "bg-white border border-slate-200 text-slate-800 rounded-bl-md"}`}>
               {m.texto}
               {m.links && m.links.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1.5">
                   {m.links.map((l, j) => (
                     <button key={j} type="button" onClick={() => abrirNoQS(l.hash)}
-                      className="px-2 py-0.5 rounded-full text-[11.5px] font-semibold bg-[#EEF4FF] text-[#0147FF] hover:bg-[#dfe9ff]">
+                      className="px-2 py-0.5 rounded-full text-[11.5px] font-semibold bg-[#EEF4FF] text-marca-tx hover:bg-[#dfe9ff]">
                       {l.rotulo} ↗
                     </button>
                   ))}
@@ -453,8 +453,8 @@ export function TelaPerguntar({ conversa, setConversa }: { conversa: MensagemCha
       <form className="flex gap-1.5 pt-2" onSubmit={(e) => { e.preventDefault(); void enviar(texto); }}>
         <input value={texto} onChange={(e) => setTexto(e.target.value)} maxLength={500} autoFocus
           placeholder="Escreva sua pergunta…" aria-label="Pergunta"
-          className="flex-1 min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-[13.5px] text-slate-800 focus:outline-none focus:border-[#0147FF]" />
-        <button type="submit" disabled={pensando || !texto.trim()} className="px-3 rounded-xl text-[13px] font-semibold bg-[#0147FF] text-white disabled:opacity-50">
+          className="flex-1 min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-[13.5px] text-slate-800 focus:outline-none focus:border-marca" />
+        <button type="submit" disabled={pensando || !texto.trim()} className="px-3 rounded-xl text-[13px] font-semibold bg-marca text-white disabled:opacity-50">
           Enviar
         </button>
       </form>
