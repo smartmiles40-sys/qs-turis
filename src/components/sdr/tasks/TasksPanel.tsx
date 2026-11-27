@@ -2465,13 +2465,17 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
     let base = tasks.filter((t) => tarefaVisivelNaFila(t, leadsMap.get(t.lead_id)?.status));
     if (currentUser && !canSeeAllData(currentUser)) {
       base = base.filter((t) => t.owner_id === currentUser.id);
+    } else if (ownerFilter) {
+      // Gestor filtrou uma SDR (Bruno, 27/11): TODOS os números da página passam
+      // a ser só dela — atrasadas, em FUP, canais, temperatura, 1º contato.
+      base = base.filter((t) => t.owner_id === ownerFilter);
     }
     base = base.filter((t) => new Date(t.scheduled_at).getTime() <= endTodayMs);
     // A MESMA regra da fila. Sem esta linha o contador cobra o que a lista não
     // mostra — foi a reclamação do time em 02/09 sobre as "atrasadas do
     // WhatsApp".
     return base.filter((t) => atividadeVisivel(t, leadsMap.get(t.lead_id)));
-  }, [tasks, leadsMap, currentUser, endTodayMs, atividadeVisivel]);
+  }, [tasks, leadsMap, currentUser, endTodayMs, atividadeVisivel, ownerFilter]);
   // Partição por dia ÚTIL (2026-07-24): "atrasada" só quando venceu em dia útil
   // anterior — no fim de semana a fila de sexta continua contando como "de hoje".
   const overdueTasks = counterBase.filter((t) => workdaysBetween(workHours, new Date(t.scheduled_at), new Date()) >= 1);
@@ -2623,6 +2627,18 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
   const greetHour = now.getHours();
   const greetWord = greetHour < 12 ? "Bom dia" : greetHour < 18 ? "Boa tarde" : "Boa noite";
   const firstName = currentUser?.name?.split(" ")[0] ?? "";
+  // Filtro por SDR no topo (gestor/admin, 27/11). Lista: SDRs ativos primeiro,
+  // depois quem mais tiver atividade na fila (closer cobrando desfecho etc.).
+  const podeFiltrarSdr = !!currentUser && canSeeAllData(currentUser);
+  const ownerFiltrado = ownerFilter ? qsUsers.find((u) => u.id === ownerFilter) ?? null : null;
+  const nomeFiltrado = ownerFiltrado?.name?.split(" ")[0] ?? (ownerFilter ? "responsável" : "");
+  const opcoesDono = (() => {
+    const comFila = new Set(tasks.map((t) => t.owner_id).filter(Boolean) as string[]);
+    const ativos = qsUsers.filter((u) => u.is_active !== false);
+    const sdrs = ativos.filter((u) => u.role === "sdr");
+    const outros = ativos.filter((u) => u.role !== "sdr" && (comFila.has(u.id) || u.id === ownerFilter));
+    return { sdrs, outros };
+  })();
   const todayLabel = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "short" });
 
   // Celebration effect when daily goal is hit
@@ -4270,8 +4286,32 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 {greetWord}{firstName ? `, ${firstName}` : ""} · <span className="capitalize">{todayLabel}</span>
                 {" · "}<span className="qsx-hl">{TOTAL_SCHEDULED} atividade{TOTAL_SCHEDULED !== 1 ? "s" : ""}</span> na fila
               </div>
-              <h1 className="qsx-h1">Fila de hoje</h1>
+              <h1 className="qsx-h1">{ownerFilter ? `Fila de hoje · ${nomeFiltrado}` : "Fila de hoje"}</h1>
             </div>
+            {podeFiltrarSdr && (
+              <div className="flex items-center gap-2">
+                <label htmlFor="qsx-ver-sdr" className="text-[13px] font-semibold" style={{ color: "var(--muted)" }}>Ver</label>
+                <select
+                  id="qsx-ver-sdr"
+                  value={ownerFilter || ""}
+                  onChange={(e) => { setOwnerFilter(e.target.value || null); setActiveTaskId(null); }}
+                  className={`qsx-fchip${ownerFilter ? " on" : ""}`}
+                  title="Escolha um SDR: a fila, as metas, as atrasadas e todos os contadores passam a ser só dele"
+                >
+                  <option value="">Time todo</option>
+                  {opcoesDono.sdrs.length > 0 && (
+                    <optgroup label="SDRs">
+                      {opcoesDono.sdrs.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </optgroup>
+                  )}
+                  {opcoesDono.outros.length > 0 && (
+                    <optgroup label="Outros com atividade na fila">
+                      {opcoesDono.outros.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </optgroup>
+                  )}
+                </select>
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               <button onClick={() => setShowDialer(true)} className="qsx-btn">
                 <span className="flex" style={{ color: "var(--ok)" }}><IconPhoneCall size={15} /></span>
@@ -4326,7 +4366,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             </div>
             {/* SLA do 1º atendimento (0400, Bruno 17/11): quadradinho; o clique abre o
                 tempo de resposta de cada lead. Substitui o "Aéreo hoje". */}
-            <SlaFilaHoje onOpenLead={onOpenLead} />
+            <SlaFilaHoje onOpenLead={onOpenLead} sdrId={podeFiltrarSdr ? ownerFilter : null} />
             {/* Atividades feitas num dia passado (padrão: ontem) */}
             <div
               className="qsx-meta"
@@ -4355,7 +4395,7 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               WhatsApp. Admin vê os SDRs; SDR vê o próprio. */}
           <div className="qsx-cm">
             <span className="qsx-cm-title">
-              {isTeamView ? "Time hoje" : "Você hoje"}
+              {isTeamView ? "Time hoje" : ownerFilter && podeFiltrarSdr ? `${nomeFiltrado} hoje` : "Você hoje"}
             </span>
             <div className="qsx-cm-list">
               {contactRows.map((r) => (
@@ -4412,7 +4452,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
                 {overdueAntigasCount > 0 && <span style={{ fontWeight: 400 }}>&nbsp;({overdueAntigasCount} antigas)</span>}
               </span>
               <span className="qsx-chip">{fupTasks.length} em FUP</span>
-              <span className="qsx-chip" style={{ color: "var(--ok)" }} title="Atividades que você concluiu hoje">{doneTodayMine} feitas hoje</span>
+              {ownerFilter && podeFiltrarSdr ? (
+                <span className="qsx-chip" style={{ color: "var(--ok)" }} title={`Atividades que ${nomeFiltrado} concluiu hoje`}>{DAILY_DONE} feitas hoje</span>
+              ) : (
+                <span className="qsx-chip" style={{ color: "var(--ok)" }} title="Atividades que você concluiu hoje">{doneTodayMine} feitas hoje</span>
+              )}
             </div>
           </div>
 
@@ -4440,11 +4484,11 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
             <button
               type="button"
               onClick={() => setFiltrosNoCelular((v) => !v)}
-              className={`qsx-fchip qsx-filtros-btn${(statusFilter || channelFilter || priorityFilter || scoreFilter || periodFilter || ownerFilter) ? " on" : ""}`}
+              className={`qsx-fchip qsx-filtros-btn${(statusFilter || channelFilter || priorityFilter || scoreFilter || periodFilter) ? " on" : ""}`}
               aria-expanded={filtrosNoCelular}
             >
               {filtrosNoCelular ? "Fechar filtros" : "Filtros"}
-              {(statusFilter || channelFilter || priorityFilter || scoreFilter || periodFilter || ownerFilter) ? " · ativos" : ""}
+              {(statusFilter || channelFilter || priorityFilter || scoreFilter || periodFilter) ? " · ativos" : ""}
             </button>
             {/* Discador: liga pra N leads de uma vez (liga/desliga em Configurações). */}
             {discadorDisponivel && !discadorAberto && (
@@ -4525,21 +4569,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
               <option value="tarde">Tarde</option>
             </select>
 
-            <select
-              value={ownerFilter || ""}
-              onChange={(e) => setOwnerFilter(e.target.value || null)}
-              className={`qsx-fchip${ownerFilter ? " on" : ""}`}
-              aria-label="Filtrar por responsável"
-            >
-              <option value="">Responsável</option>
-              {qsUsers.map((u) => (
-                <option key={u.id} value={u.id}>{u.name}</option>
-              ))}
-            </select>
-
-            {(statusFilter || channelFilter || priorityFilter || scoreFilter || periodFilter || ownerFilter) && (
+            {(statusFilter || channelFilter || priorityFilter || scoreFilter || periodFilter) && (
               <button
-                onClick={() => { setStatusFilter(null); setChannelFilter(null); setPriorityFilter(null); setScoreFilter(null); setPeriodFilter(null); setOwnerFilter(null); }}
+                onClick={() => { setStatusFilter(null); setChannelFilter(null); setPriorityFilter(null); setScoreFilter(null); setPeriodFilter(null); }}
                 className="qsx-limpar text-[13px] font-semibold hover:underline"
                 style={{ color: "var(--muted)" }}
               >

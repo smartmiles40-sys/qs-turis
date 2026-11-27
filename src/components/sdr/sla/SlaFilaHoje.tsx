@@ -5,7 +5,7 @@
 // o time) e, ao clicar, abre o tempo de resposta de cada lead que entrou
 // (SlaDetalhe). Atualiza sozinho a cada 60 s e ao voltar pra aba.
 // -----------------------------------------------------------------------------
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import SlaDetalhe from "./SlaDetalhe";
 import { fetchPainelSla, minutosTxt, tomSla, type PainelSla, type TomSla } from "@/lib/qs/sla";
 
@@ -20,8 +20,24 @@ const CSS = `
 @media (prefers-reduced-motion:reduce){.sla-pulse{animation:none}}
 `;
 
-export default function SlaFilaHoje({ onOpenLead }: { onOpenLead: (leadId: string) => void }) {
-  const [p, setP] = useState<PainelSla | null>(null);
+export default function SlaFilaHoje({ onOpenLead, sdrId = null }: { onOpenLead: (leadId: string) => void; sdrId?: string | null }) {
+  const [bruto, setP] = useState<PainelSla | null>(null);
+  // Gestor filtrou uma SDR na Fila (27/11): o quadradinho e o detalhe passam a
+  // ser só dela. O recorte é aqui, em cima da mesma resposta do banco.
+  const p = useMemo<PainelSla | null>(() => {
+    if (!bruto || !sdrId) return bruto;
+    const linha = bruto.sdrs.find((s) => s.sdr_id === sdrId);
+    const vazio = { recebidos: 0, atendidos: 0, na_meta: 0, fora_meta: 0, aguardando: 0, mediana_min: null, marcadas: 0 };
+    return {
+      ...bruto,
+      gestor: false,
+      time: linha ? { hoje: linha.hoje, semana: linha.semana, mes: linha.mes, faixa: linha.faixa } : { hoje: vazio, semana: vazio, mes: vazio, faixa: vazio },
+      sdrs: linha ? [linha] : [],
+      aguardando: bruto.aguardando.filter((a) => a.sdr_id === sdrId),
+      marcadas: bruto.marcadas.filter((a) => a.sdr_id === sdrId),
+      atendidos: bruto.atendidos.filter((a) => a.sdr_id === sdrId),
+    };
+  }, [bruto, sdrId]);
   const [erro, setErro] = useState(false);
   const [aberto, setAberto] = useState(false);
 
