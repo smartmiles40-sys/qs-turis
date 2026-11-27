@@ -1779,7 +1779,7 @@ export default function LeadDetailPage({ leadId, onBack, papel: papelDaProp }: L
           </button>
           {(lead.instagram || convIg) && (
             <button type="button" className="fl-btn" onClick={() => setShowInstagram(true)}
-              title={convIg ? "Conversa do Instagram da agência com este lead" : "Ainda sem DM — abre o perfil e explica como a conversa chega"}
+              title={convIg ? "Conversa do Instagram com este lead" : "Ainda sem DM — abre o perfil e explica como a conversa chega"}
               style={{ color: "#C13584", borderColor: "#E9B3D3", position: "relative" }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.5" cy="6.5" r="1" fill="currentColor" /></svg>
               Instagram

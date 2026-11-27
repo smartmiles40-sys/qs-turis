@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, Component, Suspense, type ReactNode } from
 import { useQsAuth, canAccessNav, telaInicial, ORDEM_EXECUCAO } from "@/contexts/QsAuthContext";
 import AppShell, { type ShellGroup, type ShellItem } from "@/components/ui/AppShell";
 import { Icon } from "@/components/ui/icons";
+import MeuInstagram, { EVENTO_ABRIR_MEU_IG } from "@/components/sdr/instagram/MeuInstagram";
 import { Segmented } from "@/components/ui";
 import { lazyPagina } from "@/lib/qs/lazyPagina";
 
@@ -475,6 +476,7 @@ export default function SdrLayout() {
       }
       userActions={[
         { id: "telefone", label: "Configurar telefone", icon: Icon.telefone, onClick: reopenTelefoneOnboarding },
+        { id: "instagram", label: "Meu Instagram", icon: Icon.chat, onClick: () => window.dispatchEvent(new CustomEvent(EVENTO_ABRIR_MEU_IG)) },
       ]}
       comercial={comercialDividido(currentUser, "sdr")}
       after={activeNav !== "whatsapp" ? (
@@ -493,6 +495,7 @@ export default function SdrLayout() {
 
       {/* Onboarding do telefone (BravoTech) — só na 1ª vez, por máquina */}
       <TelefoneOnboarding user={currentUser ? { id: currentUser.id, name: currentUser.name } : null} />
+      <MeuInstagram userId={currentUser?.id ?? null} />
 
       {/* Retrospectiva do dia — modal de boas-vindas, 1x por dia por usuário */}
       <RetrospectivaModal user={currentUser ? { id: currentUser.id, name: currentUser.name } : null} />

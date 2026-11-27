@@ -56,8 +56,11 @@ function restanteJanela(ultimaEntrada: string | null): string | null {
   return h > 0 ? `${h} h ${m} min` : `${m} min`;
 }
 
-export default function InstagramDoLead({ leadId, instagram, nome, aberto, onFechar, onMudou }: {
-  leadId: string;
+export default function InstagramDoLead({ leadId, conversaId = null, instagram, nome, aberto, onFechar, onMudou }: {
+  /** Conversa do lead (a mais recente)… */
+  leadId: string | null;
+  /** …ou uma conversa específica (contato novo, ainda sem lead). */
+  conversaId?: string | null;
   /** @ cadastrado no lead (sem o @). */
   instagram: string | null;
   nome: string;
@@ -76,7 +79,12 @@ export default function InstagramDoLead({ leadId, instagram, nome, aberto, onFec
   const marcouLida = useRef(false);
 
   const carregar = useCallback(async () => {
-    const c = await conversaIgDoLead(leadId);
+    let c: ConversaIg | null = null;
+    if (conversaId) {
+      const { data } = await supabase.from("mkt_ig_conversas" as never)
+        .select("id,username,nome,ultima_entrada_em,ultima_mensagem_em,nao_lidas").eq("id", conversaId).limit(1);
+      c = ((data ?? []) as unknown as ConversaIg[])[0] ?? null;
+    } else if (leadId) c = await conversaIgDoLead(leadId);
     setConv(c);
     if (c) {
       const { data } = await supabase
@@ -88,12 +96,12 @@ export default function InstagramDoLead({ leadId, instagram, nome, aberto, onFec
       setMsgs((data ?? []) as unknown as MsgIg[]);
       if (c.nao_lidas > 0 && !marcouLida.current) {
         marcouLida.current = true;
-        void fetch("/api/sdr-instagram", { method: "POST", headers: await authHeaders(), body: JSON.stringify({ leadId, acao: "lida" }) })
+        void fetch("/api/sdr-instagram", { method: "POST", headers: await authHeaders(), body: JSON.stringify({ conversaId: c.id, acao: "lida" }) })
           .then(() => onMudou?.()).catch(() => null);
       }
     } else setMsgs([]);
     setCarregando(false);
-  }, [leadId, onMudou]);
+  }, [leadId, conversaId, onMudou]);
 
   useEffect(() => {
     if (!aberto) return;
@@ -120,10 +128,10 @@ export default function InstagramDoLead({ leadId, instagram, nome, aberto, onFec
 
   async function enviar() {
     const t = texto.trim();
-    if (!t || enviando) return;
+    if (!t || enviando || !conv) return;
     setEnviando(true); setErro(null);
     try {
-      const res = await fetch("/api/sdr-instagram", { method: "POST", headers: await authHeaders(), body: JSON.stringify({ leadId, texto: t }) });
+      const res = await fetch("/api/sdr-instagram", { method: "POST", headers: await authHeaders(), body: JSON.stringify({ conversaId: conv.id, texto: t }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) { setErro(j?.error || "Não consegui enviar."); return; }
       setTexto("");
@@ -148,7 +156,7 @@ export default function InstagramDoLead({ leadId, instagram, nome, aberto, onFec
             <div className="truncate text-[15px] font-semibold">{nome}</div>
             <div className="truncate text-[12.5px]" style={{ color: "var(--ink3)" }}>
               {perfil ? <a href={urlDoInstagram(perfil)} target="_blank" rel="noopener noreferrer" style={{ color: "#DB2777", fontWeight: 600 }}>@{perfil}</a> : "sem @ cadastrado"}
-              {" · Instagram da agência"}
+
             </div>
           </div>
           <button type="button" onClick={onFechar} className="rounded-lg px-2 py-1 text-[20px] leading-none" aria-label="Fechar" style={{ color: "var(--ink3)" }}>×</button>
@@ -158,7 +166,7 @@ export default function InstagramDoLead({ leadId, instagram, nome, aberto, onFec
           {carregando && <div className="py-10 text-center text-sm" style={{ color: "var(--ink3)" }}>Carregando…</div>}
           {!carregando && !conv && (
             <div className="py-10 text-center text-sm" style={{ color: "var(--ink3)" }}>
-              {perfil ? <>@{perfil} ainda não mandou DM pro Instagram da agência.</> : <>Cadastre o @ do lead pra conversa do Instagram aparecer aqui.</>}
+              {perfil ? <>@{perfil} ainda não mandou DM pro seu Instagram do trabalho.</> : <>Cadastre o @ do lead pra conversa do Instagram aparecer aqui.</>}
               <div className="mt-2 text-[12.5px]">Pelo Instagram não dá pra puxar conversa pelo QS: mande a 1ª mensagem pelo app. Quando o cliente responder, a conversa cai aqui.</div>
             </div>
           )}

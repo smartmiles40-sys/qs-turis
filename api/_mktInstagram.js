@@ -323,6 +323,8 @@ async function tratarMensagem(conta, m, r) {
   await quieto(rest(`mkt_ig_conversas?id=eq.${conv.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { ultima_entrada_em: agora, ultima_mensagem_em: agora, ultima_previa: (entrada.previa || `[${tipo}]`).slice(0, 140), nao_lidas: Number(conv.nao_lidas ?? 0) + 1 } }));
   await quieto(rest(`mkt_ig_contas?id=eq.${conta.id}`, { method: 'PATCH', prefer: 'return=minimal', body: { ultima_entrada_em: agora } }));
   conv.ultima_entrada_em = agora;
+  // Conta de SDR (0431): só grava — quem responde é ela, nada de robô do Marketing.
+  if (conta.dono_id) return;
   // 1º os fluxos (0343): clique, resposta esperada, gatilhos. Nenhum pegou → regras simples.
   const motor = await import('./_mktMotor.js');
   const doFluxo = await motor.receberInstagram({ conta, conversa: conv, nova: conv.nova, entrada }).catch((e) => ({ consumida: false, motivo: e?.message }));
@@ -343,14 +345,19 @@ async function tratarMensagem(conta, m, r) {
 export async function processarWebhookInstagram(payload) {
   const r = { mensagens: 0, comentarios: 0, respostas: 0, erros: [], desligado: false };
   if (payload?.object !== 'instagram') return r;
-  if (!(await instagramLigado())) { r.desligado = true; return r; }
+  // A chave do Marketing (mkt_auto_config.instagram.ligado) vale só pra conta da
+  // AGÊNCIA. Conta de SDR (dono_id, 0431) recebe sempre que estiver conectada.
+  const ligado = await instagramLigado();
+  if (!ligado) r.desligado = true;
   for (const e of payload.entry ?? []) {
-    const conta = (await rest(`mkt_ig_contas?select=id,ig_user_id,username,status&ig_user_id=eq.${enc(String(e.id ?? ''))}&limit=1`).catch(() => null))?.[0];
+    const conta = (await rest(`mkt_ig_contas?select=id,ig_user_id,username,status,dono_id&ig_user_id=eq.${enc(String(e.id ?? ''))}&limit=1`).catch(() => null))?.[0];
     if (!conta || conta.status !== 'conectada') continue;
+    if (!conta.dono_id && !ligado) continue;
     for (const m of e.messaging ?? []) {
       try { await tratarMensagem(conta, m, r); } catch (err) { r.erros.push(err?.message || String(err)); }
     }
     for (const c of e.changes ?? []) {
+      if (conta.dono_id) continue; // comentários: só a conta da agência tem automação
       if (c.field !== 'comments' && c.field !== 'live_comments') continue;
       try { if (c.value) await tratarComentario(conta, c.value, r); } catch (err) { r.erros.push(err?.message || String(err)); }
     }
