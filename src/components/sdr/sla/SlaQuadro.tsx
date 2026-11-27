@@ -7,7 +7,7 @@
 //   NÃO tem mais filtro próprio: lê o intervalo do filtro da página (de/ate).
 // SDR vê só o próprio cartão. Usa as variáveis de cor do Desempenho (.dsp).
 // -----------------------------------------------------------------------------
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import SlaDetalhe from "./SlaDetalhe";
 import {
   farolSla, fetchPainelSla, minutosTxt, pctNaMeta, pctSla, tomSla,
@@ -38,14 +38,30 @@ function CartaoFarol({ nome, b, meta, destaque, onAbrir }: { nome: string; b: Bl
   );
 }
 
-export default function SlaQuadro({ de, ate, rotPer, onOpenLead }: {
+export default function SlaQuadro({ de, ate, rotPer, onOpenLead, sdrId = null }: {
   /** Intervalo do filtro da página (YYYY-MM-DD, inclusivo). */
   de: string; ate: string;
   /** "de hoje", "da semana", "do mês", "de 01/11 a 15/11". */
   rotPer: string;
   onOpenLead?: (leadId: string) => void;
+  /** Gestor escolheu uma SDR no filtro da página (27/11): o quadro vira só dela. */
+  sdrId?: string | null;
 }) {
-  const [p, setP] = useState<PainelSla | null>(null);
+  const [bruto, setP] = useState<PainelSla | null>(null);
+  const p = useMemo<PainelSla | null>(() => {
+    if (!bruto || !sdrId) return bruto;
+    const linha = bruto.sdrs.find((s) => s.sdr_id === sdrId);
+    const vazio = { recebidos: 0, atendidos: 0, na_meta: 0, fora_meta: 0, aguardando: 0, mediana_min: null, marcadas: 0 };
+    return {
+      ...bruto,
+      gestor: false,
+      time: linha ? { hoje: linha.hoje, semana: linha.semana, mes: linha.mes, faixa: linha.faixa } : { hoje: vazio, semana: vazio, mes: vazio, faixa: vazio },
+      sdrs: linha ? [linha] : [],
+      aguardando: bruto.aguardando.filter((a) => a.sdr_id === sdrId),
+      marcadas: bruto.marcadas.filter((a) => a.sdr_id === sdrId),
+      atendidos: bruto.atendidos.filter((a) => a.sdr_id === sdrId),
+    };
+  }, [bruto, sdrId]);
   const [erro, setErro] = useState<string | null>(null);
   const [abrir, setAbrir] = useState<{ sdr: string } | null>(null);
 

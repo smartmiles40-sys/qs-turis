@@ -33,7 +33,11 @@ const COR_PRODUTO: Record<string, string> = { expedicao: "var(--p1)", pacote: "v
 type Pagina = "principal" | "conversao" | "operacao";
 const n = (v: number) => v.toLocaleString("pt-BR");
 
-export default function DesempenhoSdr({ onIrParaPainel, onOpenLead }: { onIrParaPainel?: () => void; onOpenLead?: (leadId: string) => void }) {
+export default function DesempenhoSdr({ onIrParaPainel, onOpenLead, sdrSel: sdrSelProp, onSdrSel }: {
+  onIrParaPainel?: () => void; onOpenLead?: (leadId: string) => void;
+  /** SDR em foco, compartilhado com a Fila de hoje (SdrLayout). */
+  sdrSel?: string; onSdrSel?: (id: string) => void;
+}) {
   const [pagina, setPagina] = useState<Pagina>("principal");
   // Filtro ÚNICO da página (18/11): funil, KPIs e a espera do lead leem o mesmo intervalo.
   const [periodo, setPeriodo] = useState<PeriodoDesempenho>("mes");
@@ -46,7 +50,9 @@ export default function DesempenhoSdr({ onIrParaPainel, onOpenLead }: { onIrPara
     if (id === "personalizado") setRascunho(periodo === "personalizado" ? faixa : intervalo);
     setPeriodo(id);
   };
-  const [sdrSel, setSdrSel] = useState<string>("");
+  const [sdrSelLocal, setSdrSelLocal] = useState<string>("");
+  const sdrSel = sdrSelProp !== undefined ? sdrSelProp : sdrSelLocal;
+  const setSdrSel = (id: string) => { if (onSdrSel) onSdrSel(id); else setSdrSelLocal(id); };
   const [dados, setDados] = useState<Desempenho | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(false);
@@ -134,7 +140,7 @@ export default function DesempenhoSdr({ onIrParaPainel, onOpenLead }: { onIrPara
         {!dados && !erro && <div className="dsp-card p-10 text-center text-sm dsp-mut">Carregando…</div>}
 
         {/* Quanto tempo o lead espera (SLA 0400, Bruno 17/11; nome novo 18/11): hoje · semana · mês por SDR. */}
-        {pagina === "principal" && <SlaQuadro de={intervalo.de} ate={intervalo.ate} rotPer={rotPer} onOpenLead={onOpenLead} />}
+        {pagina === "principal" && <SlaQuadro de={intervalo.de} ate={intervalo.ate} rotPer={rotPer} onOpenLead={onOpenLead} sdrId={dados?.gestor ? linhaSel?.sdr_id ?? null : null} />}
 
         {dados && bloco && pagina === "principal" && (
           <Principal d={dados} b={bloco} linha={linhaSel} rotPer={rotPer} onSdr={(id) => setSdrSel(id)} onIrParaPainel={onIrParaPainel} />
@@ -246,7 +252,7 @@ function Principal({ d, b, linha, rotPer, onSdr, onIrParaPainel }: {
           <div className="flex min-w-0 flex-col gap-1.5">
             <div className="dsp-lbl">Atividades hoje</div>
             <div className="text-[26px] font-bold leading-none">{n(b.atividades.concluidas)}<span className="text-[15px] font-medium dsp-mut"> de {n(b.atividades.programadas)}</span></div>
-            <div className="text-[13px] dsp-mut">feitas × programadas</div>
+            <div className="text-[13px] dsp-mut">feitas × programadas{b.atividades.programadas > b.atividades.concluidas ? ` · faltam ${n(b.atividades.programadas - b.atividades.concluidas)}` : ""}</div>
           </div>
         </div>
         <Kpi rotulo={`Reuniões ${rotPer}`} valor={n(r.marcadas)} sub="marcadas pelos SDRs · lead distinto, remarcação não conta 2×" />
@@ -316,7 +322,7 @@ function Principal({ d, b, linha, rotPer, onSdr, onIrParaPainel }: {
         <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
           <Acao n={b.atividades.atrasadas} alerta titulo="Atividades atrasadas"
             sub={mostrarCards ? atrasPorSdr.map((s) => `${s.nome.split(" ")[0]} ${n(s.atividades.atrasadas)}`).join(" · ") : `${n(b.cadencia.leads_atrasados)} leads · a mais antiga parada há ${b.cadencia.mais_antiga_dias} dias`}
-            onClick={onIrParaPainel} />
+            onClick={onIrParaPainel ? () => { if (linha) onSdr(linha.sdr_id); onIrParaPainel(); } : undefined} />
           <Acao n={b.sem_1o_contato} alerta titulo="Leads sem 1º contato" sub="chegaram nos últimos 30 dias · live primeiro, depois quentes" />
           <Acao n={b.por_confirmar} titulo="Reuniões por confirmar" sub="hoje e amanhã · confirmar na véspera reduz no-show" />
           <Acao n={b.desfechos_pendentes} titulo="Desfechos pendentes dos closers" sub="sem desfecho a R.R não entra na conta do SDR" />

@@ -61,6 +61,9 @@ import { celebrarNatal, fraseNatalDoDia } from "@/natal/natal";
 
 interface TasksPanelProps {
   onOpenLead: (leadId: string) => void;
+  /** SDR em foco, compartilhado com a Visão Geral do Desempenho (SdrLayout). */
+  ownerFilter?: string | null;
+  onOwnerFilter?: (id: string | null) => void;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -387,7 +390,7 @@ function tarefaVisivelNaFila(t: Task, statusDoLead: string | undefined): boolean
   return statusDoLead !== "ganho" && statusDoLead !== "perdido";
 }
 
-export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
+export default function TasksPanel({ onOpenLead, ownerFilter: ownerFilterProp, onOwnerFilter }: TasksPanelProps) {
   const { currentUser } = useQsAuth();
   const chatDock = useChatAppDock();
   // MODO APARELHO (SDR, desde 03/09): as atividades de WhatsApp levam o SDR pra
@@ -616,7 +619,9 @@ export default function TasksPanel({ onOpenLead }: TasksPanelProps) {
 
 
   // Filtro "Responsável" — declarado aqui em cima porque o PLACAR também o usa.
-  const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
+  const [ownerFilterLocal, setOwnerFilterLocal] = useState<string | null>(null);
+  const ownerFilter = ownerFilterProp !== undefined ? ownerFilterProp : ownerFilterLocal;
+  const setOwnerFilter = (id: string | null) => { if (onOwnerFilter) onOwnerFilter(id); else setOwnerFilterLocal(id); };
 
   // Placar REAL: atividades concluídas (hoje/mês) + metas de qs_goals.
   // ESCOPO: SDR vê sempre o próprio placar; admin/gestor vê o da UNIDADE

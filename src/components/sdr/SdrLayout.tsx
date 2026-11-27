@@ -226,6 +226,9 @@ export default function SdrLayout() {
     if (inicial !== "painel") setActiveNav(inicial === "minha-agenda" && currentUser.role !== "closer" ? "reunioes" : inicial);
   }, [currentUser]);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  // SDR em foco (gestor, 27/11): escolher a Mariana na Fila de hoje ou na Visão
+  // Geral vale pras duas telas — trocar de tela não perde o filtro.
+  const [sdrFoco, setSdrFoco] = useState<string | null>(null);
   // A tela de onde o lead foi aberto, pro "Voltar" devolver pra ela.
   const [origemDoLead, setOrigemDoLead] = useState<SdrNav | null>(null);
   const [editingCadenceId, setEditingCadenceId] = useState<string | null>(null);
@@ -526,7 +529,7 @@ export default function SdrLayout() {
         >
         {activeNav === "painel" && (
           <PageErrorBoundary pageName="Painel de Atividades">
-            <TasksPanel onOpenLead={openLeadDetail} />
+            <TasksPanel onOpenLead={openLeadDetail} ownerFilter={sdrFoco} onOwnerFilter={setSdrFoco} />
           </PageErrorBoundary>
         )}
         {activeNav === "leads" && (
@@ -569,7 +572,7 @@ export default function SdrLayout() {
         {activeNav === "dashboard" && (
           <PageErrorBoundary pageName="Visão Geral">
             {/* Desempenho SDR (0322/0323, spec 06/11) pra gestor e SDR; o closer segue na tela dele. */}
-            {userRole === "closer" ? <SdrDashboard /> : <DesempenhoSdr onIrParaPainel={() => navigate("painel")} onOpenLead={openLeadDetail} />}
+            {userRole === "closer" ? <SdrDashboard /> : <DesempenhoSdr onIrParaPainel={() => navigate("painel")} onOpenLead={openLeadDetail} sdrSel={sdrFoco ?? ""} onSdrSel={(id) => setSdrFoco(id || null)} />}
           </PageErrorBoundary>
         )}
         {activeNav === "analises" && (
